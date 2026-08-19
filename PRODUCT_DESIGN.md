@@ -219,7 +219,7 @@ When an agent claims completion, the secretary produces a Completion Digest. The
 ### MVP
 What must exist to prove the product thesis:
 - Codex and Claude Code adapters
-- CLI with: `sec run`, `sec status`, `sec inbox`, `sec show`, `sec approve`, `sec stop`, `sec digest`
+- CLI (`secretary`, short alias `asec`) with core commands: `secretary run`, `secretary status`, `secretary inbox`, `secretary show`, `secretary approve`, `secretary stop`, `secretary digest`
 - Multiple concurrent tasks, each mapping to one worktree and one run (no multi-agent or multi-run per task in MVP)
 - Normalized event ingestion from adapters
 - Deterministic attention engine (always-surface / batch / elevate rules)

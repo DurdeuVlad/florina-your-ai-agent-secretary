@@ -196,11 +196,11 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **ID**: DEC-026  
 **Date**: 2026-08-19  
 **Status**: ACCEPTED  
-**Decision**: CLI binary name is `sec`  
-- **Rationale**: Short, memorable, fast to type. Aligns with the mental model of a secretary. The `sec` prefix is used consistently in PRODUCT_DESIGN.md (`sec run`, `sec status`, etc.).
-- **Consequences**: Entry point binary is `sec`. Package/repo name remains `agent-secretary`.
-- **Alternatives Considered**: `agent-secretary` (too long for frequent CLI use); `secretary` (long); `as` (too generic, conflicts with common shell aliases).
-- **Reconsideration Trigger**: Name collision with an established CLI tool.
+**Decision**: Canonical CLI binary name is `secretary`, with official short alias `asec`  
+- **Rationale**: `sec` suffers from severe namespace collision with standard security tooling (e.g. `sec` Simple Event Correlator, AppSec/InfoSec scripts, SEC regulatory tools) and timing units. `secretary` is completely unambiguous, expressive, matches the product persona, and autocompletes with `sec<tab>`. `asec` (Agent SECretary) provides a clean, 4-letter, non-colliding short alias for frequent CLI use.
+- **Consequences**: Primary CLI binary is `secretary`, install symlink/alias is `asec`. Commands work interchangeably (e.g. `secretary run` or `asec run`). Package/repo name remains `agent-secretary`.
+- **Alternatives Considered**: `sec` (rejected due to security/sec namespace collision); `agent-secretary` (kept as package name, too verbose for primary CLI binary); `as` (rejected due to standard shell keyword / assembler collisions).
+- **Reconsideration Trigger**: If a compelling community convention emerges.
 
 ---
 
