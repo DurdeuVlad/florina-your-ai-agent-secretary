@@ -168,10 +168,10 @@ oauth-migration     Claude   editing
 **Surfaces**: Active projects, active tasks, attention inbox, completed deliverables, blocked work, decisions, agent/session inspector.
 
 There are four primary interfaces over the same local control plane:
-1. **CLI**: Scripting, setup, SSH, automation.
-2. **TUI/lightweight web UI**: Glanceable fleet, inbox, digest.
-3. **Push-to-talk Voice**: Delegation, status, approvals.
-4. **Remote Companion**: Notification, status, pause/stop, constrained approval away from workstation.
+1. **Desktop App (Electron / Tauri)**: High-craft, lightweight desktop frontend (inspired by the clean, minimal aesthetic of Codex Desktop and Raycast). Provides the persistent visual Attention Inbox, one-click capability approval cards, side-by-side completion digest & diff viewer, and floating Push-to-Talk voice HUD with global hotkey support.
+2. **CLI (`secretary` / `asec`)**: Terminal-first workflow, scripting, headless CI/SSH environments, and automation.
+3. **Push-to-Talk Voice**: Global hotkey, sub-second speech-to-speech interaction for hands-free delegation, quick status queries, and spoken approvals.
+4. **Remote Companion (Near-Term / Later)**: Mobile/web paired device for push notifications, status monitoring, and away-from-desk approvals.
 
 ## Agent Adapters
 
@@ -217,15 +217,15 @@ When an agent claims completion, the secretary produces a Completion Digest. The
 ## Product Scope
 
 ### MVP
-What must exist to prove the product thesis:
 - Codex and Claude Code adapters
-- CLI (`secretary`, short alias `asec`) with core commands: `secretary run`, `secretary status`, `secretary inbox`, `secretary show`, `secretary approve`, `secretary stop`, `secretary digest`
+- Desktop App (Electron / Tauri): Minimal, high-craft desktop frontend featuring the visual Attention Inbox (`NEEDS YOU` cards, live fleet `WORKING` status), one-click capability approvals, completion digest inspector, and global hotkey push-to-talk voice HUD
+- CLI (`secretary`, short alias `asec`): Full terminal parity (`secretary run`, `status`, `inbox`, `show`, `approve`, `stop`, `digest`)
 - Multiple concurrent tasks, each mapping to one worktree and one run (no multi-agent or multi-run per task in MVP)
 - Normalized event ingestion from adapters
-- Deterministic attention engine (always-surface / batch / elevate rules)
-- LLM completion digest
-- Context capsules (project/task isolation)
-- Push-to-talk voice (local ASR via whisper.cpp → intent → command API → optional TTS)
+- Deterministic attention engine (always-surface / batch / elevate rules + liveness timeout check)
+- LLM completion digest separating observed git/test facts from inferred behavior changes and risk hotspots
+- Context capsules (project/task isolation backed by local SQLite)
+- Push-to-talk voice (OpenAI Realtime API fast-start WebRTC/WebSocket bridge with local whisper.cpp fallback)
 - SQLite-backed task/event/attention state
 - Immutable event journal
 - Execution safety: MVP relies on agent-native sandboxing (Codex's built-in sandbox, Claude Code's permission system). The Secretary does not provision OS-level containers or sandboxes — it enforces policy atop existing agent security.

@@ -185,11 +185,11 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **ID**: DEC-021  
 **Date**: 2026-08-19  
 **Status**: ACCEPTED  
-**Decision**: MVP voice intent parsing uses LLM-based extraction from transcribed text  
-- **Rationale**: Push-to-talk produces short utterances that map well to the existing command API. An LLM call on the transcribed text provides natural-language flexibility without training a custom classifier. Latency is acceptable for push-to-talk (not continuous).
-- **Consequences**: Pipeline: whisper.cpp (local ASR) → LLM intent extraction (structured command JSON) → typed command API → optional TTS response. The LLM call is for intent parsing only, not for executing the command.
-- **Alternatives Considered**: Rule-based/regex parser; trained classifier; full conversational LLM.
-- **Reconsideration Trigger**: If LLM latency proves unacceptable for the push-to-talk experience, switch to a lighter intent model.
+**Decision**: Dual-track voice pipeline: OpenAI Realtime API for sub-second fast-start, whisper.cpp for local offline  
+- **Rationale**: Realtime speech-to-speech (via WebRTC/WebSocket) natively provides sub-second latency, voice activity detection (VAD), interruption handling, and direct function/tool calling against the local daemon API without multi-week audio plumbing. `whisper.cpp` + local TTS is preserved as the local/offline privacy alternative.
+- **Consequences**: The Realtime voice session is passed the Secretary's typed tool definitions (`start_task`, `get_inbox`, `approve_permission`, etc.). Spoken intent triggers tool calls executed on `localhost`. The voice model never executes arbitrary shell commands directly.
+- **Alternatives Considered**: Local-only whisper.cpp pipeline exclusively (high latency/robotic turns in early versions); cloud STT + LLM + cloud TTS pipeline (high latency, lacks native interruption handling).
+- **Reconsideration Trigger**: If local realtime speech-to-speech models reach sub-second parity on consumer hardware.
 
 ---
 
@@ -212,6 +212,17 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 - **Consequences**: The security hierarchy in MVP starts at the agent-native sandbox level. The Secretary's role is to broker approvals and enforce policy, not to provision execution environments. The OS/container layer in the hierarchy is documented for future hardening, not MVP implementation.
 - **Alternatives Considered**: Docker-based sandbox per task; firejail/bubblewrap per agent; Secretary-managed VMs.
 - **Reconsideration Trigger**: If agent-native sandboxes prove insufficient for multi-tenant or high-security use cases.
+
+---
+
+**ID**: DEC-028  
+**Date**: 2026-08-19  
+**Status**: ACCEPTED  
+**Decision**: Desktop frontend is a lightweight, high-craft desktop app (Electron / Tauri)  
+- **Rationale**: To feel as polished and fast as tools like Codex Desktop, Raycast, and Claude Desktop, the visual surface needs native OS integration: global push-to-talk hotkeys, system tray status, floating HUD / attention notifications, and instant keyboard navigation (`j`/`k`, `y`, `d`).
+- **Consequences**: The Desktop UI connects to the local Secretary Daemon over `localhost` IPC/WebSocket. It renders the Attention Inbox, structured capability approval cards, side-by-side completion digest & diff views, and voice waveform indicator. It is strictly a client to the daemon, ensuring 100% feature and state parity with the CLI.
+- **Alternatives Considered**: Web-only browser dashboard (lacks global OS push-to-talk hotkeys and system tray hooks); pure TUI only (harder to view rich side-by-side diffs and audio visualizers).
+- **Reconsideration Trigger**: If maintaining the desktop wrapper creates unacceptable build/distribution overhead.
 
 ---
 
