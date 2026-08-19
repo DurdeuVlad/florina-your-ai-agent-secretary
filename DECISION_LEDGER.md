@@ -215,19 +215,23 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-020
 **Date**: 2026-08-19
-**Status**: OPEN
-**Decision**: Context Capsule storage and retrieval mechanism
-- **Rationale**: Blocked on architecture design.
-- **Consequences**: Need to decide how capsules are stored, versioned, and fetched, and how old context is summarized or discarded.
+**Status**: ACCEPTED
+**Decision**: Context Capsules are scoped SQLite state, not a retrieval system
+- **Rationale**: Capsules must be simple enough for MVP. A RAG/vector-search approach adds complexity without proven value. Scoped rows in SQLite match the existing storage decision.
+- **Consequences**: Three capsule scopes: Project (repo metadata, policies, task list), Task (objective, run history, deliverables, event summaries — maps 1:1 with a worktree), Session (raw events, conversation — ephemeral, summarized into Task Capsule on completion). Secretary loads the relevant capsule on-demand when context switches.
+- **Alternatives Considered**: Vector database / RAG retrieval; in-memory-only capsules; single flat context.
+- **Reconsideration Trigger**: If capsule sizes exceed what fits in a single LLM context window, necessitating retrieval.
 
 ---
 
 **ID**: DEC-021
 **Date**: 2026-08-19
-**Status**: OPEN
-**Decision**: Voice intent parsing approach
-- **Rationale**: Blocked on voice architecture design.
-- **Consequences**: Options include whisper.cpp → structured intent parser → command API. Need to decide if the intent parser is an LLM call, a trained classifier, or rule-based.
+**Status**: ACCEPTED
+**Decision**: MVP voice intent parsing uses LLM-based extraction from transcribed text
+- **Rationale**: Push-to-talk produces short utterances that map well to the existing command API. An LLM call on the transcribed text provides natural-language flexibility without training a custom classifier. Latency is acceptable for push-to-talk (not continuous).
+- **Consequences**: Pipeline: whisper.cpp (local ASR) → LLM intent extraction (structured command JSON) → typed command API → optional TTS response. The LLM call is for intent parsing only, not for executing the command.
+- **Alternatives Considered**: Rule-based/regex parser; trained classifier; full conversational LLM.
+- **Reconsideration Trigger**: If LLM latency proves unacceptable for the push-to-talk experience, switch to a lighter intent model.
 
 ---
 
@@ -264,3 +268,25 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Decision**: Cross-project context resolution strategy
 - **Rationale**: Blocked on context routing design.
 - **Consequences**: Need a resolution hierarchy for when a user says 'the cache issue' and multiple projects have cache work, to allow the secretary to disambiguate.
+
+---
+
+**ID**: DEC-026
+**Date**: 2026-08-19
+**Status**: ACCEPTED
+**Decision**: CLI binary name is `sec`
+- **Rationale**: Short, memorable, fast to type. Aligns with the mental model of a secretary. The `sec` prefix is used consistently in PRODUCT_DESIGN.md (`sec run`, `sec status`, etc.).
+- **Consequences**: Entry point binary is `sec`. Package/repo name remains `agent-secretary`.
+- **Alternatives Considered**: `agent-secretary` (too long for frequent CLI use); `secretary` (long); `as` (too generic, conflicts with common shell aliases).
+- **Reconsideration Trigger**: Name collision with an established CLI tool.
+
+---
+
+**ID**: DEC-027
+**Date**: 2026-08-19
+**Status**: ACCEPTED
+**Decision**: MVP relies on agent-native sandboxing, not Secretary-provisioned containers
+- **Rationale**: Codex and Claude Code both have built-in sandboxing and permission systems. The Secretary enforces policy atop these. Provisioning OS-level containers (Docker, etc.) for local CLIs is a massive scope item with minimal thesis-validation value.
+- **Consequences**: The security hierarchy in MVP starts at the agent-native sandbox level. The Secretary's role is to broker approvals and enforce policy, not to provision execution environments. The OS/container layer in the hierarchy is documented for future hardening, not MVP implementation.
+- **Alternatives Considered**: Docker-based sandbox per task; firejail/bubblewrap per agent; Secretary-managed VMs.
+- **Reconsideration Trigger**: If agent-native sandboxes prove insufficient for multi-tenant or high-security use cases.

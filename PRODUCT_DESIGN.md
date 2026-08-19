@@ -58,7 +58,12 @@ A question that requires or records user judgment.
 An explicit permission to perform a particular class of action.
 
 ### Context Capsule
-The isolated body of knowledge needed to reason about one project/task/session. Each project/task/session owns its own relevant context.
+The isolated body of knowledge needed to reason about one project/task/session. Each project/task/session owns its own relevant context. Capsules exist at three scopes:
+- **Project Capsule**: Repository metadata, project-level policies, task list summary. Persists across tasks.
+- **Task Capsule**: Objective, agent assignment, run history, deliverables, rolled-up event summaries. Maps 1:1 with a git worktree in MVP.
+- **Session Capsule**: Raw conversation, tool calls, event stream. Ephemeral; summarized into the Task Capsule when the session ends.
+
+In MVP, capsules are stored as scoped rows/tables in the local SQLite database — not a retrieval/RAG system. The secretary loads a capsule's content into its working context on demand when discussion enters that scope, and unloads it when switching away.
 
 ### Relationships
 - A **Project** contains multiple **Tasks**.
@@ -67,7 +72,8 @@ The isolated body of knowledge needed to reason about one project/task/session. 
 - **Sessions** produce an append-only stream of **Events** and ultimately generate **Deliverables**.
 - **Events** are processed by the Attention Policy to create **Attention Items**.
 - **Attention Items** prompt the user for **Decisions** or **Approvals**.
-- All state relies on a **Context Capsule** at the appropriate boundary (Project, Task, Session) to ensure strict isolation.
+- Each **Project**, **Task**, and **Session** owns a **Context Capsule** at the appropriate boundary to ensure strict isolation.
+- In MVP, one **Task** maps to one git **worktree** and one **Task Capsule**.
 
 ## Context Routing Model
 
@@ -102,7 +108,7 @@ Agent Secretary transitions from standard states (running / waiting / idle / don
 - Scope Changed
 
 **Initial Deterministic Attention Engine**:
-- **ALWAYS SURFACE**: Agent requests permission, agent requests human input, agent crashes, repeated failures, task completes, sandbox violation.
+- **ALWAYS SURFACE**: Agent requests permission, agent requests human input, agent crashes, repeated failures, task completes, sandbox violation, liveness timeout (no meaningful events — file writes, tool calls, or test runs — for a configurable duration).
 - **BATCH**: Normal file writes, ordinary tool calls, routine test progress, informational messages.
 - **ELEVATE**: Secrets/auth directories changed, migrations changed, CI/deploy config changed, unexpected lockfile changes, network permission requested, filesystem scope expansion, push/merge/deploy requested.
 
@@ -126,9 +132,11 @@ Voice and CLI share the same typed command API. Voice should never become a para
 
 **Security Hierarchy for Voice Approvals**:
 - **Voice only**: read/status/pause
-- **Voice + explicit scoped phrase**: low-risk one-time permission
-- **Authenticated UI confirmation**: push/PR/network expansion
+- **Voice + explicit scoped phrase**: low-risk one-time permission, only when the voice readback includes deterministic fields from the adapter (not LLM-generated text). Example: "Approve network access to registry.npmjs.org for task oauth" — the task name, permission type, and destination are structured data read aloud.
+- **Authenticated UI confirmation**: push/PR/network expansion — user must visually verify the structured approval card
 - **Strong device confirmation**: merge/deploy/destructive cloud action
+
+> **Compatibility with DEC-010**: Voice approvals do NOT approve LLM summaries. For low-risk voice approvals, the secretary reads back deterministic structured fields (task, capability, destination, scope) from the adapter data. For anything requiring the full approval card, voice merely stages the approval to a visual surface where the user verifies structured data before confirming.
 
 ## Visual Experience
 
@@ -176,14 +184,17 @@ Heterogeneous agents appear behind a single interface. The secretary never needs
 - **D**: Structured JSON CLI output (other tools)
 - **E**: PTY heuristic (last-resort compatibility)
 
-The attention engine knows how much confidence it can place in inferred states based on adapter fidelity.
+The attention engine adjusts its behavior based on adapter fidelity:
+- **Tier A–B**: Auto-approve policies are available (the secretary has structured data to evaluate). Permission requests are presented with full structured context.
+- **Tier C**: Auto-approve where ACP provides sufficient structured context; fall back to manual approval otherwise.
+- **Tier D–E**: No auto-approval permitted. All permission-like events require human confirmation because the secretary cannot reliably distinguish actual permission requests from other output.
 
 ## Task Lifecycle
 
 A Task moves through stages:
 `created → delegated → running → attention-needed / blocked → running → completed → reviewed / accepted`
 
-Tasks can fail and be cancelled. A worker process terminating successfully does not equal task completion. The task may need human review or have open decisions. The MVP assumes one human objective maps to one selected worker (no autonomous task decomposition or auto-selecting agents).
+Tasks can fail and be cancelled. A worker process terminating successfully does not equal task completion. The task may need human review or have open decisions. In MVP, each individual task maps to one selected worker — but multiple tasks run concurrently across different worktrees and agents. Autonomous task decomposition and auto-selecting agents are deferred.
 
 ## Deliverable Review
 
@@ -209,7 +220,7 @@ When an agent claims completion, the secretary produces a Completion Digest. The
 What must exist to prove the product thesis:
 - Codex and Claude Code adapters
 - CLI with: `sec run`, `sec status`, `sec inbox`, `sec show`, `sec approve`, `sec stop`, `sec digest`
-- One task → one worktree → one run
+- Multiple concurrent tasks, each mapping to one worktree and one run (no multi-agent or multi-run per task in MVP)
 - Normalized event ingestion from adapters
 - Deterministic attention engine (always-surface / batch / elevate rules)
 - LLM completion digest
@@ -217,6 +228,7 @@ What must exist to prove the product thesis:
 - Push-to-talk voice (local ASR via whisper.cpp → intent → command API → optional TTS)
 - SQLite-backed task/event/attention state
 - Immutable event journal
+- Execution safety: MVP relies on agent-native sandboxing (Codex's built-in sandbox, Claude Code's permission system). The Secretary does not provision OS-level containers or sandboxes — it enforces policy atop existing agent security.
 
 ### Near-Term
 Things that logically follow after validation:

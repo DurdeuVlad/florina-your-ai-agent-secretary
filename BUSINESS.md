@@ -1,3 +1,5 @@
+# Agent Secretary: Business Case
+
 ## Problem
 
 As coding agents become capable of handling meaningful implementation tasks independently, the primary constraint on development speed has shifted from agent capability to human supervision capacity. When a developer runs 3-5+ concurrent coding agent sessions, they spend more time managing agents than doing productive work. 
@@ -102,7 +104,7 @@ Success is measured by behavioral changes:
 - User can move between unrelated projects without contextual contamination
 - User voluntarily returns to the Secretary instead of reverting to agent terminals
 
-**North-star metric:** Attention Compression Ratio = agent events that could have demanded human inspection / actual human interruptions
+**North-star metric:** Attention Compression Ratio (ACR) = total classifiable agent events processed by the attention engine / actual human interruptions surfaced
 
 **Supplemental metrics:** 
 - Human interventions per agent-hour
