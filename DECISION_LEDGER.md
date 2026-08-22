@@ -291,12 +291,12 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-023  
 **Date**: 2026-08-19  
-**Status**: OPEN  
-**Decision**: PTY fallback adapter design  
-- **Rationale**: Blocked on adapter contract finalization.
-- **Consequences**: Need to determine how to detect agent state from terminal output for unsupported agents, and how to handle confidence gaps (known to be low-fidelity).
-- **Alternatives Considered**: Generic regex matching on terminal output; PTY scrape with vision model; omit PTY fallback entirely in early versions.
-- **Blocked On**: Adapter contract finalization.
+**Status**: ACCEPTED  
+**Decision**: PTY fallback adapter design — omit PTY fallback in early versions (Approach C); Tier E contract preserved but no concrete adapter shipped  
+- **Rationale**: The PTY fallback (Tier E) is a last-resort path for agents with no structured supervision surface. Three approaches were evaluated in `docs/PTY_FALLBACK_DESIGN.md`: (A) generic regex matching on terminal output, (B) PTY scrape with a vision model, (C) omit PTY fallback entirely in early versions. Approach C is recommended because it aligns with DEC-013 (MVP = Codex Tier A + Claude Code Tier B only), DEC-011 (never silently widen permissions — refusing to guess at permission prompts from unstructured text is the conservative choice), and the product thesis DEC-015 (attention compression requires trustworthy event sources; a fragile regex scraper or hallucination-prone vision classifier generates false-positive confirmation cards and missed prompts, both worsening Attention Compression Ratio). Approach A is deterministic but fragile (per-agent pattern maintenance, version drift). Approach B imports a non-deterministic vision model into event generation, in tension with DEC-014 (deterministic attention engine) and complicating audit (DEC-012).
+- **Consequences**: No concrete Tier E PTY adapter is implemented in the MVP or near-term. Unsupported agents run outside the Secretary until they receive a structured adapter (Tier A–D). `AdapterFidelityTier.E` and the Tier E contract (no auto-approve; all permission-like events require human confirmation) remain defined in `src/domain/enums.ts` and `src/adapters/base.ts` so the attention engine and policy layer are forward-compatible. The confidence gap is eliminated by not attempting detection — the strongest possible strategy. When a third agent achieves significant adoption (DEC-013 reconsideration trigger), first pursue a structured adapter (ACP-native Tier C or JSON CLI Tier D); only fall back to a PTY heuristic if no structured surface exists and demand justifies the maintenance burden, preferring Approach A (regex, deterministic, auditable) over Approach B (vision) as the interim.
+- **Alternatives Considered**: Generic regex matching on terminal output (Approach A — pragmatic but fragile, high maintenance); PTY scrape with vision model (Approach B — robust detection but high complexity, cost, non-deterministic input, hallucination risk); omit PTY fallback entirely in early versions (Approach C — chosen).
+- **Resolved By**: Issue #13 — `docs/PTY_FALLBACK_DESIGN.md`.
 
 ---
 
