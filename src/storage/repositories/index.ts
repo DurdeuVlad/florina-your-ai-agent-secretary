@@ -14,3 +14,5 @@ export { AttentionItemRepository } from './attention-item.js';
 export { DecisionRepository } from './decision.js';
 export { ApprovalRepository } from './approval.js';
 export { ContextCapsuleRepository } from './context-capsule.js';
+export { CompletionDigestRepository } from './completion-digest.js';
+export type { ListDigestsOptions } from './completion-digest.js';

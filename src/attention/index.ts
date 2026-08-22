@@ -10,3 +10,5 @@ export * from './liveness-monitor.js';
 export * from './attention-item.js';
 export * from './attention-inbox.js';
 export * from './attention-aggregator.js';
+export * from './completion-digest.js';
+export * from './digest-builder.js';
