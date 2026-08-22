@@ -36,3 +36,26 @@ export type {
 } from './codex-mapper.js';
 export { StubAdapter, STUB_ADAPTER_ID, buildDefaultStubEvents } from './stub-adapter.js';
 export type { StubAdapterOptions } from './stub-adapter.js';
+export { ClaudeAdapter, CLAUDE_ADAPTER_ID } from './claude-adapter.js';
+export type {
+  ClaudeAdapterOptions,
+  PtyProcess,
+  PtySpawner,
+  PtySpawnOptions,
+} from './claude-adapter.js';
+export {
+  parsePtyLine,
+  stripAnsi,
+  mapPtyChunk,
+  mapToolStarted,
+  mapFileChanged,
+  mapProgress,
+  mapCompletion,
+  mapPermissionPrompt,
+  parseAndMapPtyLine,
+} from './claude-mapper.js';
+export type {
+  ClaudeMapperContext,
+  ParsedPtyChunk,
+  ParsedPtyKind,
+} from './claude-mapper.js';
