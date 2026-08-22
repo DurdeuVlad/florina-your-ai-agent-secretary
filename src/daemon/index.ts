@@ -66,3 +66,21 @@ export { ScopeAccessError, validateScopeAccess, withContextBoundary } from './co
 export type { ScopedQuery } from './context-isolation.js';
 export { ContextRouter, createContextRouter } from './context-router.js';
 export type { CapsuleSource, GlobalAwareness, UnloadResult } from './context-router.js';
+
+/* Credential / secret brokering (DEC-022) */
+export { CredentialBroker } from './credential-broker.js';
+export type {
+  CredentialBackend,
+  CredentialMetadata,
+  StoredCredential,
+  CredentialBrokerOptions,
+} from './credential-broker.js';
+export { CapabilityBroker } from './capability-broker.js';
+export type {
+  ActionExecutor,
+  ActionResult,
+  BrokerActionOutcome,
+  ActionRegistration,
+  ActionContext,
+  CapabilityBrokerOptions,
+} from './capability-broker.js';

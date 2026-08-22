@@ -226,6 +226,21 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 ---
 
+**ID**: DEC-022  
+**Date**: 2026-08-19  
+**Status**: ACCEPTED  
+**Decision**: Credential/secret brokering model — capability broker pattern where workers request actions and the broker executes using stored credentials  
+- **Rationale**: Workers (coding agents) must never receive permanent credentials (GitHub tokens, cloud keys). Injecting secrets into worker processes or environments risks leakage via logs, error messages, or prompt injection. A broker pattern keeps credentials in a vault that the worker cannot directly access; the worker requests an action (e.g. `create_pr`) and receives only the action result.
+- **Consequences**:
+  - **Credential vault** (`src/daemon/credential-broker.ts`): securely stores credentials using the OS keychain where available (Windows Credential Manager via `cmdkey`, macOS Keychain via `security`) and falls back to an AES-256-GCM encrypted local file store (PBKDF2 key derivation from machine-specific material). `listCredentials` returns names only — never values.
+  - **Capability broker** (`src/daemon/capability-broker.ts`): workers call `executeAction(action, params, credentialName, context)`. The broker (1) evaluates the request against the policy engine from #12 (DEC-007, DEC-011) — a `deny` means the credential is never accessed; (2) retrieves the credential from the vault; (3) executes the action via a registered executor, passing the credential internally; (4) returns only the `ActionResult` to the worker — never the raw credential.
+  - **Audit log**: every credential use is recorded in the immutable event journal (DEC-012) with the action, credential name (not value), timestamp, and success/failure.
+  - **Security hierarchy** (DEC-011): the capability broker sits at the "secret/capability broker" rung, below the secretary policy rung. Policy is evaluated before any credential is retrieved. An LLM "safe" verdict can never defeat a policy deny.
+- **Alternatives Considered**: Environment variable injection into worker processes (risks leakage via logs/process inspection); credential proxy daemon (same concept but separate process — unnecessary for MVP since the Secretary daemon already brokers); direct developer interactive auth per action (too much friction for concurrent multi-task workflows).
+- **Reconsideration Trigger**: If a need arises for credential rotation, scoped/temporary credentials, or cross-machine credential sharing that the current vault model cannot support.
+
+---
+
 ## DEFERRED Decisions
 
 **ID**: DEC-016  
@@ -271,17 +286,6 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 - **Consequences**: Need to define the canonical TypeScript/JSON schema for `SupervisorEvent` union type covering: `AgentStarted`, `AgentProgress`, `ToolStarted`, `ToolFinished`, `FileChanged`, `TestStarted`, `TestFinished`, `ApprovalRequested`, `HumanInputRequested`, `AgentBlocked`, `AgentCompleted`, `AgentFailed`, `AgentStopped`.
 - **Alternatives Considered**: Loose untyped JSON events; strict Protobuf definitions; agent-specific event pass-through.
 - **Blocked On**: Adapter contract specification in architecture design.
-
----
-
-**ID**: DEC-022  
-**Date**: 2026-08-19  
-**Status**: OPEN  
-**Decision**: Credential/secret brokering model  
-- **Rationale**: Blocked on security architecture design.
-- **Consequences**: Workers should not receive permanent credentials (GitHub tokens, cloud keys). Need to specify the exact capability broker pattern where workers request actions (e.g. `create_pr`) and the broker executes using stored credentials.
-- **Alternatives Considered**: Environment variable injection into worker processes; credential proxy daemon; direct developer interactive auth per action.
-- **Blocked On**: Security architecture design.
 
 ---
 
