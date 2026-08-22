@@ -23,6 +23,11 @@ export default [
     },
     rules: {
       ...tseslint.configs.recommended.rules,
+      // The base `no-redeclare` rule does not understand TypeScript
+      // declaration merging between a `const` value and a same-named
+      // `type` alias (the idiomatic "string enum" pattern). Disable it
+      // for TS files; the type-aware variant is not enabled here.
+      'no-redeclare': 'off',
     },
   },
   {
