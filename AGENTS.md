@@ -74,3 +74,47 @@ dist/          # build output (gitignored)
 - Every meaningful state transition is recorded in the immutable event journal
   before summarizing (DEC-012). Summaries never replace source events.
 - The Secretary narrows permissions, never silently widens them (DEC-011).
+
+## Worktree Lifecycle (DEC-024)
+
+In the MVP each Task maps 1:1 to one git worktree and one run (DEC-020). The
+worktree lifecycle is implemented in `src/daemon/worktree.ts`
+(`WorktreeManager`).
+
+### Branch naming convention
+
+Every task worktree is created on a branch named exactly:
+
+```
+secretary/<task-slug>
+```
+
+where `<task-slug>` is a sanitized, git- and filesystem-safe identifier
+(lowercase alphanumeric and hyphens only). The `secretary/` prefix namespaces
+all Secretary-managed branches so they are clearly distinguishable from
+human-authored branches and can be listed/cleaned up safely. Use the
+`secretaryBranchName(slug)` helper to build the canonical branch name.
+
+### Worktree placement
+
+Worktrees are placed in a sibling `.secretary-worktrees/` directory (outside
+the main working tree) at a deterministic path derived from the repository
+path and the task slug, so paths are stable across runs.
+
+### Prune policy
+
+- Worktrees are **retained** until an explicit prune (`secretary prune`).
+- `pruneWorktree` removes a worktree **only when it is clean** (no
+  uncommitted changes).
+- **Dirty worktrees are never silently deleted** — `pruneWorktree` throws a
+  `DirtyWorktreeError` so the human can decide what to do with the
+  uncommitted work (DEC-011: destroying uncommitted work would be a
+  destructive widening of permissions).
+
+### Dirty detection
+
+`detectDirty(worktreePath)` runs `git status --porcelain` and returns whether
+there are uncommitted (staged, unstaged, or untracked) changes.
+`worktreeStatus(worktreePath)` returns a `{ clean, dirty, branch, baseCommit }`
+snapshot that the attention engine can use to surface a dirty
+completed/cancelled worktree for human review.

@@ -28,6 +28,21 @@ export default [
       // `type` alias (the idiomatic "string enum" pattern). Disable it
       // for TS files; the type-aware variant is not enabled here.
       'no-redeclare': 'off',
+      // `no-undef` does not understand TypeScript type-only references
+      // (e.g. the `NodeJS` namespace). The TypeScript compiler already
+      // checks for undefined references, so disable it for TS files.
+      'no-undef': 'off',
+      // Honor the `_`-prefix convention for intentionally-unused args and
+      // variables (e.g. handler signatures that must accept a parameter
+      // they do not use).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
     },
   },
   {

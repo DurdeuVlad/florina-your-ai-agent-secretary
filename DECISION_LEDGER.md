@@ -298,12 +298,12 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-024  
 **Date**: 2026-08-19  
-**Status**: OPEN  
+**Status**: ACCEPTED  
 **Decision**: Worktree lifecycle management  
-- **Rationale**: Blocked on task lifecycle design.
-- **Consequences**: Decide exact branch naming conventions, cleanup/prune policies on task completion or cancellation, and handling of dirty worktrees.
+- **Rationale**: Each Task maps 1:1 to one git worktree and one run in MVP (DEC-020). A deterministic branch naming convention and a safe prune policy are required so Secretary-managed work is clearly distinguishable from human-authored branches and uncommitted work is never silently destroyed.
+- **Consequences**: Branch naming convention is `secretary/<task-slug>` (sanitized slug, lowercase alphanumeric + hyphens). Worktrees are placed in a sibling `.secretary-worktrees/` directory at a deterministic path. Worktrees are retained until an explicit prune; `pruneWorktree` removes only clean worktrees and throws `DirtyWorktreeError` on dirty ones (DEC-011 — never silently destroy uncommitted work). Dirty detection via `git status --porcelain` surfaces a status the attention engine can elevate for human review. Implemented in `src/daemon/worktree.ts` (`WorktreeManager`).
 - **Alternatives Considered**: Automatic worktree deletion on task completion; retain all worktrees until explicit user prune; ephemeral temp directories.
-- **Blocked On**: Task lifecycle design.
+- **Resolved By**: Issue #7 — `src/daemon/worktree.ts`.
 
 ---
 
