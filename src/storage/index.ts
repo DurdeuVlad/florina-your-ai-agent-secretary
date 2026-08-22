@@ -14,3 +14,7 @@ export { runMigrations, MIGRATIONS, MIGRATION_001_INITIAL } from './migrations.j
 export type { Migration } from './migrations.js';
 export * from './schema.js';
 export * from './repositories/index.js';
+
+/* Runtime metrics time-series persistence (issue #18, DEC-015) */
+export { MetricsRepository } from './repositories/metrics.js';
+export type { StoredMetricsSnapshot, ListSnapshotsOptions } from './repositories/metrics.js';

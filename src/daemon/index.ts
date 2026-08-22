@@ -84,3 +84,11 @@ export type {
   ActionContext,
   CapabilityBrokerOptions,
 } from './capability-broker.js';
+
+/* Runtime metrics instrumentation (DEC-015, issue #18) */
+export { MetricsCollector, DEFAULT_HISTOGRAM_BUCKETS } from './metrics.js';
+export type {
+  MetricsCollectorOptions,
+  MetricsSnapshot,
+  HistogramSummary,
+} from './metrics.js';
