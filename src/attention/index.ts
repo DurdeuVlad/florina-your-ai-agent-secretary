@@ -7,3 +7,6 @@
 export * from './engine.js';
 export * from './failure-tracker.js';
 export * from './liveness-monitor.js';
+export * from './attention-item.js';
+export * from './attention-inbox.js';
+export * from './attention-aggregator.js';
