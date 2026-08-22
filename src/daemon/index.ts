@@ -55,21 +55,14 @@ export type {
   ApiRepositories,
 } from './api.js';
 export { EventBus, EventStream, EventBusEvents } from './event-stream.js';
-export type {
-  EventStreamMessage,
-  EventStreamControlMessage,
-} from './event-stream.js';
+export type { EventStreamMessage, EventStreamControlMessage } from './event-stream.js';
 export { collectHealth } from './health.js';
 export type { HealthStatus } from './health.js';
 
 /* Context Capsule routing & isolation (DEC-003, DEC-020) */
 export { ContextStore } from './context-store.js';
 export type { LoadRecord } from './context-store.js';
-export {
-  ScopeAccessError,
-  validateScopeAccess,
-  withContextBoundary,
-} from './context-isolation.js';
+export { ScopeAccessError, validateScopeAccess, withContextBoundary } from './context-isolation.js';
 export type { ScopedQuery } from './context-isolation.js';
 export { ContextRouter, createContextRouter } from './context-router.js';
 export type { CapsuleSource, GlobalAwareness, UnloadResult } from './context-router.js';
