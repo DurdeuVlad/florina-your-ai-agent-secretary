@@ -42,6 +42,58 @@ These four files are the **foundational source of truth**. Implementation archit
 
 **Pre-implementation product definition phase.** The four foundation documents define the product; architecture and implementation follow.
 
+## Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) >= 20
+- npm (bundled with Node.js)
+
+### Install
+
+```bash
+npm install
+```
+
+### Build
+
+```bash
+npm run build
+```
+
+Produces compiled JavaScript + type declarations in `dist/`. The CLI binary is
+`dist/cli/index.js` (exposed as `secretary` / `asec` via the `bin` field).
+
+### Test
+
+```bash
+npm test            # run once
+npm run test:watch  # watch mode
+```
+
+### Lint & Format
+
+```bash
+npm run lint          # eslint
+npm run lint:fix      # eslint --fix
+npm run format        # prettier --write
+npm run format:check  # prettier --check
+npm run typecheck     # tsc --noEmit
+```
+
+### Development
+
+```bash
+npm install
+npm run typecheck   # type-check without emitting
+npm run lint
+npm test
+npm run build
+```
+
+See [`AGENTS.md`](AGENTS.md) for the toolchain/language rationale, full
+command reference, and project layout.
+
 ## License
 
 TBD

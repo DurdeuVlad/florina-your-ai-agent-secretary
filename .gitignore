@@ -13,3 +13,20 @@ Thumbs.db
 .gemini/
 .claude/
 .agents/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local

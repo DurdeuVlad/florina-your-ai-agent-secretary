@@ -1,0 +1,11 @@
+dist
+node_modules
+coverage
+package-lock.json
+
+# Foundation docs are authored manually; do not reformat
+BUSINESS.md
+DECISION_LEDGER.md
+DEEP_RESEARCH.md
+PRODUCT_DESIGN.md
+README.md

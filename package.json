@@ -1,0 +1,44 @@
+{
+  "name": "agent-secretary",
+  "version": "0.0.1",
+  "description": "An open-source attention broker for coding agents.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "secretary": "dist/cli/index.js",
+    "asec": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "agent",
+    "attention",
+    "broker",
+    "coding-agent",
+    "supervisor"
+  ],
+  "author": "",
+  "license": "TBD",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.16.0",
+    "eslint-config-prettier": "^9.1.0",
+    "globals": "^15.15.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
