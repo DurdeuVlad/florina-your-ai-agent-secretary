@@ -54,54 +54,26 @@
 
 import type { AdapterFidelityTier } from './enums.js';
 import type { SupervisorEventKind } from './types.js';
+import { CAPABILITY_TYPE_VALUES, CAPABILITY_RISK_LEVEL_VALUES } from './capabilities.js';
+import type {
+  CapabilityType,
+  CapabilityRiskLevel,
+  CapabilityRequest,
+  ISO8601Timestamp,
+} from './capabilities.js';
+
+// The canonical capability vocabulary (CapabilityType, CapabilityScope,
+// CapabilityRequest, CapabilityRiskLevel, ISO8601Timestamp) lives in
+// `./capabilities.js` (DEC-010). It is re-exported to consumers via
+// `./index.js`; this module imports it only for its own validation logic.
+/** Risk classification for a capability request (DEC-010 / DEC-011). */
+export type RiskLevel = CapabilityRiskLevel;
 
 /**
  * Adapter fidelity tier (DEC-013 / PRODUCT_DESIGN). The canonical definition
  * lives in `./enums.js`; it is imported here so event variants share a single
  * source of truth.
  */
-
-/** ISO-8601 timestamp string (e.g. `2026-08-19T12:00:00.000Z`). */
-export type ISO8601Timestamp = string;
-
-/** Risk classification for a capability request (DEC-010 / DEC-011). */
-export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
-
-/** Kind of capability being requested by an agent. */
-export type CapabilityType = 'filesystem' | 'network' | 'shell' | 'git' | 'secret' | 'other';
-
-/** A structured scope boundary for a capability request. */
-export interface CapabilityScope {
-  /** The class of resource the scope constrains. */
-  type: CapabilityType;
-  /** Concrete targets within the scope (paths, hosts, commands, ...). */
-  targets: string[];
-}
-
-/**
- * Structured capability request fields per DEC-010.
- *
- * Approval cards must show these deterministic adapter fields. An LLM
- * explanation is supplemental and never the authorization basis.
- */
-export interface CapabilityRequest {
-  /** Human-readable task name/objective the request belongs to. */
-  task: string;
-  /** Agent requesting the capability (e.g. `codex`, `claude-code`). */
-  agent: string;
-  /** The class of capability being requested. */
-  capability: CapabilityType;
-  /** Destination/resource the capability targets (host, path, repo, ...). */
-  destination: string;
-  /** The exact command or operation to be performed, if applicable. */
-  command: string;
-  /** Working directory in which the capability would execute. */
-  workingDir: string;
-  /** Structured scope boundaries for the requested capability. */
-  scope: CapabilityScope[];
-  /** Determined risk level for the requested capability. */
-  riskLevel: RiskLevel;
-}
 
 /** Common envelope shared by every SupervisorEvent variant. */
 export interface SupervisorEventBase {
@@ -420,16 +392,9 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
 
 const ADAPTER_FIDELITY_TIERS: readonly AdapterFidelityTier[] = ['A', 'B', 'C', 'D', 'E'] as const;
 
-const RISK_LEVELS: readonly RiskLevel[] = ['low', 'medium', 'high', 'critical'] as const;
+const RISK_LEVELS: readonly RiskLevel[] = CAPABILITY_RISK_LEVEL_VALUES;
 
-const CAPABILITY_TYPES: readonly CapabilityType[] = [
-  'filesystem',
-  'network',
-  'shell',
-  'git',
-  'secret',
-  'other',
-] as const;
+const CAPABILITY_TYPES: readonly CapabilityType[] = CAPABILITY_TYPE_VALUES;
 
 const FILE_CHANGE_TYPES: readonly FileChangeType[] = [
   'created',

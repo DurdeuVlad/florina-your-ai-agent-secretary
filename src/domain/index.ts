@@ -7,4 +7,7 @@
 export * from './enums.js';
 export * from './types.js';
 export * from './factories.js';
+export * from './capabilities.js';
+export * from './policy.js';
+export * from './approval.js';
 export * from './events.js';
