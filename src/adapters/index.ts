@@ -1,7 +1,24 @@
 /**
- * Adapters module — bridges to heterogeneous coding agents (Codex, Claude Code).
- *
- * Each adapter normalizes agent-native events into the canonical
+ * Adapters module — bridges to heterogeneous coding agents (Codex, Claude
+ * Code) that normalize agent-native events into the canonical
  * `SupervisorEvent` schema (DEC-019).
+ *
+ * Public API:
+ * - {@link AgentAdapter} interface and {@link BaseAdapter} abstract class
+ *   with the fidelity tier contract (DEC-013).
+ * - {@link AdapterRegistry} for selecting and instantiating adapters by id.
+ * - {@link StubAdapter} (Tier E) for end-to-end pipeline testing.
  */
-export {};
+export type {
+  AgentAdapter,
+  AdapterFidelityTier,
+  AdapterConnectionState,
+  SessionConfig,
+  StartRunResult,
+} from './base.js';
+export { BaseAdapter } from './base.js';
+export { AdapterRegistry } from './registry.js';
+export type { AdapterFactory } from './registry.js';
+export { UnknownAdapterError, DuplicateAdapterError } from './registry.js';
+export { StubAdapter, STUB_ADAPTER_ID, buildDefaultStubEvents } from './stub-adapter.js';
+export type { StubAdapterOptions } from './stub-adapter.js';
