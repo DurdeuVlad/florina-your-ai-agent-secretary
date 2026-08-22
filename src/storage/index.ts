@@ -1,5 +1,16 @@
 /**
  * Storage module — SQLite-backed event journal and Context Capsules
  * (DEC-012, DEC-020).
+ *
+ * Public API:
+ * - `StorageDatabase`: connection management + forward-only migrations.
+ * - `runMigrations`: standalone migration runner for an existing connection.
+ * - Repository classes for every domain object.
+ * - Schema statement constants for introspection or custom migrations.
  */
-export {};
+export { StorageDatabase } from './database.js';
+export type { DatabaseOptions, OpenResult } from './database.js';
+export { runMigrations, MIGRATIONS, MIGRATION_001_INITIAL } from './migrations.js';
+export type { Migration } from './migrations.js';
+export * from './schema.js';
+export * from './repositories/index.js';
