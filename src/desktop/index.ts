@@ -108,3 +108,27 @@ export type {
   RiskHighlightView,
   TestResultsView,
 } from './views/digest-types.js';
+
+export { PttHudViewModel, DEFAULT_PTT_HUD_STATE } from './views/ptt-hud.js';
+export type { PttHudState, PttHudStateCallback } from './views/ptt-hud.js';
+export {
+  renderPttHud,
+  renderPttButton,
+  renderTranscriptPreview,
+  renderVoiceModeIndicator,
+  renderHotkeyHint,
+  renderResponsePreview,
+} from './views/ptt-templates.js';
+
+export {
+  HotkeyManager,
+  MockKeyboardBackend,
+  DEFAULT_HOTKEYS,
+  parseAccelerator,
+} from './hotkeys.js';
+export type {
+  HotkeyAction,
+  KeyEventLike,
+  KeyboardBackend,
+  ParsedAccelerator,
+} from './hotkeys.js';
