@@ -22,8 +22,10 @@ import type { MetricsSnapshot } from '../daemon/metrics.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
-import type { RendererStateData, StateChangeCallback, VoiceState } from './renderer-state.js';
+import type { RendererStateData, StateChangeCallback, VoiceState, DaemonStatus } from './renderer-state.js';
 import type { WindowBackend, WindowOptions } from './window-backend.js';
+import { SystemTrayManager } from './system-tray.js';
+import type { TrayActionCallback, TrayBackend } from './system-tray.js';
 
 /** Options for constructing a {@link DesktopApp}. */
 export interface DesktopAppOptions {
@@ -35,6 +37,18 @@ export interface DesktopAppOptions {
   readonly windowOptions?: WindowOptions;
   /** Connection timeout in milliseconds (default 10s). */
   readonly connectTimeoutMs?: number;
+  /**
+   * Optional system tray backend. When supplied, the app creates a
+   * {@link SystemTrayManager} on {@link DesktopApp.start} and tears it down
+   * on {@link DesktopApp.stop}. When omitted, no tray is created (useful for
+   * headless tests that only exercise the window/IPC path).
+   */
+  readonly trayBackend?: TrayBackend;
+  /**
+   * Optional callback invoked when the user selects a quick action from the
+   * system tray. The host wires these to daemon commands / window actions.
+   */
+  readonly onTrayAction?: TrayActionCallback;
 }
 
 /**
@@ -67,6 +81,7 @@ export class DesktopApp {
   private readonly state: RendererState;
   private readonly connectTimeoutMs: number;
   private readonly windowOptions: WindowOptions;
+  private readonly tray: SystemTrayManager | null;
   private socket: WebSocket | null = null;
   private started = false;
 
@@ -76,6 +91,14 @@ export class DesktopApp {
     this.state = new RendererState();
     this.connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
     this.windowOptions = options.windowOptions ?? {};
+    if (options.trayBackend !== undefined) {
+      this.tray = new SystemTrayManager(options.trayBackend);
+      if (options.onTrayAction !== undefined) {
+        this.tray.onAction(options.onTrayAction);
+      }
+    } else {
+      this.tray = null;
+    }
   }
 
   /** The IPC bridge (exposed for wiring renderer-side handlers in tests). */
@@ -94,13 +117,28 @@ export class DesktopApp {
   }
 
   /**
-   * Start the app: create and show the window. Does not connect to the
-   * daemon — call {@link connectToDaemon} afterwards.
+   * The system tray manager, or `null` when no tray backend was supplied.
+   * Exposed so the host can register additional action callbacks or inspect
+   * tray state.
+   */
+  get trayManager(): SystemTrayManager | null {
+    return this.tray;
+  }
+
+  /**
+   * Start the app: create and show the window, and start the system tray
+   * (if configured). Does not connect to the daemon — call
+   * {@link connectToDaemon} afterwards.
    */
   start(): void {
     if (this.started) return;
     this.window.createWindow(this.windowOptions);
     this.window.show();
+    if (this.tray !== null) {
+      this.tray.start();
+      // Mirror the initial daemon status into the tray.
+      this.tray.setStatus(this.state.snapshot().daemonStatus);
+    }
     this.started = true;
   }
 
@@ -111,7 +149,7 @@ export class DesktopApp {
    * on failure.
    */
   connectToDaemon(socketUrl: string): Promise<void> {
-    this.state.update({ daemonStatus: 'connecting', connected: false, error: undefined });
+    this.updateDaemonStatus('connecting', { connected: false, error: undefined });
     return new Promise<void>((resolve, reject) => {
       let socket: WebSocket;
       try {
@@ -121,7 +159,7 @@ export class DesktopApp {
           `Invalid daemon URL: ${socketUrl}`,
           err instanceof Error ? err : undefined,
         );
-        this.state.update({ daemonStatus: 'error', connected: false, error: e.message });
+        this.updateDaemonStatus('error', { connected: false, error: e.message });
         reject(e);
         return;
       }
@@ -131,14 +169,14 @@ export class DesktopApp {
         const e = new DesktopConnectionError(
           `Timed out connecting to daemon at ${socketUrl}`,
         );
-        this.state.update({ daemonStatus: 'error', connected: false, error: e.message });
+        this.updateDaemonStatus('error', { connected: false, error: e.message });
         reject(e);
       }, this.connectTimeoutMs);
 
       socket.once('open', () => {
         clearTimeout(timer);
         this.socket = socket;
-        this.state.update({ daemonStatus: 'connected', connected: true, error: undefined });
+        this.updateDaemonStatus('connected', { connected: true, error: undefined });
         this.wireDaemonSocket(socket);
         resolve();
       });
@@ -149,7 +187,7 @@ export class DesktopApp {
           `Failed to connect to daemon at ${socketUrl}: ${err.message}`,
           err,
         );
-        this.state.update({ daemonStatus: 'error', connected: false, error: e.message });
+        this.updateDaemonStatus('error', { connected: false, error: e.message });
         reject(e);
       });
     });
@@ -219,9 +257,8 @@ export class DesktopApp {
       } else {
         resolve();
       }
-      this.state.update({
+      this.updateDaemonStatus('disconnected', {
         connected: false,
-        daemonStatus: 'disconnected',
         inboxItems: [],
         activeTask: null,
         metrics: null,
@@ -230,13 +267,32 @@ export class DesktopApp {
     });
   }
 
-  /** Stop the app: disconnect, dispose the IPC bridge, and close the window. */
+  /** Stop the app: disconnect, dispose the IPC bridge, close the window, and destroy the tray. */
   stop(): Promise<void> {
     return this.disconnect().then(() => {
       this.bridge.dispose();
       this.window.close();
+      if (this.tray !== null) {
+        this.tray.stop();
+      }
       this.started = false;
     });
+  }
+
+  /**
+   * Update the daemon status in the renderer state and mirror it into the
+   * system tray (when configured). Centralizes the status-sync so every
+   * connection transition (connecting / connected / disconnected / error)
+   * keeps both surfaces consistent.
+   */
+  private updateDaemonStatus(
+    status: DaemonStatus,
+    extra?: Partial<RendererStateData>,
+  ): void {
+    this.state.update({ daemonStatus: status, ...extra });
+    if (this.tray !== null) {
+      this.tray.setStatus(status);
+    }
   }
 
   /**
@@ -259,20 +315,12 @@ export class DesktopApp {
 
     socket.once('close', () => {
       this.socket = null;
-      this.state.update({
-        connected: false,
-        daemonStatus: 'disconnected',
-        error: undefined,
-      });
+      this.updateDaemonStatus('disconnected', { connected: false, error: undefined });
     });
 
     socket.once('error', (err: Error) => {
       this.socket = null;
-      this.state.update({
-        connected: false,
-        daemonStatus: 'error',
-        error: err.message,
-      });
+      this.updateDaemonStatus('error', { connected: false, error: err.message });
     });
   }
 

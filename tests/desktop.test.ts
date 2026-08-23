@@ -10,6 +10,7 @@ import {
   IPC_CHANNELS,
   MockIpcTransport,
   MockWindowBackend,
+  MockTrayBackend,
   RendererState,
   DEFAULT_RENDERER_STATE,
   DEFAULT_WINDOW_BOUNDS,
@@ -579,6 +580,83 @@ describe('DesktopApp', () => {
     expect(window.windowOptions.width).toBe(400);
     expect(window.windowOptions.title).toBe('Mini');
     expect(window.windowOptions.alwaysOnTop).toBe(true);
+  });
+
+  /* ---------------------------------------------------------------- *
+   * System tray integration (issue #28)
+   * ---------------------------------------------------------------- */
+  it('creates the system tray on start when a tray backend is supplied', () => {
+    const window = new MockWindowBackend();
+    const transport = new MockIpcTransport();
+    const trayBackend = new MockTrayBackend();
+    const app = new DesktopApp({ window, ipcTransport: transport, trayBackend });
+    app.start();
+    expect(trayBackend.isActive).toBe(true);
+    expect(trayBackend.tooltip).toContain('Disconnected');
+    expect(app.trayManager).not.toBeNull();
+  });
+
+  it('does not create a tray when no tray backend is supplied', () => {
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: new MockIpcTransport(),
+    });
+    app.start();
+    expect(app.trayManager).toBeNull();
+  });
+
+  it('mirrors daemon connection status into the tray', async () => {
+    const window = new MockWindowBackend();
+    const transport = new MockIpcTransport();
+    const trayBackend = new MockTrayBackend();
+    const app = new DesktopApp({ window, ipcTransport: transport, trayBackend });
+    app.start();
+    expect(trayBackend.tooltip).toContain('Disconnected');
+    const connecting = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    await connecting;
+    expect(trayBackend.tooltip).toContain('Connected');
+    expect(trayBackend.menu.find((i) => i.id === 'status')!.label).toBe('Daemon: Connected');
+  });
+
+  it('forwards tray quick actions to the onTrayAction callback', () => {
+    const window = new MockWindowBackend();
+    const transport = new MockIpcTransport();
+    const trayBackend = new MockTrayBackend();
+    const onTrayAction = vi.fn();
+    const app = new DesktopApp({
+      window,
+      ipcTransport: transport,
+      trayBackend,
+      onTrayAction,
+    });
+    app.start();
+    trayBackend.click('quit');
+    expect(onTrayAction).toHaveBeenCalledWith('quit');
+    trayBackend.click('open-inbox');
+    expect(onTrayAction).toHaveBeenCalledWith('open-inbox');
+  });
+
+  it('destroys the tray on stop', async () => {
+    const window = new MockWindowBackend();
+    const transport = new MockIpcTransport();
+    const trayBackend = new MockTrayBackend();
+    const app = new DesktopApp({ window, ipcTransport: transport, trayBackend });
+    app.start();
+    expect(trayBackend.isActive).toBe(true);
+    await app.stop();
+    expect(trayBackend.isDestroyed).toBe(true);
+  });
+
+  it('mirrors error status into the tray on connection failure', async () => {
+    const window = new MockWindowBackend();
+    const transport = new MockIpcTransport();
+    const trayBackend = new MockTrayBackend();
+    const app = new DesktopApp({ window, ipcTransport: transport, trayBackend });
+    app.start();
+    // Connect to a port that is not listening -> error.
+    await expect(app.connectToDaemon('ws://127.0.0.1:1')).rejects.toBeDefined();
+    expect(trayBackend.tooltip).toContain('Error');
   });
 });
 

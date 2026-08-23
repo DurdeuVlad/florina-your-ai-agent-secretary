@@ -132,3 +132,14 @@ export type {
   KeyboardBackend,
   ParsedAccelerator,
 } from './hotkeys.js';
+
+export { SystemTrayManager, MockTrayBackend } from './system-tray.js';
+export type {
+  TrayAction,
+  TrayActionCallback,
+  TrayBackend,
+  TrayMenuItem,
+} from './system-tray.js';
+
+export { KeyboardNavigator } from './keyboard-nav.js';
+export type { NavAction, NavActionCallback } from './keyboard-nav.js';
