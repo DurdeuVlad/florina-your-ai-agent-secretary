@@ -32,6 +32,8 @@ import type {
   AttentionInbox,
   AttentionInboxFilter,
 } from '../attention/attention-inbox.js';
+import type { CompletionDigest } from '../attention/completion-digest.js';
+import type { CompletionDigestRepository } from '../storage/repositories/completion-digest.js';
 import type { EventBus } from './event-stream.js';
 import type {
   TaskStateMachine,
@@ -188,6 +190,12 @@ export interface ShutdownCommand {
   readonly kind: 'shutdown';
 }
 
+/** Query the latest completion digest for a task (issue #37). */
+export interface GetDigestCommand {
+  readonly kind: 'get-digest';
+  readonly taskId: string;
+}
+
 /**
  * The canonical discriminated union of all commands (DEC-026).
  *
@@ -206,7 +214,8 @@ export type Command =
   | QueryTaskCommand
   | ListTasksCommand
   | PruneWorktreeCommand
-  | ShutdownCommand;
+  | ShutdownCommand
+  | GetDigestCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -222,6 +231,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'list-tasks',
   'prune-worktree',
   'shutdown',
+  'get-digest',
 ] as const;
 
 /* ================================================================== *
@@ -283,6 +293,13 @@ export interface ShutdownResponse {
   readonly ok: boolean;
 }
 
+/** Response to a `get-digest` command (issue #37). */
+export interface DigestResponse {
+  readonly ok: boolean;
+  readonly digest: CompletionDigest | null;
+  readonly error?: string;
+}
+
 /** Generic error response for unknown / malformed commands. */
 export interface UnknownCommandResponse {
   readonly ok: false;
@@ -305,6 +322,7 @@ export type Response =
   | TaskListResponse
   | PruneResponse
   | ShutdownResponse
+  | DigestResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -375,6 +393,11 @@ export interface CommandApiDeps {
    * active session (issue #35).
    */
   readonly sessionManager?: SessionManager;
+  /**
+   * Optional completion-digest repository. When present, the `get-digest`
+   * command queries it for the latest digest for a task (issue #37).
+   */
+  readonly completionDigestRepository?: CompletionDigestRepository;
 }
 
 /* ================================================================== *
@@ -402,6 +425,7 @@ export class CommandApi {
   private readonly onShutdown?: () => void;
   private readonly adapterRegistry?: AdapterRegistry;
   private readonly sessionManager?: SessionManager;
+  private readonly completionDigestRepository?: CompletionDigestRepository;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -419,6 +443,7 @@ export class CommandApi {
     this.onShutdown = deps.onShutdown;
     this.adapterRegistry = deps.adapterRegistry;
     this.sessionManager = deps.sessionManager;
+    this.completionDigestRepository = deps.completionDigestRepository;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -459,6 +484,8 @@ export class CommandApi {
         return this.handlePruneWorktree(command);
       case 'shutdown':
         return this.handleShutdown(command);
+      case 'get-digest':
+        return this.handleGetDigest(command);
       default:
         return {
           ok: false,
@@ -888,6 +915,30 @@ export class CommandApi {
     this.onShutdown?.();
     return { ok: true };
   }
+
+  /** get-digest: return the latest completion digest for a task (issue #37). */
+  private async handleGetDigest(cmd: GetDigestCommand): Promise<DigestResponse> {
+    if (!cmd.taskId) {
+      return { ok: false, digest: null, error: 'taskId is required' };
+    }
+    if (!this.completionDigestRepository) {
+      return {
+        ok: false,
+        digest: null,
+        error: 'Completion digest repository is not configured',
+      };
+    }
+    try {
+      const digest = this.completionDigestRepository.findByTaskId(cmd.taskId);
+      return { ok: true, digest };
+    } catch (err) {
+      return {
+        ok: false,
+        digest: null,
+        error: `Failed to query digest: ${errorMessage(err)}`,
+      };
+    }
+  }
 }
 
 /* ================================================================== *
@@ -980,7 +1031,9 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                       ? PruneResponse
                       : C extends ShutdownCommand
                         ? ShutdownResponse
-                        : Response;
+                        : C extends GetDigestCommand
+                          ? DigestResponse
+                          : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the

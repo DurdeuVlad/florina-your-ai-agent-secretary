@@ -27,6 +27,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import {
   ApprovalRepository,
   AttentionItemRepository,
+  CompletionDigestRepository,
   ContextCapsuleRepository,
   DecisionRepository,
   DeliverableRepository,
@@ -229,6 +230,7 @@ export class SecretaryDaemon extends EventEmitter {
         sessionStore: repos.sessions,
         adapterRegistry: this.adapterRegistry,
         sessionManager: this.sessionManager,
+        completionDigestRepository: repos.completionDigests,
         onShutdown: () => {
           void this.stop();
         },
@@ -301,6 +303,7 @@ export class SecretaryDaemon extends EventEmitter {
       sessions: new SessionRepository(raw),
       decisions: new DecisionRepository(raw),
       capsules: new ContextCapsuleRepository(raw),
+      completionDigests: new CompletionDigestRepository(raw),
     };
   }
 

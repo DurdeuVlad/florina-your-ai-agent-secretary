@@ -31,6 +31,7 @@ import type {
   ApproveResponse,
   ItemMutationResponse,
   PruneResponse,
+  DigestResponse,
 } from '../src/daemon/command-api.js';
 import type { MetricsSnapshot } from '../src/daemon/metrics.js';
 import type { CompletionDigest } from '../src/attention/completion-digest.js';
@@ -733,16 +734,34 @@ describe('subcommand dispatch (mocked transport)', () => {
     expect(code).toBe(1);
   });
 
-  it('digest prints an honest not-yet-available message', async () => {
-    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+  it('digest sends a get-digest command and renders the digest', async () => {
+    const response: DigestResponse = { ok: true, digest: makeDigest() };
+    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['digest', 'task_1'], transport);
     expect(code).toBe(0);
+    const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
+    expect(sentCommand).toEqual({ kind: 'get-digest', taskId: 'task_1' });
+  });
+
+  it('digest prints a no-digest message when digest is null', async () => {
+    const response: DigestResponse = { ok: true, digest: null };
+    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['digest', 'task_1'], transport);
+    expect(code).toBe(0);
+  });
+
+  it('digest exits 1 on error response', async () => {
+    const response: DigestResponse = { ok: false, digest: null, error: 'repo not configured' };
+    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['digest', 'task_1'], transport);
+    expect(code).toBe(1);
   });
 
   it('digest exits 1 without a taskId', async () => {
     const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['digest'], transport);
     expect(code).toBe(1);
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it('inbox --priority filter is passed to the command', async () => {

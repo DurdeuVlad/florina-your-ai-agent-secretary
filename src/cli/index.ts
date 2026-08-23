@@ -30,6 +30,7 @@ import type {
   AcknowledgeItemCommand,
   ResolveItemCommand,
   EscalateItemCommand,
+  GetDigestCommand,
   InboxFilter,
   InboxResponse,
   TaskListResponse,
@@ -39,6 +40,7 @@ import type {
   ItemMutationResponse,
   PruneResponse,
   ShutdownResponse,
+  DigestResponse,
 } from '../daemon/command-api.js';
 import type { TaskState } from '../domain/enums.js';
 import type {
@@ -397,17 +399,17 @@ async function cmdDigest(ctx: CommandContext): Promise<CommandResult> {
   if (!taskId) {
     return { exitCode: 1, message: 'Usage: secretary digest <taskId>\n' };
   }
-  // The typed Command API (#19) does not yet include a digest query. The
-  // daemon's control-plane `get_digest` returns recent activity rather than a
-  // CompletionDigest. Until a digest command is added to the Command union,
-  // we surface a clear, honest message rather than fabricating a digest.
-  return {
-    exitCode: 0,
-    message:
-      `Completion digest for task ${taskId} is not yet available via the typed command API.\n` +
-      `The daemon stores digests (issue #16); a 'get-digest' command will be added to the\n` +
-      `Command union in a future issue.\n`,
-  };
+  const command: GetDigestCommand = { kind: 'get-digest', taskId };
+  const response = await sendCommand(ctx.client, command);
+  if (!response.ok) {
+    const r = response as DigestResponse;
+    return { exitCode: 1, message: `Failed to query digest: ${r.error ?? errorOf(response)}\n` };
+  }
+  const r = response as DigestResponse;
+  if (!r.digest) {
+    return { exitCode: 0, message: `No completion digest found for task ${taskId}.\n` };
+  }
+  return { exitCode: 0, message: formatDigest(r.digest) };
 }
 
 /* --- metrics --- */
@@ -497,6 +499,7 @@ async function sendCommand(
   | ItemMutationResponse
   | PruneResponse
   | ShutdownResponse
+  | DigestResponse
   | { ok: false; error: string }
 > {
   try {

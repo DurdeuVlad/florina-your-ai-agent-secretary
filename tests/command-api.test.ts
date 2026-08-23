@@ -17,6 +17,7 @@ import type {
   TaskListResponse,
   PruneResponse,
   ShutdownResponse,
+  DigestResponse,
   UnknownCommandResponse,
 } from '../src/daemon/command-api.js';
 import { EventBus } from '../src/daemon/event-stream.js';
@@ -29,6 +30,7 @@ import {
   EventRepository,
   ApprovalRepository,
   SessionRepository,
+  CompletionDigestRepository,
 } from '../src/storage/index.js';
 import {
   TaskState,
@@ -40,6 +42,7 @@ import {
 import type { Task, Approval } from '../src/domain/types.js';
 import { DirtyWorktreeError } from '../src/daemon/worktree.js';
 import { createAttentionItem } from '../src/attention/attention-item.js';
+import type { CompletionDigest } from '../src/attention/completion-digest.js';
 
 /* ================================================================== *
  * Test fixtures
@@ -135,6 +138,7 @@ interface Fixture {
   sessionStore: SessionStore;
   onShutdown: ReturnType<typeof vi.fn>;
   db: StorageDatabase;
+  completionDigestRepository: CompletionDigestRepository;
   /** The project ID created in the fixture (for task creation). */
   projectId: string;
   /** Helper: insert a task into both the task store and the SQLite repo. */
@@ -188,6 +192,7 @@ function createFixture(): Fixture {
   const eventRepo = new EventRepository(raw);
   const approvalRepo = new ApprovalRepository(raw);
   const sessionRepo = new SessionRepository(raw);
+  const completionDigestRepo = new CompletionDigestRepository(raw);
 
   const eventBus = new EventBus();
   const taskStateMachine = new TaskStateMachine(taskRepo, eventRepo);
@@ -210,6 +215,7 @@ function createFixture(): Fixture {
     taskStore,
     approvalStore,
     sessionStore,
+    completionDigestRepository: completionDigestRepo,
     onShutdown,
   };
 
@@ -238,6 +244,7 @@ function createFixture(): Fixture {
     sessionStore,
     onShutdown,
     db,
+    completionDigestRepository: completionDigestRepo,
     projectId: project.id,
     insertTask,
     insertApproval,
@@ -1126,6 +1133,66 @@ describe('CommandApi', () => {
       await fixture.api.execute({ kind: 'shutdown' });
 
       expect(fixture.onShutdown).toHaveBeenCalledOnce();
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * get-digest (issue #37)
+   * ---------------------------------------------------------------- */
+  describe('get-digest', () => {
+    function makeDigest(taskId: string): CompletionDigest {
+      return {
+        taskId,
+        sessionId: 'session_1',
+        agentId: 'agent_1',
+        startedAt: '2025-01-01T00:00:00.000Z',
+        completedAt: '2025-01-01T01:00:00.000Z',
+        duration: 3_600_000,
+        summary: 'Implementation complete. 9 files, 23/23 tests passing.',
+        filesChangedCount: 9,
+        filesChanged: ['src/a.ts', 'src/b.ts'],
+        testsRun: 23,
+        testsPassed: 23,
+        testsFailed: 0,
+        approvalsRequested: 1,
+        approvalsGranted: 1,
+        approvalsDenied: 0,
+        decisions: [],
+        riskHighlights: [],
+      };
+    }
+
+    it('returns the latest digest for a task', async () => {
+      const { task } = createTaskWithSession(fixture);
+      const digest = makeDigest(task.id);
+      fixture.completionDigestRepository.save(digest);
+
+      const res = await fixture.api.execute({ kind: 'get-digest', taskId: task.id });
+
+      const r = res as DigestResponse;
+      expect(r.ok).toBe(true);
+      expect(r.digest).not.toBeNull();
+      expect(r.digest?.taskId).toBe(task.id);
+      expect(r.digest?.summary).toBe(digest.summary);
+    });
+
+    it('returns ok with null digest when no digest exists', async () => {
+      const { task } = createTaskWithSession(fixture);
+
+      const res = await fixture.api.execute({ kind: 'get-digest', taskId: task.id });
+
+      const r = res as DigestResponse;
+      expect(r.ok).toBe(true);
+      expect(r.digest).toBeNull();
+    });
+
+    it('returns an error when taskId is empty', async () => {
+      const res = await fixture.api.execute({ kind: 'get-digest', taskId: '' });
+
+      const r = res as DigestResponse;
+      expect(r.ok).toBe(false);
+      expect(r.digest).toBeNull();
+      expect(r.error).toContain('taskId is required');
     });
   });
 
