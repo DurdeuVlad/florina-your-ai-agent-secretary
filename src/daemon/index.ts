@@ -129,3 +129,11 @@ export type {
   ApprovalStore,
   SessionStore,
 } from './command-api.js';
+
+/* Adapter session management (issue #35, DEC-005) */
+export { SessionManager } from './session-manager.js';
+export type {
+  SessionInfo,
+  StartSessionResult,
+  StopSessionResult,
+} from './session-manager.js';

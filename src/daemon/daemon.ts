@@ -47,6 +47,9 @@ import { MetricsCollector } from './metrics.js';
 import { WorktreeManager } from './worktree.js';
 import { AttentionInbox } from '../attention/attention-inbox.js';
 import { AttentionAggregator } from '../attention/attention-aggregator.js';
+import { AdapterRegistry } from '../adapters/registry.js';
+import { StubAdapter, STUB_ADAPTER_ID } from '../adapters/stub-adapter.js';
+import { SessionManager } from './session-manager.js';
 import { collectHealth } from './health.js';
 import type { HealthStatus } from './health.js';
 
@@ -111,6 +114,8 @@ export class SecretaryDaemon extends EventEmitter {
   private attentionAggregator: AttentionAggregator | null = null;
   private worktreeManager: WorktreeManager | null = null;
   private taskStateMachine: TaskStateMachine | null = null;
+  private adapterRegistry: AdapterRegistry | null = null;
+  private sessionManager: SessionManager | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -156,6 +161,16 @@ export class SecretaryDaemon extends EventEmitter {
     return this.commandApi;
   }
 
+  /** Exposed for tests to inspect the wired AdapterRegistry. */
+  get adapterRegistry$(): AdapterRegistry | null {
+    return this.adapterRegistry;
+  }
+
+  /** Exposed for tests to inspect the wired SessionManager. */
+  get sessionManager$(): SessionManager | null {
+    return this.sessionManager;
+  }
+
   /**
    * Start the daemon: acquire the single-instance lock, open the database,
    * and begin listening on the localhost WebSocket port.
@@ -189,6 +204,19 @@ export class SecretaryDaemon extends EventEmitter {
       this.attentionAggregator.start();
       this.worktreeManager = new WorktreeManager({ taskRepository: repos.tasks });
       this.taskStateMachine = new TaskStateMachine(repos.tasks, repos.events);
+
+      // Wire the adapter registry and session manager (issue #35). The
+      // registry maps stable adapter ids to factories. The stub adapter is
+      // registered by default for end-to-end pipeline testing; real
+      // adapters (Codex, Claude Code) can be registered by callers. The
+      // session manager owns the lifecycle of active agent sessions and
+      // pipes adapter events onto the EventBus.
+      this.adapterRegistry = new AdapterRegistry();
+      // The stub factory creates adapters WITHOUT a direct bus reference so
+      // the SessionManager is the sole event publisher (no duplicates).
+      this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter(null));
+      this.sessionManager = new SessionManager(this.bus);
+
       this.commandApi = new CommandApi({
         eventBus: this.bus,
         taskStateMachine: this.taskStateMachine,
@@ -199,6 +227,8 @@ export class SecretaryDaemon extends EventEmitter {
         taskStore: repos.tasks,
         approvalStore: repos.approvals,
         sessionStore: repos.sessions,
+        adapterRegistry: this.adapterRegistry,
+        sessionManager: this.sessionManager,
         onShutdown: () => {
           void this.stop();
         },
@@ -487,6 +517,12 @@ export class SecretaryDaemon extends EventEmitter {
 
   private async cleanup(): Promise<void> {
     this.removeHandlers();
+    // Stop all active adapter sessions before tearing down the bus so
+    // adapters are cleanly cancelled/disconnected (issue #35).
+    if (this.sessionManager) {
+      await this.sessionManager.stopAll();
+      this.sessionManager = null;
+    }
     if (this.attentionAggregator) {
       this.attentionAggregator.stop();
       this.attentionAggregator = null;
@@ -519,6 +555,7 @@ export class SecretaryDaemon extends EventEmitter {
     this.attentionInbox = null;
     this.worktreeManager = null;
     this.taskStateMachine = null;
+    this.adapterRegistry = null;
   }
 
   private setState(state: DaemonState): void {

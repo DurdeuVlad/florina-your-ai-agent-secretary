@@ -68,6 +68,10 @@ class SqliteBackedTaskStore implements TaskStore {
       .map((r) => this.taskRepo.getById(r.id))
       .filter((t): t is Task => t !== null);
   }
+
+  update(task: Task): void {
+    this.taskRepo.update(task);
+  }
 }
 
 /**

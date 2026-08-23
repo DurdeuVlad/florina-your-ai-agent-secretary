@@ -41,6 +41,9 @@ import type { MetricsCollector, MetricsSnapshot } from './metrics.js';
 import type { WorktreeManager } from './worktree.js';
 import { DirtyWorktreeError } from './worktree.js';
 import type { EventRepository } from '../storage/repositories/event.js';
+import type { AdapterRegistry } from '../adapters/registry.js';
+import type { AgentAdapter, SessionConfig as AdapterSessionConfig } from '../adapters/base.js';
+import type { SessionManager } from './session-manager.js';
 
 /* ================================================================== *
  * Shared types
@@ -318,6 +321,8 @@ export type Response =
 export interface TaskStore {
   getById(taskId: string): Task | null;
   listAll(): readonly Task[];
+  /** Persist an updated task (state, sessionIds, agentIds, etc.). */
+  update(task: Task): void;
 }
 
 /**
@@ -358,6 +363,18 @@ export interface CommandApiDeps {
   readonly sessionStore: SessionStore;
   /** Optional callback invoked when the `shutdown` command is received. */
   readonly onShutdown?: () => void;
+  /**
+   * Optional adapter registry. When present (along with `sessionManager`),
+   * `start-task` looks up an adapter by `agentId` and starts an agent
+   * session that pipes normalized events onto the EventBus (issue #35).
+   */
+  readonly adapterRegistry?: AdapterRegistry;
+  /**
+   * Optional session manager. When present, `start-task` uses it to manage
+   * the adapter lifecycle and `stop-task` uses it to cancel/disconnect the
+   * active session (issue #35).
+   */
+  readonly sessionManager?: SessionManager;
 }
 
 /* ================================================================== *
@@ -383,6 +400,8 @@ export class CommandApi {
   private readonly approvalStore: ApprovalStore;
   private readonly sessionStore: SessionStore;
   private readonly onShutdown?: () => void;
+  private readonly adapterRegistry?: AdapterRegistry;
+  private readonly sessionManager?: SessionManager;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -398,6 +417,8 @@ export class CommandApi {
     this.approvalStore = deps.approvalStore;
     this.sessionStore = deps.sessionStore;
     this.onShutdown = deps.onShutdown;
+    this.adapterRegistry = deps.adapterRegistry;
+    this.sessionManager = deps.sessionManager;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -520,6 +541,17 @@ export class CommandApi {
       };
     }
 
+    // Update the task to record the new session and agent so that
+    // subsequent commands (e.g. stop-task) can resolve the correct
+    // sessionId/agentId from the task row.
+    this.taskStore.update({
+      ...task,
+      sessionIds: [...task.sessionIds, sessionId],
+      agentIds: task.agentIds.includes(cmd.agentId)
+        ? task.agentIds
+        : [...task.agentIds, cmd.agentId],
+    });
+
     try {
       if (currentState === TaskState.Created) {
         this.taskStateMachine.transition(cmd.taskId, TaskState.Created, TaskState.Delegated, ctx);
@@ -561,6 +593,48 @@ export class CommandApi {
       autonomyLevel: cmd.sessionConfig.autonomyLevel,
     };
     this.eventBus.publish(event);
+
+    // Wire the adapter session (issue #35). When an adapter registry and
+    // session manager are available, look up the adapter by `agentId`,
+    // connect it, start the run, and pipe its normalized event stream onto
+    // the EventBus. The adapter is created without a direct bus reference
+    // so the session manager is the sole event publisher (no duplicates).
+    if (this.adapterRegistry && this.sessionManager) {
+      let adapter: AgentAdapter;
+      try {
+        adapter = this.adapterRegistry.create(cmd.agentId, this.eventBus);
+      } catch (err) {
+        return {
+          ok: false,
+          taskId: cmd.taskId,
+          sessionId,
+          error: `Unknown or unavailable adapter for agent "${cmd.agentId}": ${errorMessage(err)}`,
+        };
+      }
+      const adapterSessionConfig: AdapterSessionConfig = {
+        taskId: cmd.taskId,
+        sessionId,
+        agentId: cmd.agentId,
+        workingDir: cmd.sessionConfig.workingDir,
+        objective: task.objective,
+        model: cmd.sessionConfig.model,
+        autonomyLevel: cmd.sessionConfig.autonomyLevel,
+      };
+      const sessionResult = await this.sessionManager.startSession(
+        cmd.taskId,
+        cmd.agentId,
+        adapter,
+        adapterSessionConfig,
+      );
+      if (!sessionResult.ok) {
+        return {
+          ok: false,
+          taskId: cmd.taskId,
+          sessionId,
+          error: sessionResult.error ?? 'Failed to start adapter session',
+        };
+      }
+    }
 
     return { ok: true, taskId: cmd.taskId, sessionId };
   }
@@ -621,6 +695,14 @@ export class CommandApi {
       details: cmd.reason,
     };
     this.eventBus.publish(event);
+
+    // Tear down the adapter session (issue #35). Best-effort: the task
+    // state transition already succeeded, so a missing or failing session
+    // stop does not change the response. The session manager cancels the
+    // adapter run and disconnects it.
+    if (this.sessionManager) {
+      await this.sessionManager.stopSession(cmd.taskId);
+    }
 
     return { ok: true, taskId: cmd.taskId };
   }
