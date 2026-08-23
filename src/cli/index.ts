@@ -27,12 +27,16 @@ import type {
   ListTasksCommand,
   QueryMetricsCommand,
   ApproveCommand,
+  AcknowledgeItemCommand,
+  ResolveItemCommand,
+  EscalateItemCommand,
   InboxFilter,
   InboxResponse,
   TaskListResponse,
   TaskResponse,
   MetricsResponse,
   ApproveResponse,
+  ItemMutationResponse,
   PruneResponse,
   ShutdownResponse,
 } from '../daemon/command-api.js';
@@ -147,6 +151,9 @@ Commands:
     --task <taskId>
   approve <taskId> <approvalId> [--grant|--deny] [--note <text>]
                               Grant or deny a pending approval
+  ack <itemId>               Acknowledge an attention item
+  resolve <itemId>           Resolve an attention item
+  escalate <itemId>          Escalate an attention item to Critical
   tasks [--status <state>]    List tasks
   task <taskId>               Show task details
   digest <taskId>             Show completion digest for a task
@@ -207,6 +214,12 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdInbox(ctx);
     case 'approve':
       return cmdApprove(ctx);
+    case 'ack':
+      return cmdAck(ctx);
+    case 'resolve':
+      return cmdResolve(ctx);
+    case 'escalate':
+      return cmdEscalate(ctx);
     case 'tasks':
       return cmdTasks(ctx);
     case 'task':
@@ -299,6 +312,51 @@ async function cmdApprove(ctx: CommandContext): Promise<CommandResult> {
     exitCode: 0,
     message: `Approval ${r.approvalId} ${decision}ed.\n`,
   };
+}
+
+/* --- ack --- */
+async function cmdAck(ctx: CommandContext): Promise<CommandResult> {
+  const [itemId] = ctx.args.positionals;
+  if (!itemId) {
+    return { exitCode: 1, message: 'Usage: secretary ack <itemId>\n' };
+  }
+  const command: AcknowledgeItemCommand = { kind: 'ack-item', itemId };
+  const response = await sendCommand(ctx.client, command);
+  if (!response.ok) {
+    return { exitCode: 1, message: `Ack failed: ${errorOf(response)}\n` };
+  }
+  const r = response as ItemMutationResponse;
+  return { exitCode: 0, message: `Item ${r.itemId} acknowledged.\n` };
+}
+
+/* --- resolve --- */
+async function cmdResolve(ctx: CommandContext): Promise<CommandResult> {
+  const [itemId] = ctx.args.positionals;
+  if (!itemId) {
+    return { exitCode: 1, message: 'Usage: secretary resolve <itemId>\n' };
+  }
+  const command: ResolveItemCommand = { kind: 'resolve-item', itemId };
+  const response = await sendCommand(ctx.client, command);
+  if (!response.ok) {
+    return { exitCode: 1, message: `Resolve failed: ${errorOf(response)}\n` };
+  }
+  const r = response as ItemMutationResponse;
+  return { exitCode: 0, message: `Item ${r.itemId} resolved.\n` };
+}
+
+/* --- escalate --- */
+async function cmdEscalate(ctx: CommandContext): Promise<CommandResult> {
+  const [itemId] = ctx.args.positionals;
+  if (!itemId) {
+    return { exitCode: 1, message: 'Usage: secretary escalate <itemId>\n' };
+  }
+  const command: EscalateItemCommand = { kind: 'escalate-item', itemId };
+  const response = await sendCommand(ctx.client, command);
+  if (!response.ok) {
+    return { exitCode: 1, message: `Escalate failed: ${errorOf(response)}\n` };
+  }
+  const r = response as ItemMutationResponse;
+  return { exitCode: 0, message: `Item ${r.itemId} escalated.\n` };
 }
 
 /* --- tasks --- */
@@ -436,6 +494,7 @@ async function sendCommand(
   | TaskResponse
   | MetricsResponse
   | ApproveResponse
+  | ItemMutationResponse
   | PruneResponse
   | ShutdownResponse
   | { ok: false; error: string }

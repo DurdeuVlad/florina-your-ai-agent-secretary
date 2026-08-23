@@ -29,6 +29,7 @@ import type {
   TaskResponse,
   MetricsResponse,
   ApproveResponse,
+  ItemMutationResponse,
   PruneResponse,
 } from '../src/daemon/command-api.js';
 import type { MetricsSnapshot } from '../src/daemon/metrics.js';
@@ -628,6 +629,78 @@ describe('subcommand dispatch (mocked transport)', () => {
   it('approve exits 1 with missing positionals', async () => {
     const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['approve', 'task_1'], transport);
+    expect(code).toBe(1);
+  });
+
+  it('ack <itemId> sends an ack-item command and exits 0', async () => {
+    const response: ItemMutationResponse = { ok: true, itemId: 'attn_1' };
+    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['ack', 'attn_1'], transport);
+    expect(code).toBe(0);
+    const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
+    expect(sentCommand).toEqual({ kind: 'ack-item', itemId: 'attn_1' });
+  });
+
+  it('ack exits 1 without an itemId', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['ack'], transport);
+    expect(code).toBe(1);
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('ack exits 1 on an error response', async () => {
+    const transport: WebSocketTransport = vi.fn(
+      async () => ({ ok: false, itemId: 'attn_1', error: 'item not found' }),
+    ) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['ack', 'attn_1'], transport);
+    expect(code).toBe(1);
+  });
+
+  it('resolve <itemId> sends a resolve-item command and exits 0', async () => {
+    const response: ItemMutationResponse = { ok: true, itemId: 'attn_1' };
+    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['resolve', 'attn_1'], transport);
+    expect(code).toBe(0);
+    const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
+    expect(sentCommand).toEqual({ kind: 'resolve-item', itemId: 'attn_1' });
+  });
+
+  it('resolve exits 1 without an itemId', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['resolve'], transport);
+    expect(code).toBe(1);
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('resolve exits 1 on an error response', async () => {
+    const transport: WebSocketTransport = vi.fn(
+      async () => ({ ok: false, itemId: 'attn_1', error: 'already resolved' }),
+    ) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['resolve', 'attn_1'], transport);
+    expect(code).toBe(1);
+  });
+
+  it('escalate <itemId> sends an escalate-item command and exits 0', async () => {
+    const response: ItemMutationResponse = { ok: true, itemId: 'attn_1' };
+    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['escalate', 'attn_1'], transport);
+    expect(code).toBe(0);
+    const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
+    expect(sentCommand).toEqual({ kind: 'escalate-item', itemId: 'attn_1' });
+  });
+
+  it('escalate exits 1 without an itemId', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['escalate'], transport);
+    expect(code).toBe(1);
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('escalate exits 1 on an error response', async () => {
+    const transport: WebSocketTransport = vi.fn(
+      async () => ({ ok: false, itemId: 'attn_1', error: 'item not found' }),
+    ) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['escalate', 'attn_1'], transport);
     expect(code).toBe(1);
   });
 
