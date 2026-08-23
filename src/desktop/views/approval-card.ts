@@ -79,6 +79,8 @@ export const RISK_LABELS: Readonly<Record<CapabilityRiskLevel, string>> = {
  * confirmation — they cannot be one-click approved (DEC-011).
  */
 const HIGHER_AUTHORITY_CAPABILITIES: ReadonlySet<CapabilityType> = new Set([
+  CapabilityType.Git,
+  CapabilityType.Secret,
   CapabilityType.Push,
   CapabilityType.Merge,
   CapabilityType.Deploy,

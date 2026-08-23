@@ -185,6 +185,8 @@ describe('ApprovalCardViewModel.buildCard', () => {
 
 describe('higher-authority capabilities (DEC-011)', () => {
   const higherAuthority: CapabilityType[] = [
+    CapabilityType.Git,
+    CapabilityType.Secret,
     CapabilityType.Push,
     CapabilityType.Merge,
     CapabilityType.Deploy,
@@ -439,6 +441,34 @@ describe('template functions', () => {
       { agentName: 'Codex' },
     );
     const actions = renderApprovalActions(pushCard);
+    const buttons = actions.children as ViewRenderTree[];
+    const grant = buttons[0];
+    expect(grant.props!.disabled).toBe(true);
+    expect(grant.children![0]).toBe('Confirm visually');
+  });
+
+  it('disables one-click approval and grant button for Git (StrongDevice)', () => {
+    const gitCard = viewModel.buildCard(
+      req({ capability: CapabilityType.Git, destination: 'origin', command: 'git pull' }),
+      { agentName: 'Codex' },
+    );
+    expect(gitCard.oneClickAllowed).toBe(false);
+    expect(gitCard.riskAssessment.recommendedAction).toMatch(/visual confirmation/i);
+    const actions = renderApprovalActions(gitCard);
+    const buttons = actions.children as ViewRenderTree[];
+    const grant = buttons[0];
+    expect(grant.props!.disabled).toBe(true);
+    expect(grant.children![0]).toBe('Confirm visually');
+  });
+
+  it('disables one-click approval and grant button for Secret (StrongDevice)', () => {
+    const secretCard = viewModel.buildCard(
+      req({ capability: CapabilityType.Secret, destination: 'vault://prod/db' }),
+      { agentName: 'Codex' },
+    );
+    expect(secretCard.oneClickAllowed).toBe(false);
+    expect(secretCard.riskAssessment.recommendedAction).toMatch(/visual confirmation/i);
+    const actions = renderApprovalActions(secretCard);
     const buttons = actions.children as ViewRenderTree[];
     const grant = buttons[0];
     expect(grant.props!.disabled).toBe(true);
