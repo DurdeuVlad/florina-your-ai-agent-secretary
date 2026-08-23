@@ -3,4 +3,6 @@
  *
  * OpenAI Realtime API for sub-second fast-start; whisper.cpp for local offline.
  */
-export {};
+export * from './audio-types.js';
+export * from './realtime-message.js';
+export * from './realtime-bridge.js';
