@@ -39,7 +39,14 @@ import {
 import type { SupervisorEvent } from '../domain/events.js';
 import { ControlPlaneApi, dispatch, parseApiRequest } from './api.js';
 import type { ApiRequest, ApiResponse } from './api.js';
+import { CommandApi } from './command-api.js';
+import type { Command, Response } from './command-api.js';
 import { EventBus, EventStream } from './event-stream.js';
+import { TaskStateMachine } from './task-lifecycle.js';
+import { MetricsCollector } from './metrics.js';
+import { WorktreeManager } from './worktree.js';
+import { AttentionInbox } from '../attention/attention-inbox.js';
+import { AttentionAggregator } from '../attention/attention-aggregator.js';
 import { collectHealth } from './health.js';
 import type { HealthStatus } from './health.js';
 
@@ -96,8 +103,14 @@ export class SecretaryDaemon extends EventEmitter {
   private wss: WebSocketServer | null = null;
   private db: StorageDatabase | null = null;
   private api: ControlPlaneApi | null = null;
+  private commandApi: CommandApi | null = null;
   private bus: EventBus | null = null;
   private stream: EventStream | null = null;
+  private attentionInbox: AttentionInbox | null = null;
+  private metricsCollector: MetricsCollector | null = null;
+  private attentionAggregator: AttentionAggregator | null = null;
+  private worktreeManager: WorktreeManager | null = null;
+  private taskStateMachine: TaskStateMachine | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -138,6 +151,11 @@ export class SecretaryDaemon extends EventEmitter {
     return this.api;
   }
 
+  /** Exposed for tests to inspect the wired CommandApi. */
+  get commandPlane(): CommandApi | null {
+    return this.commandApi;
+  }
+
   /**
    * Start the daemon: acquire the single-instance lock, open the database,
    * and begin listening on the localhost WebSocket port.
@@ -155,7 +173,37 @@ export class SecretaryDaemon extends EventEmitter {
       this.openDatabase();
       this.bus = new EventBus();
       this.stream = new EventStream(this.bus);
-      this.api = new ControlPlaneApi(this.buildRepos(), this.bus);
+      const repos = this.buildRepos();
+      this.api = new ControlPlaneApi(repos, this.bus);
+
+      // Wire the typed Command API (issue #33). The CommandApi shares the
+      // same EventBus, storage repositories, and worktree manager as the
+      // legacy ControlPlaneApi so both surfaces operate on identical state.
+      this.attentionInbox = new AttentionInbox();
+      this.metricsCollector = new MetricsCollector({
+        inboxSizeProvider: () => this.attentionInbox?.size ?? 0,
+        attentionItemsPendingProvider: () => this.attentionInbox?.pendingCount ?? 0,
+      });
+      this.metricsCollector.attach(this.bus);
+      this.attentionAggregator = new AttentionAggregator(this.attentionInbox, this.bus);
+      this.attentionAggregator.start();
+      this.worktreeManager = new WorktreeManager({ taskRepository: repos.tasks });
+      this.taskStateMachine = new TaskStateMachine(repos.tasks, repos.events);
+      this.commandApi = new CommandApi({
+        eventBus: this.bus,
+        taskStateMachine: this.taskStateMachine,
+        attentionInbox: this.attentionInbox,
+        metricsCollector: this.metricsCollector,
+        worktreeManager: this.worktreeManager,
+        eventRepository: repos.events,
+        taskStore: repos.tasks,
+        approvalStore: repos.approvals,
+        sessionStore: repos.sessions,
+        onShutdown: () => {
+          void this.stop();
+        },
+      });
+
       await this.listen();
       this.startedAt = Date.now();
       this.setState('running');
@@ -349,6 +397,35 @@ export class SecretaryDaemon extends EventEmitter {
     this.cleanups.push(unregister);
 
     socket.on('message', async (data) => {
+      // Parse the raw JSON once so we can discriminate between the two
+      // protocols that share this socket:
+      //   - Command objects ({ kind: "start-task", ... })  → CommandApi
+      //   - ApiRequest envelopes ({ id, method, params })  → ControlPlaneApi
+      //   - Event-stream control messages ({ type: "subscribe" }) are
+      //     handled by the EventStream's own listener installed via register.
+      const text = typeof data === 'string' ? data : (data as Buffer).toString('utf8');
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        // Not valid JSON; let the event-stream listener handle control msgs.
+        return;
+      }
+
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        typeof (parsed as { kind?: unknown }).kind === 'string'
+      ) {
+        // Command dispatch path (issue #33).
+        const response = await this.routeCommand(parsed as Command);
+        if (socket.readyState === socket.OPEN) {
+          socket.send(JSON.stringify(response));
+        }
+        return;
+      }
+
+      // Legacy ControlPlaneApi dispatch path.
       const request = parseApiRequest(data);
       if (!request) {
         // Not an API request; the event stream's own control-message
@@ -367,6 +444,18 @@ export class SecretaryDaemon extends EventEmitter {
     socket.on('error', () => {
       unregister();
     });
+  }
+
+  /**
+   * Route a typed {@link Command} to the {@link CommandApi} and return its
+   * {@link Response}. If the CommandApi is not wired (e.g. the daemon is
+   * shutting down), an error response is returned instead.
+   */
+  private async routeCommand(command: Command): Promise<Response> {
+    if (!this.commandApi) {
+      return { ok: false, error: 'Daemon is not ready' };
+    }
+    return this.commandApi.execute(command);
   }
 
   private async routeApi(request: ApiRequest): Promise<ApiResponse<unknown>> {
@@ -398,6 +487,14 @@ export class SecretaryDaemon extends EventEmitter {
 
   private async cleanup(): Promise<void> {
     this.removeHandlers();
+    if (this.attentionAggregator) {
+      this.attentionAggregator.stop();
+      this.attentionAggregator = null;
+    }
+    if (this.metricsCollector) {
+      this.metricsCollector.detach();
+      this.metricsCollector = null;
+    }
     if (this.stream) {
       this.stream.close();
       this.stream = null;
@@ -417,7 +514,11 @@ export class SecretaryDaemon extends EventEmitter {
       }
     }
     this.api = null;
+    this.commandApi = null;
     this.bus = null;
+    this.attentionInbox = null;
+    this.worktreeManager = null;
+    this.taskStateMachine = null;
   }
 
   private setState(state: DaemonState): void {

@@ -76,6 +76,12 @@ export class TaskRepository extends BaseRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
+  /** Return all tasks ordered by creation time (ascending). */
+  listAll(): Task[] {
+    const rows = this.db.prepare('SELECT * FROM tasks ORDER BY created_at ASC').all() as TaskRow[];
+    return rows.map((r) => this.mapRow(r));
+  }
+
   update(task: Task): void {
     this.updateStmt.run({
       id: task.id,
