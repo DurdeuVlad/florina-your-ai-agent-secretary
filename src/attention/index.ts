@@ -12,3 +12,5 @@ export * from './attention-inbox.js';
 export * from './attention-aggregator.js';
 export * from './completion-digest.js';
 export * from './digest-builder.js';
+export * from './attention-tuning.js';
+export * from './adaptive-policy.js';
