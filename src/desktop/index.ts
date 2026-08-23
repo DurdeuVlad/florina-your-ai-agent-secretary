@@ -84,3 +84,27 @@ export type {
   RiskAssessmentDisplay,
   RiskColor,
 } from './views/approval-types.js';
+
+export { DigestViewModel, formatDuration } from './views/digest-view.js';
+export { DiffViewModel, LARGE_CHANGE_THRESHOLD } from './views/diff-view.js';
+export {
+  renderDigest,
+  renderDigestSummary,
+  renderTestResults,
+  renderApprovalStats,
+  renderRiskHighlights,
+  renderDiffView,
+  renderFileList,
+  renderDiffStats,
+} from './views/digest-templates.js';
+export type {
+  ApprovalStatsView,
+  DiffStatsView,
+  DiffViewData,
+  DigestColor,
+  DigestViewData,
+  FileChangeView,
+  FileGroupView,
+  RiskHighlightView,
+  TestResultsView,
+} from './views/digest-types.js';
