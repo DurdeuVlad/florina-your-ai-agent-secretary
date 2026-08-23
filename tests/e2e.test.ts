@@ -327,12 +327,16 @@ describe('e2e: error scenarios (#39)', () => {
     }
   });
 
-  it('start-task with an unknown agentId returns an error response', async () => {
+  it('start-task with an unknown agentId returns an error and leaves task state clean for retry', async () => {
     // Seed an agent row so the sessions FK constraint (agent_id →
     // agents.id) is satisfied; the failure we want to verify is at the
-    // adapter-registry lookup, which happens after the session row is
-    // inserted. The agent id is NOT registered in the AdapterRegistry,
-    // so the registry's create() throws "Unknown or unavailable adapter".
+    // adapter-registry lookup. The agent id is NOT registered in the
+    // AdapterRegistry, so the registry's create() throws "Unknown or
+    // unavailable adapter".
+    //
+    // The adapter lookup now happens BEFORE any DB mutations (Bug 1 fix),
+    // so a failed start-task must leave the task in its original state
+    // with no phantom session row, allowing the caller to retry.
     const db = getDb(daemon);
     const agents = new AgentRepository(db);
     agents.insert(
@@ -344,6 +348,13 @@ describe('e2e: error scenarios (#39)', () => {
         runtime: { kind: 'cli' },
       }),
     );
+
+    // Capture the original task state before the failed start.
+    const taskRepo = new TaskRepository(db);
+    const taskBefore = taskRepo.getById(taskId);
+    expect(taskBefore).not.toBeNull();
+    const originalSessionIds = taskBefore!.sessionIds.length;
+    const originalAgentIds = taskBefore!.agentIds.length;
 
     const res = await client.send({
       kind: 'start-task',
@@ -358,6 +369,22 @@ describe('e2e: error scenarios (#39)', () => {
     }
     // No session should be tracked.
     expect(daemon.sessionManager$!.activeCount).toBe(0);
+
+    // The task must be in its original state — no phantom session or agent.
+    const taskAfter = taskRepo.getById(taskId);
+    expect(taskAfter).not.toBeNull();
+    expect(taskAfter!.state).toBe(taskBefore!.state);
+    expect(taskAfter!.sessionIds).toHaveLength(originalSessionIds);
+    expect(taskAfter!.agentIds).toHaveLength(originalAgentIds);
+
+    // The caller can retry with the registered stub agent and succeed.
+    const retryRes = await client.send({
+      kind: 'start-task',
+      taskId,
+      agentId: 'stub',
+      sessionConfig: { workingDir: '/repo/e2e' },
+    });
+    expect(retryRes.ok).toBe(true);
   });
 
   it('stop-task with a non-existent task returns an error response', async () => {

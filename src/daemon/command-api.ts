@@ -354,10 +354,13 @@ export interface ApprovalStore {
 
 /**
  * Minimal session data-access interface needed by {@link CommandApi}.
- * The real {@link SessionRepository} satisfies `insert`.
+ * The real {@link SessionRepository} satisfies both methods. `delete` is
+ * used to roll back an inserted session row when a subsequent step in
+ * `start-task` fails before any journal events reference the session.
  */
 export interface SessionStore {
   insert(session: Session): void;
+  delete(id: string): void;
 }
 
 /**
@@ -533,6 +536,18 @@ export class CommandApi {
       };
     }
 
+    // Validate the state transition is possible before any side effects.
+    // This ensures we fail fast without mutating DB state or starting an
+    // adapter session that would then need to be rolled back.
+    if (currentState !== TaskState.Created && currentState !== TaskState.Delegated) {
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        sessionId: '',
+        error: `Task is in state "${currentState}" and cannot be started`,
+      };
+    }
+
     const sessionId = generateId('session');
     const ctx: TransitionContext = {
       sessionId,
@@ -544,88 +559,10 @@ export class CommandApi {
       },
     };
 
-    // Persist the session row before transitioning so the events table FK
-    // (session_id → sessions.id) is satisfied when the state machine appends
-    // the transition event to the journal (DEC-012).
-    const session: Session = {
-      id: sessionId,
-      taskId: cmd.taskId,
-      agentId: cmd.agentId,
-      status: 'running',
-      startedAt: new Date().toISOString(),
-      eventIds: [],
-      deliverableIds: [],
-      capsuleId: generateId('capsule'),
-    };
-    try {
-      this.sessionStore.insert(session);
-    } catch (err) {
-      return {
-        ok: false,
-        taskId: cmd.taskId,
-        sessionId: '',
-        error: `Failed to create session: ${errorMessage(err)}`,
-      };
-    }
-
-    // Update the task to record the new session and agent so that
-    // subsequent commands (e.g. stop-task) can resolve the correct
-    // sessionId/agentId from the task row.
-    this.taskStore.update({
-      ...task,
-      sessionIds: [...task.sessionIds, sessionId],
-      agentIds: task.agentIds.includes(cmd.agentId)
-        ? task.agentIds
-        : [...task.agentIds, cmd.agentId],
-    });
-
-    try {
-      if (currentState === TaskState.Created) {
-        this.taskStateMachine.transition(cmd.taskId, TaskState.Created, TaskState.Delegated, ctx);
-      } else if (currentState === TaskState.Delegated) {
-        this.taskStateMachine.transition(
-          cmd.taskId,
-          TaskState.Delegated,
-          TaskState.Running,
-          ctx,
-        );
-      } else {
-        return {
-          ok: false,
-          taskId: cmd.taskId,
-          sessionId: '',
-          error: `Task is in state "${currentState}" and cannot be started`,
-        };
-      }
-    } catch (err) {
-      return {
-        ok: false,
-        taskId: cmd.taskId,
-        sessionId: '',
-        error: `Failed to start task: ${errorMessage(err)}`,
-      };
-    }
-
-    // Publish an AgentStarted event on the live event bus.
-    const event: AgentStartedEvent = {
-      type: 'AgentStarted',
-      timestamp: new Date().toISOString(),
-      taskId: cmd.taskId,
-      sessionId,
-      agentId: cmd.agentId,
-      adapterFidelityTier: cmd.sessionConfig.adapterFidelityTier ?? 'B',
-      objective: task.objective,
-      workingDir: cmd.sessionConfig.workingDir,
-      model: cmd.sessionConfig.model,
-      autonomyLevel: cmd.sessionConfig.autonomyLevel,
-    };
-    this.eventBus.publish(event);
-
-    // Wire the adapter session (issue #35). When an adapter registry and
-    // session manager are available, look up the adapter by `agentId`,
-    // connect it, start the run, and pipe its normalized event stream onto
-    // the EventBus. The adapter is created without a direct bus reference
-    // so the session manager is the sole event publisher (no duplicates).
+    // --- Start the adapter session FIRST (if configured) ---
+    // If the adapter fails to start, no DB state has been mutated, so the
+    // task remains in its original state and the caller can retry with a
+    // different agent or after fixing the adapter (issue #35 audit fix).
     if (this.adapterRegistry && this.sessionManager) {
       let adapter: AgentAdapter;
       try {
@@ -634,7 +571,7 @@ export class CommandApi {
         return {
           ok: false,
           taskId: cmd.taskId,
-          sessionId,
+          sessionId: '',
           error: `Unknown or unavailable adapter for agent "${cmd.agentId}": ${errorMessage(err)}`,
         };
       }
@@ -657,13 +594,133 @@ export class CommandApi {
         return {
           ok: false,
           taskId: cmd.taskId,
-          sessionId,
+          sessionId: '',
           error: sessionResult.error ?? 'Failed to start adapter session',
         };
       }
     }
 
+    // --- Persist the session row ---
+    // Insert before transitioning so the events table FK
+    // (session_id → sessions.id) is satisfied when the state machine appends
+    // the transition event to the journal (DEC-012).
+    const session: Session = {
+      id: sessionId,
+      taskId: cmd.taskId,
+      agentId: cmd.agentId,
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      eventIds: [],
+      deliverableIds: [],
+      capsuleId: generateId('capsule'),
+    };
+    try {
+      this.sessionStore.insert(session);
+    } catch (err) {
+      await this.rollbackAdapterSession(cmd.taskId);
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        sessionId: '',
+        error: `Failed to create session: ${errorMessage(err)}`,
+      };
+    }
+
+    // --- Update the task to record the new session and agent ---
+    // so that subsequent commands (e.g. stop-task) can resolve the correct
+    // sessionId/agentId from the task row.
+    try {
+      this.taskStore.update({
+        ...task,
+        sessionIds: [...task.sessionIds, sessionId],
+        agentIds: task.agentIds.includes(cmd.agentId)
+          ? task.agentIds
+          : [...task.agentIds, cmd.agentId],
+      });
+    } catch (err) {
+      this.rollbackSessionRow(sessionId);
+      await this.rollbackAdapterSession(cmd.taskId);
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        sessionId: '',
+        error: `Failed to update task: ${errorMessage(err)}`,
+      };
+    }
+
+    // --- Transition the task state ---
+    // The state machine appends a journal event (with session_id FK) and
+    // updates the task row. If it throws, no journal event was written, so
+    // the session row can be safely deleted.
+    try {
+      if (currentState === TaskState.Created) {
+        this.taskStateMachine.transition(cmd.taskId, TaskState.Created, TaskState.Delegated, ctx);
+      } else {
+        this.taskStateMachine.transition(
+          cmd.taskId,
+          TaskState.Delegated,
+          TaskState.Running,
+          ctx,
+        );
+      }
+    } catch (err) {
+      // Revert the task update to remove the phantom sessionId/agentId.
+      this.taskStore.update(task);
+      this.rollbackSessionRow(sessionId);
+      await this.rollbackAdapterSession(cmd.taskId);
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        sessionId: '',
+        error: `Failed to start task: ${errorMessage(err)}`,
+      };
+    }
+
+    // --- Publish an AgentStarted event on the live event bus ---
+    const event: AgentStartedEvent = {
+      type: 'AgentStarted',
+      timestamp: new Date().toISOString(),
+      taskId: cmd.taskId,
+      sessionId,
+      agentId: cmd.agentId,
+      adapterFidelityTier: cmd.sessionConfig.adapterFidelityTier ?? 'B',
+      objective: task.objective,
+      workingDir: cmd.sessionConfig.workingDir,
+      model: cmd.sessionConfig.model,
+      autonomyLevel: cmd.sessionConfig.autonomyLevel,
+    };
+    this.eventBus.publish(event);
+
     return { ok: true, taskId: cmd.taskId, sessionId };
+  }
+
+  /**
+   * Roll back an adapter session by stopping it via the session manager.
+   * Used when a subsequent step in `start-task` fails after the adapter
+   * session was already started. Best-effort: errors are swallowed so the
+   * caller's error is not masked.
+   */
+  private async rollbackAdapterSession(taskId: string): Promise<void> {
+    if (this.sessionManager) {
+      try {
+        await this.sessionManager.stopSession(taskId);
+      } catch {
+        /* best-effort — don't mask the original error */
+      }
+    }
+  }
+
+  /**
+   * Remove a session row that was inserted but never referenced by any
+   * journal event (e.g. the state machine transition failed before
+   * appending an event). Best-effort: errors are swallowed.
+   */
+  private rollbackSessionRow(sessionId: string): void {
+    try {
+      this.sessionStore.delete(sessionId);
+    } catch {
+      /* best-effort — the row may be orphaned but won't cause issues */
+    }
   }
 
   /** stop-task: cancel a running task. */

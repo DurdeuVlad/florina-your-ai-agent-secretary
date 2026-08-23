@@ -209,9 +209,13 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     expect(types).toContain('ApprovalRequested');
     expect(types).toContain('AgentCompleted');
 
-    // The session manager should now track the active session.
-    expect(daemon.sessionManager$!.hasSession(task.id)).toBe(true);
-    expect(daemon.sessionManager$!.activeCount).toBe(1);
+    // The session manager tracked the session while the stream was active.
+    // With auto-cleanup (Bug 2 fix), the session is removed after the stream
+    // ends, so we verify the session was active by checking that events
+    // were received — which proves the SessionManager was piping events.
+    // The auto-cleanup should have removed the session by now.
+    await waitFor(() => !daemon.sessionManager$!.hasSession(task.id), 3000);
+    expect(daemon.sessionManager$!.hasSession(task.id)).toBe(false);
 
     // The attention aggregator should have created items from the stub's
     // ApprovalRequested / AgentCompleted / AgentFailed events. Verify via
@@ -232,9 +236,14 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     const tasks = new TaskRepository(db);
     const project = buildProject({ name: 'demo', repo: { path: '/repo/demo' } });
     projects.insert(project);
+    // Register a slow stub adapter so the session is still active when we
+    // call stop-task. The default stub (no delay) completes its stream
+    // immediately, which triggers auto-cleanup (Bug 2 fix) before we can
+    // test the stop path.
+    daemon.adapterRegistry$!.register('stub-slow', () => new StubAdapter(null, { delayMs: 5000 }));
     db.prepare(
       'INSERT INTO agents (id, name, provider, fidelity_tier, runtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('stub', 'Stub', 'stub', 'E', JSON.stringify({ kind: 'cli' }), new Date().toISOString());
+    ).run('stub-slow', 'Stub Slow', 'stub', 'E', JSON.stringify({ kind: 'cli' }), new Date().toISOString());
     const task = buildTask({ projectId: project.id, objective: 'Write tests' });
     tasks.insert(task);
 
@@ -242,7 +251,7 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     const startRes = await sendCommand(client, {
       kind: 'start-task',
       taskId: task.id,
-      agentId: 'stub',
+      agentId: 'stub-slow',
       sessionConfig: { workingDir: '/repo/demo' },
     });
     expect(startRes.ok).toBe(true);
@@ -428,6 +437,58 @@ describe('SessionManager (direct)', () => {
     snapshot.delete('task-1');
     // Internal state is unaffected.
     expect(manager.activeCount).toBe(1);
+    expect(manager.hasSession('task-1')).toBe(true);
+  });
+
+  it('auto-removes the session and disconnects the adapter when the stream ends naturally', async () => {
+    // Use a stub with no delay so the stream completes immediately.
+    const adapter = new StubAdapter(null, { delayMs: 0 });
+    const result = await manager.startSession('task-1', 'stub', adapter, {
+      taskId: 'task-1',
+      sessionId: 's1',
+      agentId: 'stub',
+      workingDir: '/repo',
+      objective: 'A',
+    });
+    expect(result.ok).toBe(true);
+    expect(manager.hasSession('task-1')).toBe(true);
+
+    // Wait for the background event piping to complete and auto-cleanup
+    // to run. The stub emits 13 events with no delay, so the stream ends
+    // almost immediately. We poll until the session is removed.
+    await waitFor(() => !manager.hasSession('task-1'), 3000);
+    expect(manager.activeCount).toBe(0);
+    expect(manager.hasSession('task-1')).toBe(false);
+    // The adapter should be disconnected by the auto-cleanup.
+    expect(adapter.connectionState).toBe('disconnected');
+  });
+
+  it('auto-cleanup allows starting a new session for the same task after completion', async () => {
+    // First session: stub with no delay, stream completes immediately.
+    const adapter1 = new StubAdapter(null, { delayMs: 0 });
+    const result1 = await manager.startSession('task-1', 'stub', adapter1, {
+      taskId: 'task-1',
+      sessionId: 's1',
+      agentId: 'stub',
+      workingDir: '/repo',
+      objective: 'A',
+    });
+    expect(result1.ok).toBe(true);
+
+    // Wait for auto-cleanup.
+    await waitFor(() => !manager.hasSession('task-1'), 3000);
+
+    // Second session for the same task should succeed because the first
+    // was auto-removed.
+    const adapter2 = new StubAdapter(null, { delayMs: 5000 });
+    const result2 = await manager.startSession('task-1', 'stub', adapter2, {
+      taskId: 'task-1',
+      sessionId: 's2',
+      agentId: 'stub',
+      workingDir: '/repo',
+      objective: 'A',
+    });
+    expect(result2.ok).toBe(true);
     expect(manager.hasSession('task-1')).toBe(true);
   });
 });

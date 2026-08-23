@@ -187,6 +187,13 @@ export class SessionManager {
    * This is fire-and-forget: the caller does not await it. The iteration
    * ends naturally when the adapter's stream completes (run finished) or
    * when the adapter is cancelled/disconnected (the generator returns).
+   *
+   * When the stream ends (either naturally or via error) and the session
+   * is still tracked, the session is auto-removed from the map and the
+   * adapter is disconnected. This prevents resource leaks: a completed
+   * run cleans up after itself without requiring an explicit `stop-task`.
+   * If `stopSession` was called concurrently, it has already removed the
+   * session from the map, so this cleanup is skipped.
    */
   private pipeEvents(info: SessionInfo): void {
     void (async () => {
@@ -201,8 +208,17 @@ export class SessionManager {
           this.bus.publish(event);
         }
       } catch {
-        // The adapter stream errored or was interrupted. The session is
-        // left in the map; a subsequent stop-task or stopAll will clean up.
+        // The adapter stream errored or was interrupted. Fall through to
+        // the auto-cleanup below so the session is not leaked.
+      }
+      // Auto-cleanup: if the session is still tracked (i.e. the stream
+      // ended naturally rather than via stopSession), remove it and
+      // disconnect the adapter. This is safe even if stopSession races
+      // with us — both paths are idempotent (delete is a no-op if already
+      // removed, and safeDisconnect swallows errors).
+      if (this.sessions.has(info.taskId)) {
+        this.sessions.delete(info.taskId);
+        await safeDisconnect(info.adapter);
       }
     })();
   }

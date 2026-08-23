@@ -24,6 +24,7 @@ export class SessionRepository extends BaseRepository {
   private readonly getByIdStmt: Database.Statement;
   private readonly listByTaskStmt: Database.Statement;
   private readonly updateStmt: Database.Statement;
+  private readonly deleteStmt: Database.Statement;
 
   constructor(db: Database.Database) {
     super(db);
@@ -42,6 +43,7 @@ export class SessionRepository extends BaseRepository {
         event_ids = @event_ids, deliverable_ids = @deliverable_ids, capsule_id = @capsule_id
        WHERE id = @id`,
     );
+    this.deleteStmt = this.prepare('DELETE FROM sessions WHERE id = ?');
   }
 
   insert(session: Session): void {
@@ -77,6 +79,18 @@ export class SessionRepository extends BaseRepository {
       deliverable_ids: this.toJson(session.deliverableIds),
       capsule_id: session.capsuleId,
     });
+  }
+
+  /**
+   * Delete a session row by id.
+   *
+   * This will fail if any rows in the `events` table still reference the
+   * session (FK constraint), so it must only be called when no journal
+   * events have been written for the session — e.g. during rollback after a
+   * failed `start-task` before the state machine transition appends events.
+   */
+  delete(id: EntityId): void {
+    this.deleteStmt.run(id);
   }
 
   private mapRow(row: SessionRow): Session {
