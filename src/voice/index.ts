@@ -6,3 +6,6 @@
 export * from './audio-types.js';
 export * from './realtime-message.js';
 export * from './realtime-bridge.js';
+export * from './whisper-backend.js';
+export * from './whisper-adapter.js';
+export * from './voice-pipeline.js';
