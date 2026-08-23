@@ -441,14 +441,23 @@ describe('DesktopApp', () => {
     expect(app.getState().metrics).toEqual(metrics);
     expect(transport.toRenderer.some((m) => m.channel === 'metrics:update')).toBe(true);
 
-    // approval/request, digest:update, voice:state are forwarded but not stored.
+    // approval:request and digest:update are forwarded but not stored.
     server.push({ type: 'approval:request', approvalId: 'a1' });
     server.push({ type: 'digest:update', summary: 'done' });
-    server.push({ type: 'voice:state', listening: true });
     await tick();
     expect(transport.toRenderer.some((m) => m.channel === 'approval:request')).toBe(true);
     expect(transport.toRenderer.some((m) => m.channel === 'digest:update')).toBe(true);
+
+    // voice:state is forwarded AND mirrored into renderer state.
+    server.push({ type: 'voice:state', listening: true, speaking: false, muted: false, mode: 'wake-word' });
+    await tick();
     expect(transport.toRenderer.some((m) => m.channel === 'voice:state')).toBe(true);
+    expect(app.getState().voiceState).toEqual({
+      listening: true,
+      speaking: false,
+      muted: false,
+      mode: 'wake-word',
+    });
 
     // Unknown push type is ignored.
     server.push({ type: 'unknown-type' });

@@ -22,7 +22,7 @@ import type { MetricsSnapshot } from '../daemon/metrics.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
-import type { RendererStateData, StateChangeCallback } from './renderer-state.js';
+import type { RendererStateData, StateChangeCallback, VoiceState } from './renderer-state.js';
 import type { WindowBackend, WindowOptions } from './window-backend.js';
 
 /** Options for constructing a {@link DesktopApp}. */
@@ -313,6 +313,13 @@ export class DesktopApp {
         break;
       }
       case 'voice:state': {
+        const voiceState: VoiceState = {
+          listening: Boolean(record['listening']),
+          speaking: Boolean(record['speaking']),
+          muted: Boolean(record['muted']),
+          mode: typeof record['mode'] === 'string' ? record['mode'] : undefined,
+        };
+        this.state.update({ voiceState });
         this.bridge.sendToRenderer('voice:state', record);
         break;
       }
