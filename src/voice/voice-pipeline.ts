@@ -96,9 +96,18 @@ export interface VoicePipelineOptions {
    * available again (default true).
    */
   readonly autoRecover?: boolean;
+  /**
+   * Debounce window in ms for automatic mode switches triggered by bridge
+   * state changes (default 50ms). Coalesces rapid connect/disconnect
+   * flapping so only the most recent state transition within the window
+   * takes effect, preventing the pipeline from bouncing between realtime
+   * and whisper on an unstable connection.
+   */
+  readonly modeSwitchDebounceMs?: number;
 }
 
 const DEFAULT_RECOVERY_INTERVAL_MS = 10_000;
+const DEFAULT_MODE_SWITCH_DEBOUNCE_MS = 50;
 
 /* ================================================================== *
  * VoicePipeline
@@ -119,9 +128,12 @@ export class VoicePipeline {
   private readonly recoveryIntervalMs: number;
   private readonly autoFailover: boolean;
   private readonly autoRecover: boolean;
+  private readonly modeSwitchDebounceMs: number;
 
   private mode: VoicePipelineMode = 'offline';
   private recoveryTimer: NodeJS.Timeout | null = null;
+  private modeSwitchTimer: NodeJS.Timeout | null = null;
+  private pendingMode: VoicePipelineMode | null = null;
   private unsubBridgeTranscript: (() => void) | null = null;
   private unsubBridgeState: (() => void) | null = null;
 
@@ -139,6 +151,8 @@ export class VoicePipeline {
       options?.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS;
     this.autoFailover = options?.autoFailover ?? true;
     this.autoRecover = options?.autoRecover ?? true;
+    this.modeSwitchDebounceMs =
+      options?.modeSwitchDebounceMs ?? DEFAULT_MODE_SWITCH_DEBOUNCE_MS;
   }
 
   /* ---------------------------------------------------------------- *
@@ -214,18 +228,22 @@ export class VoicePipeline {
 
   /**
    * Manually force the pipeline into whisper fallback mode (e.g. when the
-   * user opts for the local/offline privacy path). Stops the recovery timer.
+   * user opts for the local/offline privacy path). Stops the recovery timer
+   * and cancels any pending automatic mode switch.
    */
   switchToWhisper(): void {
+    this.cancelPendingModeSwitch();
     this.stopRecoveryTimer();
     this.setMode('whisper');
   }
 
   /**
    * Manually attempt to recover back to realtime mode. Starts the recovery
-   * probe if the bridge is not currently connected.
+   * probe if the bridge is not currently connected. Cancels any pending
+   * automatic mode switch so the explicit user action takes precedence.
    */
   attemptRecovery(): void {
+    this.cancelPendingModeSwitch();
     if (this.bridge.isConnected) {
       this.setMode('realtime');
       this.stopRecoveryTimer();
@@ -236,14 +254,16 @@ export class VoicePipeline {
 
   /**
    * Shut down the pipeline: unwires bridge callbacks, stops the recovery
-   * timer, and leaves the pipeline in `offline` mode. Does not disconnect the
-   * bridge or close the whisper adapter — the caller owns those lifecycles.
+   * timer, cancels any pending mode switch, and leaves the pipeline in
+   * `offline` mode. Does not disconnect the bridge or close the whisper
+   * adapter — the caller owns those lifecycles.
    */
   stop(): void {
     this.unsubBridgeTranscript?.();
     this.unsubBridgeState?.();
     this.unsubBridgeTranscript = null;
     this.unsubBridgeState = null;
+    this.cancelPendingModeSwitch();
     this.stopRecoveryTimer();
     this.setMode('offline');
   }
@@ -274,27 +294,89 @@ export class VoicePipeline {
   /**
    * React to a RealtimeBridge state transition: fail over to whisper on
    * disconnect / error, recover to realtime when reconnected.
+   *
+   * Mode transitions are driven by the `next` state parameter rather than a
+   * re-check of `bridge.isConnected`, which can be stale during rapid
+   * connect/disconnect cycles (the socket field may not have been updated
+   * yet when the state-change callback fires). A short debounce coalesces
+   * flapping transitions so only the most recent state within the window
+   * takes effect.
    */
   private handleBridgeStateChange(next: VoiceSessionState): void {
-    if (next === VoiceSessionState.Error || !this.bridge.isConnected) {
+    // Disconnected states: Error (fatal) or Connecting (mid-reconnect).
+    // Rely on `next` rather than `bridge.isConnected`, which may be stale.
+    const disconnected =
+      next === VoiceSessionState.Error ||
+      next === VoiceSessionState.Connecting;
+    if (disconnected) {
       // Realtime connection lost — fail over to whisper.
       if (this.autoFailover && this.mode === 'realtime') {
-        this.setMode('whisper');
-        if (this.autoRecover) {
-          this.startRecoveryTimer();
-        }
+        this.scheduleModeSwitch('whisper', () => {
+          if (this.autoRecover) {
+            this.startRecoveryTimer();
+          }
+        });
       }
       return;
     }
-    // Bridge is connected (Idle / Listening / etc.) — recover to realtime.
-    if (
-      this.autoRecover &&
-      this.mode === 'whisper' &&
-      this.bridge.isConnected
-    ) {
-      this.stopRecoveryTimer();
-      this.setMode('realtime');
+    // Connected states (Idle / Listening / Processing / Responding) —
+    // recover to realtime if we were in whisper fallback.
+    if (this.autoRecover && this.mode === 'whisper') {
+      this.scheduleModeSwitch('realtime', () => {
+        this.stopRecoveryTimer();
+      });
     }
+  }
+
+  /**
+   * Schedule an automatic mode switch on a short debounce timer. Only the
+   * most recently requested mode within the debounce window takes effect;
+   * earlier pending switches are cancelled so rapid connect/disconnect
+   * flapping does not bounce the pipeline between engines.
+   *
+   * The `onSwitch` callback runs after the mode is applied (e.g. to start or
+   * stop the recovery timer). If the current mode no longer makes the
+   * transition valid by the time the timer fires (e.g. the user manually
+   * switched modes), the switch is dropped.
+   */
+  private scheduleModeSwitch(
+    mode: VoicePipelineMode,
+    onSwitch: () => void,
+  ): void {
+    this.pendingMode = mode;
+    if (this.modeSwitchTimer !== null) {
+      clearTimeout(this.modeSwitchTimer);
+    }
+    this.modeSwitchTimer = setTimeout(() => {
+      this.modeSwitchTimer = null;
+      const target = this.pendingMode;
+      this.pendingMode = null;
+      if (target === null) {
+        return;
+      }
+      // Guard: drop the switch if the transition is no longer valid given
+      // the current mode (e.g. an explicit switchToWhisper happened in
+      // between).
+      if (target === 'whisper' && this.mode !== 'realtime') {
+        return;
+      }
+      if (target === 'realtime' && this.mode !== 'whisper') {
+        return;
+      }
+      this.setMode(target);
+      onSwitch();
+    }, this.modeSwitchDebounceMs);
+    // Don't keep the process alive solely for the debounce timer.
+    this.modeSwitchTimer.unref?.();
+  }
+
+  /** Cancel any pending debounced mode switch (e.g. on explicit user action). */
+  private cancelPendingModeSwitch(): void {
+    if (this.modeSwitchTimer !== null) {
+      clearTimeout(this.modeSwitchTimer);
+      this.modeSwitchTimer = null;
+    }
+    this.pendingMode = null;
   }
 
   /* ---------------------------------------------------------------- *

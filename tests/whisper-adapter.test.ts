@@ -161,6 +161,12 @@ class MockWhisperBackend implements WhisperBackend {
   readonly initCalls: { modelPath: string; options: WhisperCliOptions }[] = [];
   readonly transcribeCalls: Buffer[] = [];
   available = true;
+  /**
+   * Optional gate promise that `transcribe` awaits before resolving. Used by
+   * the concurrency test to keep the first call in-flight while a second is
+   * queued. Set to `null` (default) for immediate resolution.
+   */
+  transcribeGate: Promise<void> | null = null;
   nextResult: WhisperResult = {
     language: 'en',
     text: 'hello world',
@@ -187,6 +193,9 @@ class MockWhisperBackend implements WhisperBackend {
 
   async transcribe(audioData: Buffer): Promise<WhisperResult> {
     this.transcribeCalls.push(audioData);
+    if (this.transcribeGate !== null) {
+      await this.transcribeGate;
+    }
     if (this.transcribeError !== null) {
       throw this.transcribeError;
     }
@@ -494,6 +503,52 @@ describe('WhisperAdapter', () => {
     });
   });
 
+  describe('edge cases', () => {
+    it('serializes concurrent transcribe calls (second waits for first)', async () => {
+      await adapter.initialize('/models/base.bin');
+      // Gate the first call so it stays in-flight while the second is queued.
+      let resolveGate!: () => void;
+      backend.transcribeGate = new Promise<void>((resolve) => {
+        resolveGate = resolve;
+      });
+      const p1 = adapter.transcribe([makeChunk('AAAA')]);
+      const p2 = adapter.transcribe([makeChunk('BBBB')]);
+      // Only the first call should have reached the backend; the second is
+      // waiting in the serialization queue.
+      await vi.waitFor(() => expect(backend.transcribeCalls).toHaveLength(1));
+      // Allow the first call to complete; the second should then run.
+      resolveGate();
+      const [r1, r2] = await Promise.all([p1, p2]);
+      expect(backend.transcribeCalls).toHaveLength(2);
+      expect(r1.text).toBe('hello world');
+      expect(r2.text).toBe('hello world');
+    });
+
+    it('a failed transcribe does not block subsequent calls', async () => {
+      await adapter.initialize('/models/base.bin');
+      backend.transcribeError = new Error('transcribe failed');
+      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow(
+        'transcribe failed',
+      );
+      // The chain should have recovered — a second call must still work.
+      backend.transcribeError = null;
+      const result = await adapter.transcribe([makeChunk()]);
+      expect(result.text).toBe('hello world');
+      expect(backend.transcribeCalls).toHaveLength(2);
+    });
+
+    it('transcribe handles an empty audio buffer gracefully', async () => {
+      await adapter.initialize('/models/base.bin');
+      const result = await adapter.transcribe([]);
+      expect(result.text).toBe('');
+      expect(result.confidence).toBe(0);
+      expect(result.segments).toHaveLength(0);
+      expect(result.language).toBe('');
+      // The backend should not be invoked for an empty buffer.
+      expect(backend.transcribeCalls).toHaveLength(0);
+    });
+  });
+
   describe('confidence derivation', () => {
     it('segmentConfidence converts logprob to [0,1] probability', () => {
       const conf = segmentConfidence({
@@ -778,9 +833,10 @@ describe('VoicePipeline', () => {
     await pipeline.start();
     const modeChanges: string[] = [];
     pipeline.onModeChange((m) => modeChanges.push(m));
-    // Simulate an unexpected close (not intentional disconnect).
+    // Simulate an unexpected close (not intentional disconnect). The
+    // failover is debounced, so wait for the mode switch to settle.
     sockets[0].emitClose(1006, 'abnormal');
-    expect(pipeline.currentMode).toBe('whisper');
+    await vi.waitFor(() => expect(pipeline.currentMode).toBe('whisper'));
     expect(modeChanges).toContain('whisper');
   });
 
@@ -798,9 +854,9 @@ describe('VoicePipeline', () => {
   it('recovers back to realtime on reconnect', async () => {
     await connectBridge();
     await pipeline.start();
-    // Disconnect -> whisper.
+    // Disconnect -> whisper (debounced).
     sockets[0].emitClose(1006, 'abnormal');
-    expect(pipeline.currentMode).toBe('whisper');
+    await vi.waitFor(() => expect(pipeline.currentMode).toBe('whisper'));
     // Reconnect: the bridge schedules a reconnect internally; drive the new
     // socket open + session.created. The bridge's reconnect uses the same
     // factory, so sockets[1] is the new connection.
@@ -855,5 +911,57 @@ describe('VoicePipeline', () => {
     await whisperAdapter.initialize('/models/base.bin');
     const state = pipeline.getState();
     expect(state.whisperAvailable).toBe(true);
+  });
+
+  it('rapid switchToWhisper -> attemptRecovery is safe', async () => {
+    await connectBridge();
+    await pipeline.start();
+    // Rapid back-to-back manual mode switches must not throw or leave the
+    // pipeline in an inconsistent state.
+    expect(() => {
+      pipeline.switchToWhisper();
+      pipeline.attemptRecovery();
+      pipeline.switchToWhisper();
+      pipeline.attemptRecovery();
+    }).not.toThrow();
+    // Bridge is connected, so the last attemptRecovery recovers to realtime.
+    expect(pipeline.currentMode).toBe('realtime');
+  });
+
+  it('does not start the recovery probe when autoRecover is disabled', async () => {
+    pipeline = new VoicePipeline(bridge, whisperAdapter, {
+      autoRecover: false,
+      recoveryIntervalMs: 50,
+    });
+    await connectBridge();
+    await pipeline.start();
+    const modeChanges: string[] = [];
+    pipeline.onModeChange((m) => modeChanges.push(m));
+    // Disconnect — should fail over to whisper but NOT start a recovery timer.
+    sockets[0].emitClose(1006, 'abnormal');
+    await vi.waitFor(() => expect(pipeline.currentMode).toBe('whisper'));
+    // Wait well beyond the recovery interval; with autoRecover disabled the
+    // pipeline must not probe, so it stays in whisper even if the bridge
+    // reconnects on its own.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(pipeline.currentMode).toBe('whisper');
+    expect(modeChanges).not.toContain('realtime');
+  });
+
+  it('debounces rapid connect/disconnect flapping', async () => {
+    await connectBridge();
+    await pipeline.start();
+    // Rapid close -> reconnect-open -> close should be coalesced: only the
+    // most recent state transition within the debounce window wins.
+    sockets[0].emitClose(1006, 'abnormal');
+    // Immediately drive a reconnect (new socket) before the debounce fires.
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThanOrEqual(2));
+    sockets[1].emitOpen();
+    sockets[1].emitMessage({
+      type: 'session.created',
+      session: { id: 'sess-2' } as never,
+    });
+    // After the dust settles the pipeline should end in realtime (connected).
+    await vi.waitFor(() => expect(pipeline.currentMode).toBe('realtime'));
   });
 });

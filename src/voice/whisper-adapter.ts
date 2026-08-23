@@ -78,6 +78,18 @@ export interface WhisperAdapterOptions {
  * ================================================================== */
 
 /**
+ * Compression-ratio threshold above which a whisper.cpp segment is considered
+ * suspiciously repetitive.
+ *
+ * whisper.cpp reports a gzip-based compression ratio per segment; values near
+ * 1.0 are normal, while ratios above this threshold typically indicate the
+ * model is looping on repeated tokens — a known whisper.cpp failure mode.
+ * Segments exceeding it have their confidence penalised by the inverse ratio
+ * so callers can discount low-quality output.
+ */
+const COMPRESSION_RATIO_THRESHOLD = 3.0;
+
+/**
  * Derive a per-segment confidence in [0, 1] from whisper.cpp scoring fields.
  *
  * `avg_logprob` is the mean log-probability of decoded tokens (typically in
@@ -90,9 +102,11 @@ export function segmentConfidence(seg: WhisperSegment): number {
   const prob = Math.exp(logprob);
   const silenceDiscount = 1 - seg.no_speech_prob;
   // Penalise repetition: a compression ratio far from 1.0 indicates the
-  // model is looping. Anything above ~3.0 is suspicious in whisper.cpp.
+  // model is looping. Ratios above the threshold are suspicious in whisper.cpp.
   const compressionPenalty =
-    seg.compression_ratio > 3 ? 1 / seg.compression_ratio : 1;
+    seg.compression_ratio > COMPRESSION_RATIO_THRESHOLD
+      ? 1 / seg.compression_ratio
+      : 1;
   const score = prob * silenceDiscount * compressionPenalty;
   return Math.max(0, Math.min(1, score));
 }
@@ -151,6 +165,12 @@ export function concatAudioChunks(chunks: readonly AudioChunk[]): Buffer {
 export class WhisperAdapter {
   private readonly backend: WhisperBackend;
   private initialized = false;
+  /**
+   * Serializes concurrent `transcribe` calls. whisper.cpp processes one
+   * audio buffer at a time, so a second call must wait for the first to
+   * complete rather than invoking the backend re-entrantly.
+   */
+  private transcribeChain: Promise<void> = Promise.resolve();
 
   constructor(backend: WhisperBackend) {
     this.backend = backend;
@@ -187,13 +207,41 @@ export class WhisperAdapter {
    * Transcribe an array of {@link AudioChunk}s into a {@link TranscriptResult}.
    *
    * The chunks are concatenated into a single PCM buffer and handed to the
-   * backend. Throws if the adapter has not been initialized.
+   * backend. Throws if the adapter has not been initialized. Concurrent calls
+   * are serialized so the backend is never invoked re-entrantly — a second
+   * call waits for the first to complete. An empty audio buffer short-circuits
+   * to an empty, zero-confidence result without invoking the backend.
    */
   async transcribe(chunks: readonly AudioChunk[]): Promise<TranscriptResult> {
     if (!this.initialized) {
       throw new Error('WhisperAdapter not initialized — call initialize() first');
     }
     const audioData = concatAudioChunks(chunks);
+    if (audioData.length === 0) {
+      // No audio to transcribe — return an empty, zero-confidence result
+      // rather than invoking the backend with an empty buffer.
+      return { text: '', confidence: 0, segments: [], language: '' };
+    }
+    // Serialize concurrent calls: the whisper.cpp backend processes one
+    // audio buffer at a time, so a second call must wait for the first.
+    const next = this.transcribeChain.then(
+      () => this.runTranscribe(audioData),
+      () => this.runTranscribe(audioData),
+    );
+    // Keep the chain alive regardless of rejection so a failure doesn't
+    // block subsequent calls.
+    this.transcribeChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  /**
+   * Perform the actual backend transcription + confidence derivation for a
+   * single non-empty audio buffer. Called serially via {@link transcribe}.
+   */
+  private async runTranscribe(audioData: Buffer): Promise<TranscriptResult> {
     const result = await this.backend.transcribe(audioData);
     const segments: TranscriptSegment[] = result.segments.map((s) => ({
       id: s.id,
