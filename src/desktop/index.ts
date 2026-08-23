@@ -51,3 +51,20 @@ export type {
   WindowEventHandler,
   WindowOptions,
 } from './window-backend.js';
+
+export { InboxViewModel, KIND_METADATA, PRIORITY_METADATA } from './views/inbox-view.js';
+export {
+  renderInboxItem,
+  renderInboxGroup,
+  renderInboxList,
+  renderEmptyState,
+  renderFilterBar,
+} from './views/inbox-templates.js';
+export type {
+  AttentionItemView,
+  DisplayMetadata,
+  InboxViewData,
+  PriorityGroup,
+  RenderTree,
+  ViewFilter,
+} from './views/view-types.js';
