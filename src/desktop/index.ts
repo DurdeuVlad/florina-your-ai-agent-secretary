@@ -68,3 +68,19 @@ export type {
   RenderTree,
   ViewFilter,
 } from './views/view-types.js';
+
+export { ApprovalCardViewModel, CAPABILITY_LABELS, RISK_COLORS, RISK_LABELS } from './views/approval-card.js';
+export {
+  renderApprovalCard,
+  renderRiskBadge,
+  renderCapabilityDetails,
+  renderApprovalActions,
+  renderRiskFactors,
+} from './views/approval-templates.js';
+export type {
+  ApprovalAction,
+  ApprovalCardData,
+  ApprovalContext,
+  RiskAssessmentDisplay,
+  RiskColor,
+} from './views/approval-types.js';
