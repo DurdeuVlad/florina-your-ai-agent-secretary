@@ -1,7 +1,7 @@
 /**
  * Typed command API for the Secretary daemon (issue #19, DEC-002, DEC-026).
  *
- * Voice and CLI share the same typed command API — voice is never a parallel
+ * Voice and CLI share the same typed command API â€” voice is never a parallel
  * orchestration system (PRODUCT_DESIGN.md "Voice Experience"). Every surface
  * (CLI, desktop, voice, remote) calls the same {@link CommandApi.execute}
  * method with a typed {@link Command} and receives a typed {@link Response}.
@@ -22,24 +22,19 @@ import type { AdapterFidelityTier } from '../domain/enums.js';
 import { TaskState } from '../domain/enums.js';
 import type { TaskState as TaskStateType } from '../domain/enums.js';
 import type { Approval, Session, Task } from '../domain/types.js';
-import type {
-  AgentStartedEvent,
-  AgentStoppedEvent,
-  SupervisorEvent,
-} from '../domain/events.js';
+import type { AgentStartedEvent, AgentStoppedEvent, SupervisorEvent } from '../domain/events.js';
 import type { AttentionItem } from '../attention/attention-item.js';
-import type {
-  AttentionInbox,
-  AttentionInboxFilter,
-} from '../attention/attention-inbox.js';
+import type { AttentionInbox, AttentionInboxFilter } from '../attention/attention-inbox.js';
 import type { CompletionDigest } from '../attention/completion-digest.js';
 import type { CompletionDigestRepository } from '../storage/repositories/completion-digest.js';
 import type { EventBus } from './event-stream.js';
-import type {
-  TaskStateMachine,
-  TransitionContext,
-} from './task-lifecycle.js';
+import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { MetricsCollector, MetricsSnapshot } from './metrics.js';
+import type {
+  AttentionMetricsReport,
+  MetricsQueryOptions,
+  MetricsQueryService,
+} from '../attention/attention-metrics.js';
 import type { WorktreeManager } from './worktree.js';
 import { DirtyWorktreeError } from './worktree.js';
 import type { EventRepository } from '../storage/repositories/event.js';
@@ -165,6 +160,12 @@ export interface QueryMetricsCommand {
   readonly kind: 'query-metrics';
   /** Epoch-milliseconds lower bound (reserved for future time-filtering). */
   readonly since?: number;
+  /** Epoch-milliseconds upper bound (inclusive). */
+  readonly until?: number;
+  /** Restrict the attention-metrics report to a project. */
+  readonly projectId?: string;
+  /** Restrict the attention-metrics report to a single task. */
+  readonly taskId?: string;
 }
 
 /** Query a single task by id. */
@@ -197,6 +198,23 @@ export interface GetDigestCommand {
 }
 
 /**
+ * Create a pull request for a task's branch (issue #27).
+ *
+ * Invoked by the side-by-side digest & diff viewer's "Create PR" action. The
+ * daemon resolves the task's worktree/branch and initiates PR creation. The
+ * `title` and `body` are optional; when omitted the head commit message is
+ * used as the title.
+ */
+export interface CreatePrCommand {
+  readonly kind: 'create-pr';
+  readonly taskId: string;
+  /** Optional PR title (defaults to the head commit subject). */
+  readonly title?: string;
+  /** Optional PR body/description. */
+  readonly body?: string;
+}
+
+/**
  * The canonical discriminated union of all commands (DEC-026).
  *
  * The `kind` field is the discriminant; {@link CommandApi.execute} switches
@@ -215,7 +233,8 @@ export type Command =
   | ListTasksCommand
   | PruneWorktreeCommand
   | ShutdownCommand
-  | GetDigestCommand;
+  | GetDigestCommand
+  | CreatePrCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -232,6 +251,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'prune-worktree',
   'shutdown',
   'get-digest',
+  'create-pr',
 ] as const;
 
 /* ================================================================== *
@@ -271,6 +291,12 @@ export interface ItemMutationResponse {
 export interface MetricsResponse {
   readonly ok: boolean;
   readonly snapshot: MetricsSnapshot | null;
+  /**
+   * Attention Compression Ratio and supplemental metrics report (DEC-015,
+   * issue #18). Present only when a `metricsQueryService` is wired into the
+   * {@link CommandApiDeps}.
+   */
+  readonly attentionMetrics?: AttentionMetricsReport;
 }
 
 export interface TaskResponse {
@@ -300,6 +326,21 @@ export interface DigestResponse {
   readonly error?: string;
 }
 
+/**
+ * Response to a `create-pr` command (issue #27).
+ *
+ * On success, `branch` is the branch the PR targets and `headCommit` is the
+ * head SHA. `prUrl` is populated when the hosting provider returns a URL.
+ */
+export interface CreatePrResponse {
+  readonly ok: boolean;
+  readonly taskId: string;
+  readonly branch?: string;
+  readonly headCommit?: string;
+  readonly prUrl?: string;
+  readonly error?: string;
+}
+
 /** Generic error response for unknown / malformed commands. */
 export interface UnknownCommandResponse {
   readonly ok: false;
@@ -323,10 +364,11 @@ export type Response =
   | PruneResponse
   | ShutdownResponse
   | DigestResponse
+  | CreatePrResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
- * Dependency interfaces (structural — easy to mock in tests)
+ * Dependency interfaces (structural â€” easy to mock in tests)
  * ================================================================== */
 
 /**
@@ -401,6 +443,13 @@ export interface CommandApiDeps {
    * command queries it for the latest digest for a task (issue #37).
    */
   readonly completionDigestRepository?: CompletionDigestRepository;
+  /**
+   * Optional attention-metrics query service (DEC-015, issue #18). When
+   * present, `query-metrics` computes the ACR + supplemental metrics report
+   * for the requested time window / project / task and returns it as
+   * `attentionMetrics` on the {@link MetricsResponse}.
+   */
+  readonly metricsQueryService?: MetricsQueryService;
 }
 
 /* ================================================================== *
@@ -429,6 +478,7 @@ export class CommandApi {
   private readonly adapterRegistry?: AdapterRegistry;
   private readonly sessionManager?: SessionManager;
   private readonly completionDigestRepository?: CompletionDigestRepository;
+  private readonly metricsQueryService?: MetricsQueryService;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -447,6 +497,7 @@ export class CommandApi {
     this.adapterRegistry = deps.adapterRegistry;
     this.sessionManager = deps.sessionManager;
     this.completionDigestRepository = deps.completionDigestRepository;
+    this.metricsQueryService = deps.metricsQueryService;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -489,6 +540,8 @@ export class CommandApi {
         return this.handleShutdown(command);
       case 'get-digest':
         return this.handleGetDigest(command);
+      case 'create-pr':
+        return this.handleCreatePr(command);
       default:
         return {
           ok: false,
@@ -520,7 +573,12 @@ export class CommandApi {
 
     const task = this.taskStore.getById(cmd.taskId);
     if (task === null) {
-      return { ok: false, taskId: cmd.taskId, sessionId: '', error: `Task not found: ${cmd.taskId}` };
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        sessionId: '',
+        error: `Task not found: ${cmd.taskId}`,
+      };
     }
 
     // Determine the transition based on the current state.
@@ -602,7 +660,7 @@ export class CommandApi {
 
     // --- Persist the session row ---
     // Insert before transitioning so the events table FK
-    // (session_id → sessions.id) is satisfied when the state machine appends
+    // (session_id â†’ sessions.id) is satisfied when the state machine appends
     // the transition event to the journal (DEC-012).
     const session: Session = {
       id: sessionId,
@@ -656,12 +714,7 @@ export class CommandApi {
       if (currentState === TaskState.Created) {
         this.taskStateMachine.transition(cmd.taskId, TaskState.Created, TaskState.Delegated, ctx);
       } else {
-        this.taskStateMachine.transition(
-          cmd.taskId,
-          TaskState.Delegated,
-          TaskState.Running,
-          ctx,
-        );
+        this.taskStateMachine.transition(cmd.taskId, TaskState.Delegated, TaskState.Running, ctx);
       }
     } catch (err) {
       // Revert the task update to remove the phantom sessionId/agentId.
@@ -705,7 +758,7 @@ export class CommandApi {
       try {
         await this.sessionManager.stopSession(taskId);
       } catch {
-        /* best-effort — don't mask the original error */
+        /* best-effort â€” don't mask the original error */
       }
     }
   }
@@ -719,7 +772,7 @@ export class CommandApi {
     try {
       this.sessionStore.delete(sessionId);
     } catch {
-      /* best-effort — the row may be orphaned but won't cause issues */
+      /* best-effort â€” the row may be orphaned but won't cause issues */
     }
   }
 
@@ -856,9 +909,7 @@ export class CommandApi {
   }
 
   /** ack-item: acknowledge an attention item. */
-  private async handleAcknowledgeItem(
-    cmd: AcknowledgeItemCommand,
-  ): Promise<ItemMutationResponse> {
+  private async handleAcknowledgeItem(cmd: AcknowledgeItemCommand): Promise<ItemMutationResponse> {
     if (!cmd.itemId) {
       return { ok: false, itemId: '', error: 'itemId is required' };
     }
@@ -870,9 +921,7 @@ export class CommandApi {
   }
 
   /** resolve-item: resolve an attention item. */
-  private async handleResolveItem(
-    cmd: ResolveItemCommand,
-  ): Promise<ItemMutationResponse> {
+  private async handleResolveItem(cmd: ResolveItemCommand): Promise<ItemMutationResponse> {
     if (!cmd.itemId) {
       return { ok: false, itemId: '', error: 'itemId is required' };
     }
@@ -884,9 +933,7 @@ export class CommandApi {
   }
 
   /** escalate-item: escalate an attention item to Critical priority. */
-  private async handleEscalateItem(
-    cmd: EscalateItemCommand,
-  ): Promise<ItemMutationResponse> {
+  private async handleEscalateItem(cmd: EscalateItemCommand): Promise<ItemMutationResponse> {
     if (!cmd.itemId) {
       return { ok: false, itemId: '', error: 'itemId is required' };
     }
@@ -899,10 +946,22 @@ export class CommandApi {
 
   /** query-metrics: return the current metrics snapshot. */
   private async handleQueryMetrics(cmd: QueryMetricsCommand): Promise<MetricsResponse> {
-    // The `since` parameter is reserved for future time-filtered queries.
-    // The current MetricsCollector returns a point-in-time snapshot.
-    void cmd.since;
     const snapshot = this.metricsCollector.snapshot();
+
+    // When a metrics query service is wired, also compute the ACR +
+    // supplemental metrics report (DEC-015) for the requested window /
+    // project / task. All computation is deterministic and LLM-free.
+    if (this.metricsQueryService !== undefined) {
+      const opts: MetricsQueryOptions = {
+        ...(cmd.since !== undefined ? { since: new Date(cmd.since).toISOString() } : {}),
+        ...(cmd.until !== undefined ? { until: new Date(cmd.until).toISOString() } : {}),
+        ...(cmd.projectId !== undefined ? { projectId: cmd.projectId } : {}),
+        ...(cmd.taskId !== undefined ? { taskId: cmd.taskId } : {}),
+      };
+      const attentionMetrics = this.metricsQueryService.query(opts);
+      return { ok: true, snapshot, attentionMetrics };
+    }
+
     return { ok: true, snapshot };
   }
 
@@ -996,13 +1055,54 @@ export class CommandApi {
       };
     }
   }
+
+  /**
+   * create-pr: initiate pull-request creation for a task's branch (issue #27).
+   *
+   * Validates the task exists and has a worktree, resolves the branch and head
+   * commit, and returns them so the caller (renderer/CLI) can complete PR
+   * creation with the hosting provider. The actual push/PR-creation step is
+   * delegated to an authorized downstream integration; this handler does not
+   * perform network actions or widen permissions (DEC-011).
+   */
+  private async handleCreatePr(cmd: CreatePrCommand): Promise<CreatePrResponse> {
+    if (!cmd.taskId) {
+      return { ok: false, taskId: '', error: 'taskId is required' };
+    }
+    const task = this.taskStore.getById(cmd.taskId);
+    if (task === null) {
+      return { ok: false, taskId: cmd.taskId, error: `Task not found: ${cmd.taskId}` };
+    }
+    if (!task.worktreePath) {
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        error: `Task has no worktree: ${cmd.taskId}`,
+      };
+    }
+    try {
+      const status = this.worktreeManager.worktreeStatus(task.worktreePath);
+      return {
+        ok: true,
+        taskId: cmd.taskId,
+        branch: status.branch,
+        headCommit: status.baseCommit,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        error: `Failed to resolve worktree status: ${errorMessage(err)}`,
+      };
+    }
+  }
 }
 
 /* ================================================================== *
  * Internal helpers
  * ================================================================== */
 
-/** Terminal task states — no further transitions permitted. */
+/** Terminal task states â€” no further transitions permitted. */
 const TERMINAL_STATES: ReadonlySet<TaskStateType> = new Set<TaskStateType>([
   TaskState.Accepted,
   TaskState.Failed,
@@ -1090,7 +1190,9 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                         ? ShutdownResponse
                         : C extends GetDigestCommand
                           ? DigestResponse
-                          : Response;
+                          : C extends CreatePrCommand
+                            ? CreatePrResponse
+                            : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the

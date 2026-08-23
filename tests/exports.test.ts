@@ -59,6 +59,12 @@ describe('public API exports', () => {
     expect(typeof api.AdaptivePolicy).toBe('function');
   });
 
+  it('exports MetricsQueryService for ACR + supplemental metrics (DEC-015)', () => {
+    expect(typeof api.MetricsQueryService).toBe('function');
+    expect(typeof api.MetricsRecorder).toBe('function');
+    expect(typeof api.computeAttentionMetrics).toBe('function');
+  });
+
   it('exports StorageDatabase from the storage module', () => {
     expect(typeof api.StorageDatabase).toBe('function');
   });

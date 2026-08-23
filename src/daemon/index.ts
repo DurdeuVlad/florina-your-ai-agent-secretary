@@ -87,11 +87,22 @@ export type {
 
 /* Runtime metrics instrumentation (DEC-015, issue #18) */
 export { MetricsCollector, DEFAULT_HISTOGRAM_BUCKETS } from './metrics.js';
+export type { MetricsCollectorOptions, MetricsSnapshot, HistogramSummary } from './metrics.js';
+
+/* Attention Compression Ratio + supplemental metrics (DEC-015, issue #18) */
+export {
+  computeAttentionMetrics,
+  MetricsQueryService,
+  MetricsRecorder,
+} from '../attention/attention-metrics.js';
 export type {
-  MetricsCollectorOptions,
-  MetricsSnapshot,
-  HistogramSummary,
-} from './metrics.js';
+  AttentionMetricsInput,
+  AttentionMetricsReport,
+  AttentionItemResolution,
+  ApprovalExecutionPair,
+  MetricsQueryOptions,
+  MetricsQuerySources,
+} from '../attention/attention-metrics.js';
 
 /* Typed command API shared by CLI and voice (issue #19, DEC-002, DEC-026) */
 export { CommandApi, executeCommand, COMMAND_KINDS } from './command-api.js';
@@ -134,8 +145,4 @@ export type {
 
 /* Adapter session management (issue #35, DEC-005) */
 export { SessionManager } from './session-manager.js';
-export type {
-  SessionInfo,
-  StartSessionResult,
-  StopSessionResult,
-} from './session-manager.js';
+export type { SessionInfo, StartSessionResult, StopSessionResult } from './session-manager.js';

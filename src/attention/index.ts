@@ -14,3 +14,4 @@ export * from './completion-digest.js';
 export * from './digest-builder.js';
 export * from './attention-tuning.js';
 export * from './adaptive-policy.js';
+export * from './attention-metrics.js';
