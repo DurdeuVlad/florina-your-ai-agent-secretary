@@ -3,11 +3,13 @@
  *
  * Covers the subset of the protocol used by the {@link RealtimeBridge}:
  * - Client -> Server: `session.update`, `input_audio_buffer.append`,
- *   `input_audio_buffer.commit`, `response.create`.
+ *   `input_audio_buffer.commit`, `response.create`, `response.cancel`,
+ *   `conversation.item.create` (function_call_output).
  * - Server -> Client: `session.created`, `session.updated`,
  *   `input_audio_buffer.committed`, `response.output_audio.delta`,
  *   `response.output_audio.done`, `response.text.delta`,
- *   `response.text.done`, `error`.
+ *   `response.text.done`, `conversation.item.created`,
+ *   `conversation.item.deleted`, `error`.
  *
  * Also includes input-audio transcription events, which the bridge maps to
  * {@link TranscriptEvent}s. These are optional but part of the same protocol.
@@ -66,6 +68,61 @@ export interface RealtimeSession extends RealtimeSessionConfig {
 }
 
 /* ================================================================== *
+ * Conversation items (tool calls)
+ * ================================================================== */
+
+/**
+ * A function call item produced by the Realtime model. The server delivers
+ * these via `conversation.item.created` so the client can execute the named
+ * tool and return its output with a `conversation.item.create` carrying a
+ * {@link RealtimeFunctionCallOutput} (DEC-021).
+ */
+export interface RealtimeFunctionCall {
+  readonly type: 'function_call';
+  /** Server-assigned item id (optional on the outbound side). */
+  readonly id?: string;
+  /** Correlation id linking the call to its output. */
+  readonly call_id: string;
+  /** Name of the tool to invoke. */
+  readonly name: string;
+  /** JSON-encoded arguments string. */
+  readonly arguments: string;
+}
+
+/**
+ * The output of a function call, sent back to the server via
+ * `conversation.item.create` so the model can continue the conversation.
+ */
+export interface RealtimeFunctionCallOutput {
+  readonly type: 'function_call_output';
+  /** Correlation id matching the originating {@link RealtimeFunctionCall}. */
+  readonly call_id: string;
+  /** Tool result as a JSON-encoded string. */
+  readonly output: string;
+}
+
+/**
+ * A conversation item. The bridge is primarily interested in `function_call`
+ * items (to dispatch tool calls) and `function_call_output` items (to send
+ * results back), but the union is left open for message items.
+ */
+export type RealtimeConversationItem =
+  | RealtimeFunctionCall
+  | RealtimeFunctionCallOutput
+  | { readonly type: 'message'; readonly role: string; readonly content: readonly unknown[] }
+  | { readonly type: string; readonly [key: string]: unknown };
+
+/**
+ * Type guard narrowing a {@link RealtimeConversationItem} to a
+ * {@link RealtimeFunctionCall}.
+ */
+export function isFunctionCallItem(
+  item: RealtimeConversationItem,
+): item is RealtimeFunctionCall {
+  return item.type === 'function_call';
+}
+
+/* ================================================================== *
  * Client -> Server messages
  * ================================================================== */
 
@@ -96,6 +153,23 @@ export interface ResponseCreateMessage {
   };
 }
 
+/** Cancel an in-progress response (e.g. when the user interrupts the AI). */
+export interface ResponseCancelMessage {
+  readonly type: 'response.cancel';
+  /** Optional response id; if omitted the currently-active response is cancelled. */
+  readonly response_id?: string;
+}
+
+/**
+ * Create a new conversation item. The bridge uses this to send a
+ * {@link RealtimeFunctionCallOutput} back to the server after executing a
+ * tool call (DEC-021).
+ */
+export interface ConversationItemCreateMessage {
+  readonly type: 'conversation.item.create';
+  readonly item: RealtimeFunctionCallOutput;
+}
+
 /**
  * Discriminated union of all client -> server messages the bridge sends.
  */
@@ -103,7 +177,9 @@ export type ClientMessage =
   | SessionUpdateMessage
   | InputAudioBufferAppendMessage
   | InputAudioBufferCommitMessage
-  | ResponseCreateMessage;
+  | ResponseCreateMessage
+  | ResponseCancelMessage
+  | ConversationItemCreateMessage;
 
 /** Ordered list of valid client message `type` discriminants. */
 export const CLIENT_MESSAGE_TYPES: readonly string[] = [
@@ -111,6 +187,8 @@ export const CLIENT_MESSAGE_TYPES: readonly string[] = [
   'input_audio_buffer.append',
   'input_audio_buffer.commit',
   'response.create',
+  'response.cancel',
+  'conversation.item.create',
 ] as const;
 
 /* ================================================================== *
@@ -184,6 +262,18 @@ export interface InputAudioTranscriptionCompletedMessage {
   readonly item_id?: string;
 }
 
+/** A conversation item was created (e.g. a function_call from the model). */
+export interface ConversationItemCreatedMessage {
+  readonly type: 'conversation.item.created';
+  readonly item: RealtimeConversationItem;
+}
+
+/** A conversation item was deleted. */
+export interface ConversationItemDeletedMessage {
+  readonly type: 'conversation.item.deleted';
+  readonly item_id: string;
+}
+
 /** A server-side error. */
 export interface ErrorMessage {
   readonly type: 'error';
@@ -208,6 +298,8 @@ export type ServerMessage =
   | ResponseTextDoneMessage
   | InputAudioTranscriptionDeltaMessage
   | InputAudioTranscriptionCompletedMessage
+  | ConversationItemCreatedMessage
+  | ConversationItemDeletedMessage
   | ErrorMessage;
 
 /** Ordered list of valid server message `type` discriminants. */
@@ -221,6 +313,8 @@ export const SERVER_MESSAGE_TYPES: readonly string[] = [
   'response.text.done',
   'conversation.item.input_audio_transcription.delta',
   'conversation.item.input_audio_transcription.completed',
+  'conversation.item.created',
+  'conversation.item.deleted',
   'error',
 ] as const;
 

@@ -116,6 +116,21 @@ export interface ResponseEvent {
   readonly audio?: AudioChunk;
 }
 
+/**
+ * A tool call requested by the Realtime model. The bridge emits this when it
+ * receives a `function_call` conversation item so the host can execute the
+ * named tool and return the result via
+ * {@link RealtimeBridge.sendToolCallOutput} (DEC-021).
+ */
+export interface ToolCallEvent {
+  /** Correlation id linking the call to its output. */
+  readonly callId: string;
+  /** Name of the tool to invoke. */
+  readonly name: string;
+  /** JSON-encoded arguments string. */
+  readonly arguments: string;
+}
+
 /** A voice pipeline error. */
 export interface VoiceErrorEvent {
   readonly message: string;

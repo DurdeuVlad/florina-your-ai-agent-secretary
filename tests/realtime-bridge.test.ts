@@ -634,4 +634,196 @@ describe('RealtimeBridge', () => {
       vi.useRealTimers();
     });
   });
+
+  /* ---------------------------------------------------------------- *
+   * Tool call protocol
+   * ---------------------------------------------------------------- */
+
+  describe('tool call protocol', () => {
+    async function connect(): Promise<MockSocket> {
+      const p = bridge.connect('sk-test');
+      sockets[0].emitOpen();
+      await p;
+      sockets[0].emitMessage({ type: 'session.created', session: { id: 's1' } });
+      return sockets[0];
+    }
+
+    it('fires onToolCall when a function_call item is created', async () => {
+      const socket = await connect();
+      const calls: { callId: string; name: string; arguments: string }[] = [];
+      bridge.onToolCall((e) =>
+        calls.push({ callId: e.callId, name: e.name, arguments: e.arguments }),
+      );
+
+      socket.emitMessage({
+        type: 'conversation.item.created',
+        item: {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'start_task',
+          arguments: '{"title":"fix bug"}',
+        },
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual({
+        callId: 'call_1',
+        name: 'start_task',
+        arguments: '{"title":"fix bug"}',
+      });
+    });
+
+    it('does not fire onToolCall for non-function_call items', async () => {
+      const socket = await connect();
+      const calls: string[] = [];
+      bridge.onToolCall((e) => calls.push(e.name));
+
+      socket.emitMessage({
+        type: 'conversation.item.created',
+        item: { type: 'message', role: 'assistant', content: [] },
+      });
+
+      expect(calls).toHaveLength(0);
+    });
+
+    it('sendToolCallOutput sends conversation.item.create with function_call_output', async () => {
+      const socket = await connect();
+      bridge.sendToolCallOutput('call_1', '{"ok":true}');
+
+      const creates = allSent(socket).filter((m) => m.type === 'conversation.item.create');
+      expect(creates).toHaveLength(1);
+      if (creates[0]?.type === 'conversation.item.create') {
+        expect(creates[0].item.type).toBe('function_call_output');
+        expect(creates[0].item.call_id).toBe('call_1');
+        expect(creates[0].item.output).toBe('{"ok":true}');
+      }
+    });
+
+    it('unsubscribes onToolCall via the returned function', async () => {
+      const socket = await connect();
+      const calls: string[] = [];
+      const off = bridge.onToolCall((e) => calls.push(e.name));
+
+      socket.emitMessage({
+        type: 'conversation.item.created',
+        item: { type: 'function_call', call_id: 'c1', name: 'first', arguments: '{}' },
+      });
+      off();
+      socket.emitMessage({
+        type: 'conversation.item.created',
+        item: { type: 'function_call', call_id: 'c2', name: 'second', arguments: '{}' },
+      });
+
+      expect(calls).toEqual(['first']);
+    });
+
+    it('ignores conversation.item.deleted', async () => {
+      const socket = await connect();
+      const before = bridge.currentState;
+      socket.emitMessage({ type: 'conversation.item.deleted', item_id: 'item_1' });
+      expect(bridge.currentState).toBe(before);
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Session id tracking
+   * ---------------------------------------------------------------- */
+
+  describe('session id tracking', () => {
+    it('tracks the session id from session.created', async () => {
+      const p = bridge.connect('sk-test');
+      sockets[0].emitOpen();
+      await p;
+      expect(bridge.sessionId).toBeNull();
+      sockets[0].emitMessage({ type: 'session.created', session: { id: 'sess-abc' } });
+      expect(bridge.sessionId).toBe('sess-abc');
+    });
+
+    it('updates the session id on session.updated', async () => {
+      const p = bridge.connect('sk-test');
+      sockets[0].emitOpen();
+      await p;
+      sockets[0].emitMessage({ type: 'session.created', session: { id: 's1' } });
+      sockets[0].emitMessage({ type: 'session.updated', session: { id: 's2' } });
+      expect(bridge.sessionId).toBe('s2');
+    });
+
+    it('clears the session id on disconnect', async () => {
+      const p = bridge.connect('sk-test');
+      sockets[0].emitOpen();
+      await p;
+      sockets[0].emitMessage({ type: 'session.created', session: { id: 's1' } });
+      expect(bridge.sessionId).toBe('s1');
+
+      const d = bridge.disconnect();
+      sockets[0].emitClose();
+      await d;
+      expect(bridge.sessionId).toBeNull();
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Interruption handling
+   * ---------------------------------------------------------------- */
+
+  describe('interrupt', () => {
+    async function connect(): Promise<MockSocket> {
+      const p = bridge.connect('sk-test');
+      sockets[0].emitOpen();
+      await p;
+      sockets[0].emitMessage({ type: 'session.created', session: { id: 's1' } });
+      return sockets[0];
+    }
+
+    it('sends response.cancel and returns to Idle from Responding', async () => {
+      const socket = await connect();
+      bridge.startListening();
+      bridge.stopListening(); // -> Processing
+      socket.emitMessage({ type: 'response.text.delta', delta: 'x' });
+      expect(bridge.currentState).toBe(VoiceSessionState.Responding);
+
+      bridge.interrupt();
+
+      const types = allSent(socket).map((m) => m.type);
+      expect(types).toContain('response.cancel');
+      expect(bridge.currentState).toBe(VoiceSessionState.Idle);
+      expect(audio.playbackStopped).toBe(true);
+    });
+
+    it('returns to Idle from Processing on interrupt', async () => {
+      const socket = await connect();
+      bridge.startListening();
+      bridge.stopListening(); // -> Processing
+      expect(bridge.currentState).toBe(VoiceSessionState.Processing);
+
+      bridge.interrupt();
+
+      expect(allSent(socket).some((m) => m.type === 'response.cancel')).toBe(true);
+      expect(bridge.currentState).toBe(VoiceSessionState.Idle);
+    });
+
+    it('is a no-op on state when already Idle', async () => {
+      const socket = await connect();
+      bridge.interrupt();
+      expect(bridge.currentState).toBe(VoiceSessionState.Idle);
+      expect(allSent(socket).some((m) => m.type === 'response.cancel')).toBe(true);
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Duplicate listener guard
+   * ---------------------------------------------------------------- */
+
+  describe('duplicate listener guard', () => {
+    it('sends session.update only once on connect', async () => {
+      const promise = bridge.connect('sk-test', {
+        instructions: 'You are the Secretary',
+      });
+      sockets[0].emitOpen();
+      await promise;
+
+      const updates = allSent(sockets[0]).filter((m) => m.type === 'session.update');
+      expect(updates).toHaveLength(1);
+    });
+  });
 });

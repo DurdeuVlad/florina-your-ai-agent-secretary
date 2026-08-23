@@ -26,6 +26,7 @@ import type {
   AudioChunk,
   AudioTransport,
   ResponseEvent,
+  ToolCallEvent,
   TranscriptEvent,
   VoiceErrorEvent,
   VoiceSessionState,
@@ -41,6 +42,7 @@ import type {
 import {
   decodeServerMessage,
   encodeClientMessage,
+  isFunctionCallItem,
 } from './realtime-message.js';
 
 /* ================================================================== *
@@ -144,6 +146,7 @@ export type TranscriptCallback = (event: TranscriptEvent) => void;
 export type ResponseCallback = (event: ResponseEvent) => void;
 export type StateChangeCallback = (event: VoiceStateChangeEvent) => void;
 export type ErrorCallback = (event: VoiceErrorEvent) => void;
+export type ToolCallCallback = (event: ToolCallEvent) => void;
 
 /* ================================================================== *
  * RealtimeBridge
@@ -164,6 +167,8 @@ export class RealtimeBridge {
 
   private socket: RealtimeSocket | null = null;
   private state: VoiceSessionState = State.Idle;
+  /** Session id assigned by the server (from session.created/updated). */
+  private currentSessionId: string | null = null;
 
   /** Stored connect args so reconnection can re-establish the session. */
   private apiKey = '';
@@ -191,6 +196,7 @@ export class RealtimeBridge {
   private responseCallbacks: ResponseCallback[] = [];
   private stateChangeCallbacks: StateChangeCallback[] = [];
   private errorCallbacks: ErrorCallback[] = [];
+  private toolCallCallbacks: ToolCallCallback[] = [];
 
   constructor(audioTransport: AudioTransport, socketFactory: SocketFactory) {
     this.audioTransport = audioTransport;
@@ -219,6 +225,11 @@ export class RealtimeBridge {
   /** Whether a WebSocket connection is currently open. */
   get isConnected(): boolean {
     return this.socket !== null && this.socket.readyState === this.socket.OPEN;
+  }
+
+  /** The server-assigned session id, or `null` until `session.created` arrives. */
+  get sessionId(): string | null {
+    return this.currentSessionId;
   }
 
   /**
@@ -250,7 +261,8 @@ export class RealtimeBridge {
       const onOpen = (): void => {
         socket.off('open', onOpen);
         socket.off('error', onConnectError);
-        this.sendSessionUpdate();
+        // The persistent boundOpen handler already sent session.update; just
+        // resolve the connect promise.
         resolve();
       };
       const onConnectError = (err: unknown): void => {
@@ -307,6 +319,19 @@ export class RealtimeBridge {
     }
   }
 
+  /**
+   * Interrupt an in-progress AI response. Sends `response.cancel` to the
+   * server, stops audio playback, and returns to `Idle`. No-op if no response
+   * is in progress.
+   */
+  interrupt(): void {
+    this.sendMessage({ type: 'response.cancel' });
+    this.audioTransport.stopPlayback();
+    if (this.state === State.Responding || this.state === State.Processing) {
+      this.setState(State.Idle);
+    }
+  }
+
   /** Register a callback for transcription events. Returns an unsubscribe fn. */
   onTranscript(callback: TranscriptCallback): () => void {
     this.transcriptCallbacks.push(callback);
@@ -332,6 +357,17 @@ export class RealtimeBridge {
   }
 
   /**
+   * Register a callback for tool call events. When the Realtime model emits a
+   * `function_call` conversation item the bridge fires this callback so the
+   * host can execute the tool and return the result via
+   * {@link RealtimeBridge.sendToolCallOutput}. Returns an unsubscribe fn.
+   */
+  onToolCall(callback: ToolCallCallback): () => void {
+    this.toolCallCallbacks.push(callback);
+    return () => this.removeListener(this.toolCallCallbacks, callback);
+  }
+
+  /**
    * Close the WebSocket connection and release audio resources.
    *
    * Suppresses automatic reconnection. Resolves once the socket is closed.
@@ -339,6 +375,7 @@ export class RealtimeBridge {
   disconnect(): Promise<void> {
     this.intentionalClose = true;
     this.listening = false;
+    this.currentSessionId = null;
     this.audioTransport.stopCapture();
     this.audioTransport.stopPlayback();
     const socket = this.socket;
@@ -366,6 +403,19 @@ export class RealtimeBridge {
     });
   }
 
+  /**
+   * Send a function call output back to the server so the Realtime model can
+   * continue the conversation after a tool call. The `callId` must match the
+   * `call_id` from the originating {@link ToolCallEvent}; `output` should be
+   * the tool result as a JSON-encoded string (DEC-021).
+   */
+  sendToolCallOutput(callId: string, output: string): void {
+    this.sendMessage({
+      type: 'conversation.item.create',
+      item: { type: 'function_call_output', call_id: callId, output },
+    });
+  }
+
   /* ---------------------------------------------------------------- *
    * Socket event handlers
    * ---------------------------------------------------------------- */
@@ -389,6 +439,7 @@ export class RealtimeBridge {
     const code = (args[0] as number) ?? 1000;
     const reason = (args[1] as string) ?? '';
     this.socket = null;
+    this.currentSessionId = null;
     this.listening = false;
     this.audioTransport.stopCapture();
     if (this.intentionalClose) {
@@ -418,6 +469,8 @@ export class RealtimeBridge {
     switch (msg.type) {
       case 'session.created':
       case 'session.updated':
+        // Track the server-assigned session id.
+        this.currentSessionId = msg.session.id;
         // Session is configured — ready to listen.
         if (this.state === State.Connecting) {
           this.setState(State.Idle);
@@ -426,6 +479,23 @@ export class RealtimeBridge {
 
       case 'input_audio_buffer.committed':
         // Audio acknowledged; remain in Processing until response arrives.
+        break;
+
+      case 'conversation.item.created': {
+        // A function_call item means the model wants a tool executed.
+        if (isFunctionCallItem(msg.item)) {
+          const item = msg.item;
+          this.emitToolCall({
+            callId: item.call_id,
+            name: item.name,
+            arguments: item.arguments,
+          });
+        }
+        break;
+      }
+
+      case 'conversation.item.deleted':
+        // Item removed from the conversation history — nothing to do.
         break;
 
       case 'conversation.item.input_audio_transcription.delta':
@@ -611,6 +681,12 @@ export class RealtimeBridge {
   private emitError(message: string, code?: string): void {
     const event: VoiceErrorEvent = { message, code };
     for (const cb of this.errorCallbacks) {
+      cb(event);
+    }
+  }
+
+  private emitToolCall(event: ToolCallEvent): void {
+    for (const cb of this.toolCallCallbacks) {
       cb(event);
     }
   }
