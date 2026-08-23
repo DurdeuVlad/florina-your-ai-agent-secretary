@@ -6,8 +6,8 @@ import { validateEvent } from '../src/domain/events.js';
 import { CapabilityType } from '../src/domain/capabilities.js';
 
 import {
-  ClaudeAdapter,
-  CLAUDE_ADAPTER_ID,
+  ClaudePtyAdapter,
+  CLAUDE_PTY_ADAPTER_ID,
   type ClaudeAdapterOptions,
   type PtyProcess,
   type PtySpawner,
@@ -108,7 +108,7 @@ function sampleSessionConfig(): SessionConfig {
   return {
     taskId: 'task-claude-1',
     sessionId: 'sess-claude-1',
-    agentId: 'claude-code',
+    agentId: 'claude-code-pty',
     workingDir: '/repo/claude',
     objective: 'Refactor the auth module',
     model: 'claude-sonnet-4',
@@ -120,8 +120,8 @@ function sampleMapperCtx(): ClaudeMapperContext {
   return {
     taskId: 'task-claude-1',
     sessionId: 'sess-claude-1',
-    agentId: 'claude-code',
-    adapterFidelityTier: AdapterFidelityTier.B,
+    agentId: 'claude-code-pty',
+    adapterFidelityTier: AdapterFidelityTier.E,
     objective: 'Refactor the auth module',
     workingDir: '/repo/claude',
   };
@@ -222,7 +222,7 @@ describe('Claude PTY mapper', () => {
       if (event.type === 'ToolStarted') {
         expect(event.toolName).toBe('Bash');
         expect(event.args).toEqual({ raw: 'npm test' });
-        expect(event.adapterFidelityTier).toBe('B');
+        expect(event.adapterFidelityTier).toBe('E');
       }
     });
   });
@@ -270,7 +270,7 @@ describe('Claude PTY mapper', () => {
       if (event.type === 'ApprovalRequested') {
         expect(event.capability).toBe(CapabilityType.Shell);
         expect(event.task).toBe('Refactor the auth module');
-        expect(event.agent).toBe('claude-code');
+        expect(event.agent).toBe('claude-code-pty');
         expect(event.workingDir).toBe('/repo/claude');
         // Shell capability is not downgraded below critical by default.
         expect(event.riskLevel).toBe('critical');
@@ -372,18 +372,18 @@ describe('Claude PTY mapper', () => {
 /* ------------------------------------------------------------------ *
  * 2. ClaudeAdapter unit tests (mock PTY)
  * ------------------------------------------------------------------ */
-describe('ClaudeAdapter (mock PTY)', () => {
-  function makeAdapter(spawner: MockPtySpawner): ClaudeAdapter {
+describe('ClaudePtyAdapter (mock PTY, Tier E)', () => {
+  function makeAdapter(spawner: MockPtySpawner): ClaudePtyAdapter {
     const options: ClaudeAdapterOptions = { spawner };
-    return new ClaudeAdapter(null, options);
+    return new ClaudePtyAdapter(null, options);
   }
 
-  it('declares fidelity tier B', () => {
+  it('declares fidelity tier E', () => {
     const spawner = new MockPtySpawner();
     const adapter = makeAdapter(spawner);
-    expect(adapter.fidelityTier).toBe(AdapterFidelityTier.B);
-    expect(adapter.fidelityTier).toBe('B');
-    expect(adapter.id).toBe(CLAUDE_ADAPTER_ID);
+    expect(adapter.fidelityTier).toBe(AdapterFidelityTier.E);
+    expect(adapter.fidelityTier).toBe('E');
+    expect(adapter.id).toBe(CLAUDE_PTY_ADAPTER_ID);
   });
 
   it('connects by spawning a PTY via the injected spawner', async () => {
@@ -418,7 +418,7 @@ describe('ClaudeAdapter (mock PTY)', () => {
     expect(events[0].type).toBe('AgentStarted');
     if (events[0].type === 'AgentStarted') {
       expect(events[0].objective).toBe('Refactor the auth module');
-      expect(events[0].adapterFidelityTier).toBe('B');
+      expect(events[0].adapterFidelityTier).toBe('E');
     }
     await adapter.disconnect();
   });
@@ -459,8 +459,8 @@ describe('ClaudeAdapter (mock PTY)', () => {
     for (const event of events) {
       expect(event.taskId).toBe('task-claude-1');
       expect(event.sessionId).toBe('sess-claude-1');
-      expect(event.agentId).toBe('claude-code');
-      expect(event.adapterFidelityTier).toBe('B');
+      expect(event.agentId).toBe('claude-code-pty');
+      expect(event.adapterFidelityTier).toBe('E');
     }
     await adapter.disconnect();
   });
@@ -625,11 +625,11 @@ describe('ClaudeAdapter (mock PTY)', () => {
     expect(adapter.connectionState).toBe('disconnected');
   });
 
-  it('self-reports fidelity tier B after connect', async () => {
+  it('self-reports fidelity tier E after connect', async () => {
     const spawner = new MockPtySpawner();
     const adapter = makeAdapter(spawner);
     await adapter.connect();
-    expect(adapter.fidelityTier).toBe(AdapterFidelityTier.B);
+    expect(adapter.fidelityTier).toBe(AdapterFidelityTier.E);
     await adapter.disconnect();
   });
 });

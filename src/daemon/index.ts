@@ -146,3 +146,14 @@ export type {
 /* Adapter session management (issue #35, DEC-005) */
 export { SessionManager } from './session-manager.js';
 export type { SessionInfo, StartSessionResult, StopSessionResult } from './session-manager.js';
+
+/* Voice session management (DEC-021, DEC-002, issue #41) */
+export { VoiceSessionManager, buildDefaultVoiceTools, mapToolCallToCommand, DEFAULT_VOICE_INSTRUCTIONS } from './voice-session-manager.js';
+export type {
+  VoiceSessionManagerOptions,
+  CommandExecutor,
+  VoiceTranscriptCallback,
+  VoiceModeCallback,
+  VoiceToolCallCallback,
+  VoiceStateCallback,
+} from './voice-session-manager.js';

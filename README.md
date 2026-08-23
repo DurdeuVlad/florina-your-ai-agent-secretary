@@ -23,7 +23,7 @@ tasks, deliverables, decisions, and attention requests.
 | Component | Description |
 |-----------|-------------|
 | **Daemon** | Local control plane — a WebSocket server on `ws://127.0.0.1:17419` that fans out to concurrent agent sessions (DEC-005). |
-| **Adapters** | Bridges from Codex (JSON-RPC) and Claude Code (PTY) into a canonical `SupervisorEvent` stream (DEC-019). A stub adapter is included for local testing. |
+| **Adapters** | Bridges from Codex (JSON-RPC, Tier A) and Claude Code (structured lifecycle hooks, Tier B) into a canonical `SupervisorEvent` stream (DEC-019). A PTY heuristic adapter (Tier E) and a stub adapter are included for compatibility and local testing. |
 | **Attention engine** | Deterministic policy that ranks events into a priority inbox, suppresses routine noise, and supports adaptive tuning (DEC-014). |
 | **Voice pipeline** | OpenAI Realtime API with a `whisper.cpp` fallback; supports voice approvals and spoken notifications (DEC-021). |
 | **Desktop skeleton** | Electron/Tauri-ready client with an IPC bridge and view components (DEC-028). |
@@ -46,10 +46,18 @@ npm run build
 
 ### Run
 
+The daemon runs in-process for the MVP — `secretary start` blocks the calling
+terminal until stopped. Use two terminals:
+
 ```bash
-secretary start     # start the daemon
+# Terminal 1 — start the daemon (blocks until stopped)
+secretary start
+
+# Terminal 2 — query the running daemon
 secretary inbox     # view attention items
+secretary tasks     # list tasks
 secretary help      # see all commands
+secretary stop      # stop the daemon (from Terminal 2)
 ```
 
 The CLI connects to the daemon at `ws://127.0.0.1:17419` by default. `asec` is
@@ -58,7 +66,7 @@ available as an alias for `secretary` (DEC-026).
 ## CLI Usage
 
 ```bash
-secretary start                              # start the daemon
+secretary start                              # start the daemon (blocks; use a separate terminal for other commands)
 secretary stop                               # stop the running daemon
 secretary status                             # show daemon status
 
@@ -81,6 +89,7 @@ secretary metrics                            # show metrics snapshot
 secretary metrics --since 3600000             # metrics for the last hour
 
 secretary prune <taskId>                     # prune a task's worktree
+secretary voice [--api-key <key>]            # start a voice session (push-to-talk)
 secretary version                            # print version
 secretary help                               # print full help
 ```
@@ -132,16 +141,16 @@ architecture, contracts, models, and code are derived from them.
 
 ## Status
 
-**MVP — actively implemented.** 32+ issues landed, 1380+ tests passing.
+**MVP — actively implemented.** 32+ issues landed, 1585+ tests passing.
 
 **Works today:**
 
 - Local daemon with WebSocket control plane
-- Codex (JSON-RPC) and Claude Code (PTY) adapters
+- Codex (JSON-RPC, Tier A) and Claude Code (hooks, Tier B) adapters
 - Deterministic attention engine with priority inbox
 - SQLite event journal, context capsules, completion digests
-- CLI (`secretary` / `asec`) with inbox, approvals, tasks, digest, metrics
-- Voice pipeline (OpenAI Realtime + whisper.cpp fallback)
+- CLI (`secretary` / `asec`) with inbox, approvals, tasks, digest, metrics, voice
+- Voice pipeline (OpenAI Realtime + whisper.cpp fallback) wired into daemon + CLI
 - Desktop skeleton (Electron/Tauri-ready IPC bridge)
 - Security/audit framework (DEC-011 compliance)
 - Git worktree lifecycle per task (DEC-024)

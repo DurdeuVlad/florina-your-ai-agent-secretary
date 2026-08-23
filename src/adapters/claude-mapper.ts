@@ -1,11 +1,13 @@
 /**
- * Claude Code CLI PTY output pattern mappers (DEC-013, DEC-010, issue #11).
+ * Claude Code CLI PTY output pattern mappers (DEC-013, DEC-023, DEC-010,
+ * issue #11 / #40).
  *
- * The Claude Code CLI is a PTY-based adapter (fidelity tier **B**). Unlike the
- * Codex app-server (tier A, structured JSON-RPC), Claude Code streams
- * unstructured terminal text. This module provides best-effort, defensive
- * regex-based mappers that parse Claude CLI PTY output into the canonical
- * {@link SupervisorEvent} schema (DEC-019).
+ * The Claude Code PTY adapter is a Tier E adapter (reclassified from B per
+ * DEC-023). Unlike the Codex app-server (tier A, structured JSON-RPC) and the
+ * Claude Code hooks adapter (tier B, structured lifecycle hooks), the PTY
+ * adapter streams unstructured terminal text. This module provides
+ * best-effort, defensive regex-based mappers that parse Claude CLI PTY output
+ * into the canonical {@link SupervisorEvent} schema (DEC-019).
  *
  * Design rules:
  * - Mapping functions are pure: they take a PTY text chunk + envelope context

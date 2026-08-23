@@ -1,13 +1,20 @@
 /**
- * Claude Code CLI PTY adapter — fidelity tier B (DEC-013, issue #11).
+ * Claude Code CLI PTY adapter — fidelity tier E (DEC-013, DEC-023, issue #40).
  *
- * Wraps the user's installed Claude Code CLI by spawning it in a pseudo-
- * terminal (PTY) and parsing the unstructured terminal output into the
- * canonical {@link SupervisorEvent} schema (DEC-019). Tier B is lower
- * fidelity than the Codex app-server (tier A, structured JSON-RPC) because
- * PTY output is unstructured and version-drifting: tool calls, file changes,
- * and permission prompts are recognized best-effort via regex (see
- * {@link claude-mapper}).
+ * **Reclassified:** This adapter was originally labeled Tier B but has been
+ * reclassified as Tier E per DEC-023. DEC-013 defines Tier B as "installed
+ * CLI + structured lifecycle hooks / Agent SDK" — NOT PTY scraping. The real
+ * Tier B path is the hooks-based adapter ({@link claude-hooks-adapter}).
+ * DEC-023 explicitly evaluated PTY-based heuristics (Approach A) and rejected
+ * them for the MVP because unstructured text cannot reliably signal
+ * permission prompts (violates DEC-011: "never silently widen permissions").
+ *
+ * This adapter is preserved as a forward-compatible Tier E stub: the PTY
+ * contract (no auto-approve; all permission-like events require human
+ * confirmation) remains defined and testable. It wraps the user's installed
+ * Claude Code CLI by spawning it in a pseudo-terminal (PTY) and parsing the
+ * unstructured terminal output into the canonical {@link SupervisorEvent}
+ * schema (DEC-019) via best-effort regex (see {@link claude-mapper}).
  *
  * Per DEC-010, permission prompts map to `ApprovalRequested` with structured
  * capability fields. Because PTY output does not expose structured fields,
@@ -45,8 +52,12 @@ import {
   type ClaudeMapperContext,
 } from './claude-mapper.js';
 
-/** Stable id for the Claude Code adapter. */
-export const CLAUDE_ADAPTER_ID = 'claude-code';
+/**
+ * Stable id for the Claude Code PTY (Tier E) adapter. Distinct from the
+ * hooks adapter id (`claude-code`) so both can coexist in the registry when
+ * needed for testing or forward-compatibility.
+ */
+export const CLAUDE_PTY_ADAPTER_ID = 'claude-code-pty';
 
 /** Ctrl-C (ETX) byte sent to the PTY to interrupt the CLI. */
 const CTRL_C = '\x03';
@@ -121,13 +132,15 @@ export interface ClaudeAdapterOptions {
 }
 
 /**
- * Claude Code CLI PTY adapter (Tier B).
+ * Claude Code CLI PTY adapter (Tier E).
  *
  * Spawns the user's installed Claude Code CLI in a PTY, sends the delegated
  * objective as a prompt, and streams best-effort normalized
- * {@link SupervisorEvent}s parsed from the terminal output.
+ * {@link SupervisorEvent}s parsed from the terminal output. Reclassified as
+ * Tier E per DEC-023; the real Tier B path is the hooks-based adapter
+ * ({@link claude-hooks-adapter}).
  */
-export class ClaudeAdapter extends BaseAdapter {
+export class ClaudePtyAdapter extends BaseAdapter {
   private readonly options: ClaudeAdapterOptions;
   private pty: PtyProcess | null = null;
   private activeSession: SessionConfig | null = null;
@@ -143,7 +156,7 @@ export class ClaudeAdapter extends BaseAdapter {
   private lineBuffer = '';
 
   constructor(bus?: EventBus | null, options: ClaudeAdapterOptions = {}) {
-    super(CLAUDE_ADAPTER_ID, AdapterFidelityTier.B, bus);
+    super(CLAUDE_PTY_ADAPTER_ID, AdapterFidelityTier.E, bus);
     this.options = options;
   }
 
@@ -170,11 +183,11 @@ export class ClaudeAdapter extends BaseAdapter {
     this.requireConnected();
     if (this.activeSession !== null) {
       throw new Error(
-        `Claude adapter already has an active session: ${this.activeSession.sessionId}`,
+        `Claude PTY adapter already has an active session: ${this.activeSession.sessionId}`,
       );
     }
     if (!this.pty) {
-      throw new Error('Claude adapter has no PTY process');
+      throw new Error('Claude PTY adapter has no PTY process');
     }
     this.activeSession = sessionConfig;
     this.streamComplete = false;
@@ -425,7 +438,7 @@ async function createNodePtySpawner(): Promise<PtySpawner> {
     ptyModule = (await import(/* @vite-ignore */ moduleName)) as unknown as typeof ptyModule;
   } catch {
     throw new Error(
-      'Claude adapter requires the "node-pty" dependency to spawn a real PTY. ' +
+      'Claude PTY adapter requires the "node-pty" dependency to spawn a real PTY. ' +
         'Install it (`npm install node-pty`) or inject a mock spawner via ' +
         'ClaudeAdapterOptions.spawner for testing.',
     );

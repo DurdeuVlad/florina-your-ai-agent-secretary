@@ -35,8 +35,12 @@ describe('public API exports', () => {
     expect(typeof api.CodexAdapter).toBe('function');
   });
 
-  it('exports ClaudeAdapter from the adapters module', () => {
-    expect(typeof api.ClaudeAdapter).toBe('function');
+  it('exports ClaudeHooksAdapter from the adapters module', () => {
+    expect(typeof api.ClaudeHooksAdapter).toBe('function');
+  });
+
+  it('exports ClaudePtyAdapter from the adapters module', () => {
+    expect(typeof api.ClaudePtyAdapter).toBe('function');
   });
 
   it('exports StubAdapter from the adapters module', () => {

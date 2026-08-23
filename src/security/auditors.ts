@@ -215,8 +215,11 @@ export class SecurityAuditor {
     const findings: SecurityFinding[] = [];
     // A host option that is not localhost.
     const hostOptionRe = /host\s*:\s*['"]([^'"]+)['"]/;
-    // A bare 0.0.0.0 / :: binding.
-    const exposedHostRe = /['"](?:0\.0\.0\.0|::|\*)['"]/;
+    // A bare 0.0.0.0 / :: binding. The `*` wildcard is only flagged when it
+    // appears in a `host`/`hostname`/`bind`/`listen` option context — not in
+    // unrelated matcher/glob patterns (e.g. Claude Code hooks `matcher: '*'`).
+    const exposedHostRe = /['"](?:0\.0\.0\.0|::)['"]/;
+    const wildcardHostRe = /(?:host|hostname|bind|listen)\s*:\s*['"]\*['"]/;
 
     for (const file of this.files) {
       file.lines.forEach((line, idx) => {
@@ -238,7 +241,7 @@ export class SecurityAuditor {
             );
           }
         }
-        if (exposedHostRe.test(line)) {
+        if (exposedHostRe.test(line) || wildcardHostRe.test(line)) {
           findings.push(
             this.finding(
               'network-exposed-bind',

@@ -161,6 +161,7 @@ Commands:
   digest <taskId>             Show completion digest for a task
   metrics [--since <ms>]      Show metrics snapshot
   prune <taskId>              Prune the worktree for a task
+  voice [--api-key <key>]     Start a voice session (push-to-talk)
   version                     Print version
   help                        Print this help
 
@@ -232,6 +233,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdMetrics(ctx);
     case 'prune':
       return cmdPrune(ctx);
+    case 'voice':
+      return cmdVoice(ctx);
     case 'version':
       return cmdVersion(ctx);
     case 'help':
@@ -448,6 +451,103 @@ async function cmdPrune(ctx: CommandContext): Promise<CommandResult> {
 /* --- version --- */
 function cmdVersion(_ctx: CommandContext): CommandResult {
   return { exitCode: 0, message: `secretary ${VERSION}\n` };
+}
+
+/* --- voice --- */
+async function cmdVoice(ctx: CommandContext): Promise<CommandResult> {
+  const apiKey =
+    typeof ctx.args.flags['api-key'] === 'string'
+      ? ctx.args.flags['api-key']
+      : process.env['OPENAI_API_KEY'];
+  if (!apiKey || typeof apiKey !== 'string') {
+    return {
+      exitCode: 1,
+      message:
+        'Voice requires an OpenAI API key. Set OPENAI_API_KEY or pass --api-key <key>.\n',
+    };
+  }
+
+  // The voice command needs a running daemon to route tool calls. Check
+  // connectivity first by querying status.
+  const status = await ctx.runner.status();
+  if (!status.running) {
+    return {
+      exitCode: 1,
+      message:
+        'Daemon is not running. Start it first with `secretary start` in another terminal.\n',
+    };
+  }
+
+  try {
+    // Lazy-import the voice session manager and stdin audio transport so the
+    // CLI doesn't load voice dependencies for non-voice commands.
+    const { VoiceSessionManager } = await import('../daemon/voice-session-manager.js');
+    const { StdinAudioTransport } = await import('../voice/stdin-audio-transport.js');
+    const { WhisperAdapter } = await import('../voice/whisper-adapter.js');
+    const { WhisperCppBackend } = await import('../voice/whisper-backend.js');
+
+    // The voice session connects to the daemon's command API via the same
+    // WebSocket client the CLI uses. We create a long-lived client that
+    // stays open for the duration of the voice session.
+    const { DaemonClient } = await import('./client.js');
+    const voiceClient = new DaemonClient();
+
+    // Create a minimal command API proxy that routes execute() calls over
+    // the WebSocket client. The VoiceSessionManager calls this for each
+    // tool call from the Realtime model.
+    const commandApi = {
+      async execute(command: import('../daemon/command-api.js').Command): Promise<import('../daemon/command-api.js').Response> {
+        return voiceClient.send(command);
+      },
+    };
+
+    const audioTransport = new StdinAudioTransport();
+    const whisperBackend = new WhisperCppBackend();
+    const whisperAdapter = new WhisperAdapter(whisperBackend);
+
+    const manager = new VoiceSessionManager({
+      apiKey,
+      audioTransport,
+      whisperAdapter,
+      commandApi,
+    });
+
+    manager.onTranscript((text, partial) => {
+      if (partial) {
+        err(`[you] ${text}\r`);
+      } else {
+        err(`[you] ${text}\n`);
+      }
+    });
+    manager.onModeChange((mode) => {
+      err(`[voice] mode: ${mode}\n`);
+    });
+    manager.onToolCall((name, success, result) => {
+      err(`[tool] ${name}: ${success ? 'ok' : 'failed'} ${JSON.stringify(result).slice(0, 200)}\n`);
+    });
+    manager.onStateChange((state) => {
+      err(`[voice] state: ${state}\n`);
+    });
+
+    err('Voice session starting. Press Enter to talk, Ctrl-C to stop.\n');
+    await manager.start();
+
+    // Keep the process alive until interrupted.
+    return new Promise<CommandResult>((resolve) => {
+      const cleanup = async (): Promise<void> => {
+        await manager.stop();
+        resolve({ exitCode: 0, message: 'Voice session ended.\n' });
+      };
+      process.on('SIGINT', () => {
+        void cleanup();
+      });
+      process.on('SIGTERM', () => {
+        void cleanup();
+      });
+    });
+  } catch (e) {
+    return { exitCode: 1, message: `Voice session failed: ${messageOf(e)}\n` };
+  }
 }
 
 /* --- help --- */

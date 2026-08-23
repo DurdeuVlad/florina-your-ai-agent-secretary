@@ -59,7 +59,7 @@ src/
   attention/   # deterministic attention engine (DEC-014)
   cli/         # `secretary` / `asec` binary (DEC-026)
   voice/       # Realtime + whisper.cpp pipeline (DEC-021)
-  desktop/     # Electron/Tauri client (DEC-028)
+  desktop/     # Electron/Tauri client skeleton (DEC-028; not yet packaged)
   storage/     # SQLite event journal + Context Capsules (DEC-012/020)
   domain/      # core domain objects (DEC-004)
 tests/         # vitest specs
@@ -118,3 +118,15 @@ there are uncommitted (staged, unstaged, or untracked) changes.
 `worktreeStatus(worktreePath)` returns a `{ clean, dirty, branch, baseCommit }`
 snapshot that the attention engine can use to surface a dirty
 completed/cancelled worktree for human review.
+
+## Desktop Skeleton Status (DEC-028, issue #43)
+
+The `src/desktop/` module is a **skeleton only** — it defines the view
+components, IPC bridge, keyboard nav, system tray, and hotkey interfaces with
+pluggable backends (`WindowBackend`, `IpcTransport`, `TrayBackend`), but no
+production Electron/Tauri backend is shipped yet. There is no `electron` or
+`@tauri-apps/*` dependency in `package.json`.
+
+**Do not** move desktop from "Planned" to "Works today" in the README until a
+real OS-native backend is implemented and a `npm run desktop` entrypoint
+exists. The view components are well-tested but cannot run without a backend.

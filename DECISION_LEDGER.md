@@ -140,11 +140,11 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-013  
 **Date**: 2026-08-19  
-**Status**: ACCEPTED  
+**Status**: ACCEPTED (amended 2026-08-20, issue #40)  
 **Decision**: MVP supports Codex and Claude Code only  
 - **Rationale**: These are the two highest-value coding agents with the best structured supervision surfaces. Starting narrow proves the thesis without spreading across ten adapters.
-- **Consequences**: Codex via app-server JSON-RPC (adapter fidelity A), Claude Code via installed CLI + hooks (adapter fidelity B).
-- **Alternatives Considered**: Support more agents immediately; start with a single agent.
+- **Consequences**: Codex via app-server JSON-RPC (adapter fidelity A), Claude Code via installed CLI + structured lifecycle hooks (adapter fidelity B). The Claude Code hooks adapter (`src/adapters/claude-hooks-adapter.ts`) wraps the user's installed `claude` CLI in headless (`-p`) mode and configures lifecycle hooks (PreToolUse, PostToolUse, PermissionRequest, Stop, Notification, SessionStart) that emit structured JSON events, which are mapped to the canonical `SupervisorEvent` schema. The previous PTY regex adapter (`src/adapters/claude-adapter.ts`) was misclassified as Tier B; it has been reclassified as Tier E per DEC-023 (PTY heuristics are Tier E, not Tier B). Tier B = "installed CLI + structured lifecycle hooks / Agent SDK" — NOT PTY scraping.
+- **Alternatives Considered**: Support more agents immediately; start with a single agent; classify PTY regex as Tier B (rejected — contradicts DEC-023 and DEC-011).
 - **Reconsideration Trigger**: If a third agent achieves significant adoption and has a strong structured API.
 
 ---

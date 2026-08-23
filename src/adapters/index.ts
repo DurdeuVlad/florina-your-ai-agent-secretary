@@ -8,6 +8,8 @@
  *   with the fidelity tier contract (DEC-013).
  * - {@link AdapterRegistry} for selecting and instantiating adapters by id.
  * - {@link CodexAdapter} (Tier A) for the Codex app-server JSON-RPC protocol.
+ * - {@link ClaudeHooksAdapter} (Tier B) for the Claude Code hooks protocol.
+ * - {@link ClaudePtyAdapter} (Tier E) for the Claude Code PTY heuristic.
  * - {@link StubAdapter} (Tier E) for end-to-end pipeline testing.
  */
 export type {
@@ -36,7 +38,46 @@ export type {
 } from './codex-mapper.js';
 export { StubAdapter, STUB_ADAPTER_ID, buildDefaultStubEvents } from './stub-adapter.js';
 export type { StubAdapterOptions } from './stub-adapter.js';
-export { ClaudeAdapter, CLAUDE_ADAPTER_ID } from './claude-adapter.js';
+export { ClaudeHooksAdapter, CLAUDE_HOOKS_ADAPTER_ID, InMemoryHookEventSink } from './claude-hooks-adapter.js';
+export type {
+  ClaudeHooksAdapterOptions,
+  ClaudeCliProcess,
+  ClaudeCliSpawner,
+  ClaudeCliSpawnOptions,
+  HookEventSink,
+} from './claude-hooks-adapter.js';
+export {
+  mapHookEvent,
+  isHookEvent,
+  mapSessionStart,
+  mapPreToolUse,
+  mapPostToolUse,
+  mapPostToolUseFailure,
+  mapPermissionRequest as mapHookPermissionRequest,
+  mapNotification,
+  mapStop as mapHookStop,
+  mapStopFailure,
+  inferCapabilityFromTool,
+  inferDestinationFromTool,
+  inferRiskLevel,
+  buildHooksConfig,
+  CLAUDE_HOOK_EVENT_NAMES,
+} from './claude-hooks-mapper.js';
+export type {
+  ClaudeHookEvent,
+  ClaudeHooksMapperContext,
+  SessionStartHookEvent,
+  PreToolUseHookEvent,
+  PostToolUseHookEvent,
+  PostToolUseFailureHookEvent,
+  PermissionRequestHookEvent as HookPermissionRequestEvent,
+  NotificationHookEvent,
+  StopHookEvent,
+  StopFailureHookEvent,
+  SessionEndHookEvent,
+  HooksConfig,
+} from './claude-hooks-mapper.js';
+export { ClaudePtyAdapter, CLAUDE_PTY_ADAPTER_ID } from './claude-adapter.js';
 export type {
   ClaudeAdapterOptions,
   PtyProcess,
