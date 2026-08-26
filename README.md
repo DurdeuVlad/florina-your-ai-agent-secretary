@@ -164,4 +164,4 @@ architecture, contracts, models, and code are derived from them.
 
 ## License
 
-TBD
+MIT — see [`LICENSE`](LICENSE).
