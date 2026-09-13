@@ -4,15 +4,15 @@ Guidance for coding agents (and humans) working in this repository.
 
 ## Project
 
-**Agent Secretary** — an open-source attention broker for coding agents. See
+**Florina** — an open-source attention broker for coding agents. See
 [`README.md`](README.md) and the foundation docs for product context.
 
 ## Toolchain & Language Rationale
 
 **Language:** TypeScript (strict mode)
 **Runtime:** Node.js >= 22
-**Package/repo name:** `agent-secretary`
-**CLI binary:** `secretary` with alias `asec` (DEC-026)
+**Package/repo name:** `florina`
+**CLI binary:** `florina` with alias `flor` (DEC-026)
 
 ### Why TypeScript / Node.js?
 
@@ -86,7 +86,7 @@ dist/          # build output (gitignored)
 **New production code** goes under `src/core` (domain, ports, use-cases),
 `src/adapters/inbound|outbound/<family>`, or `src/bootstrap` — never in the
 legacy roots (`src/domain`, `src/daemon`, `src/storage`, `src/attention`,
-`src/secretary`, `src/cli`, `src/voice`, `src/desktop`, `src/security`),
+`src/florina`, `src/cli`, `src/voice`, `src/desktop`, `src/security`),
 which exist only as compatibility facades re-exporting the canonical
 implementations.
 
@@ -103,7 +103,7 @@ The locked multi-provider architecture lives in
 - Lint must pass (`npm run lint`). Format with Prettier (`npm run format`).
 - Every meaningful state transition is recorded in the immutable event journal
   before summarizing (DEC-012). Summaries never replace source events.
-- The Secretary narrows permissions, never silently widens them (DEC-011).
+- The Florina narrows permissions, never silently widens them (DEC-011).
 
 ## Worktree Lifecycle (DEC-024)
 
@@ -116,24 +116,24 @@ worktree lifecycle is implemented in `src/daemon/worktree.ts`
 Every task worktree is created on a branch named exactly:
 
 ```
-secretary/<task-slug>
+florina/<task-slug>
 ```
 
 where `<task-slug>` is a sanitized, git- and filesystem-safe identifier
-(lowercase alphanumeric and hyphens only). The `secretary/` prefix namespaces
-all Secretary-managed branches so they are clearly distinguishable from
+(lowercase alphanumeric and hyphens only). The `florina/` prefix namespaces
+all Florina-managed branches so they are clearly distinguishable from
 human-authored branches and can be listed/cleaned up safely. Use the
-`secretaryBranchName(slug)` helper to build the canonical branch name.
+`florinaBranchName(slug)` helper to build the canonical branch name.
 
 ### Worktree placement
 
-Worktrees are placed in a sibling `.secretary-worktrees/` directory (outside
+Worktrees are placed in a sibling `.florina-worktrees/` directory (outside
 the main working tree) at a deterministic path derived from the repository
 path and the task slug, so paths are stable across runs.
 
 ### Prune policy
 
-- Worktrees are **retained** until an explicit prune (`secretary prune`).
+- Worktrees are **retained** until an explicit prune (`florina prune`).
 - `pruneWorktree` removes a worktree **only when it is clean** (no
   uncommitted changes).
 - **Dirty worktrees are never silently deleted** — `pruneWorktree` throws a

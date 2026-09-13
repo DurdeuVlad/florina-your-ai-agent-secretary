@@ -1,12 +1,12 @@
 /**
- * Daemon module — the local control plane the Secretary runs on (DEC-008).
+ * Daemon module — the local control plane the Florina runs on (DEC-008).
  *
  * Adapters, the attention engine, voice, and the desktop client all talk to
  * this daemon over localhost WebSocket. The daemon owns process lifecycle,
  * single-instance enforcement, the typed control-plane API, the live event
  * stream, and a health check endpoint.
  */
-export { SecretaryDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_LOCKFILE } from './daemon.js';
+export { FlorinaDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_LOCKFILE } from './daemon.js';
 export type { DaemonOptions, DaemonState, DaemonEvents } from './daemon.js';
 export { ControlPlaneApi, dispatch, parseApiRequest } from './api.js';
 export type {

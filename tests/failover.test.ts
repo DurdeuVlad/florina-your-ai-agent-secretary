@@ -194,7 +194,7 @@ function createFixture(): Fixture {
 async function startRunningTask(
   fx: Fixture,
   provider: string,
-  worktreePath = '/repo/.secretary-worktrees/task-1',
+  worktreePath = '/repo/.florina-worktrees/task-1',
 ): Promise<{ taskId: string; sessionId: string }> {
   const task = buildTask({
     projectId: fx.projectId,
@@ -245,7 +245,7 @@ describe('FailoverService', () => {
     // Resume: the new adapter started in the SAME worktree with a briefing prompt.
     const claude = fx.adapters.get('claude-code')!;
     expect(claude.runs).toHaveLength(1);
-    expect(claude.runs[0].config.workingDir).toBe('/repo/.secretary-worktrees/task-1');
+    expect(claude.runs[0].config.workingDir).toBe('/repo/.florina-worktrees/task-1');
     expect(claude.runs[0].config.objective).toContain('[failover briefing]');
     expect(claude.runs[0].config.objective).toContain('implement the widget');
 
@@ -322,7 +322,7 @@ describe('FailoverService', () => {
     // A second run on the codex adapter, still in the same worktree.
     const codexRuns = fx.adapters.get('codex')!.runs;
     expect(codexRuns).toHaveLength(2);
-    expect(codexRuns[1].config.workingDir).toBe('/repo/.secretary-worktrees/task-1');
+    expect(codexRuns[1].config.workingDir).toBe('/repo/.florina-worktrees/task-1');
 
     const kinds = fx.eventRepo.listByTask(taskId).map((e) => e.kind);
     expect(kinds).toContain('TaskResumed');

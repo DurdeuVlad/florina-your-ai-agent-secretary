@@ -116,7 +116,7 @@ export interface TestResult {
  * Review").
  */
 export interface DiffDigest {
-  /** Current branch name of the worktree (e.g. `secretary/add-pagination`). */
+  /** Current branch name of the worktree (e.g. `florina/add-pagination`). */
   readonly branch: string;
   /** Base commit SHA the diff is measured from. */
   readonly baseCommit: string;

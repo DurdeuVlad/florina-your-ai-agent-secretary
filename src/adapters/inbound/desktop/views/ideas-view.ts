@@ -153,7 +153,7 @@ export function renderIdeasView(view: IdeasViewData): RenderTree {
       {},
       view.ideas.length > 0
         ? view.ideas.map(renderIdeaRow)
-        : [el('EmptyHint', {}, ['no idea ledgers yet — talk to the Secretary'])],
+        : [el('EmptyHint', {}, ['no idea ledgers yet — talk to the Florina'])],
     ),
     ...(view.selected !== undefined
       ? [

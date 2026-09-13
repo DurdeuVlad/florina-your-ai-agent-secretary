@@ -11,7 +11,7 @@
  * journaled by their producers (failover, capsule rollup, grant service)
  * before they are published — the writer skips those kinds to avoid
  * double-recording. Adapters never author them; they are
- * Secretary-internal records.
+ * Florina-internal records.
  */
 import type { SupervisorEvent } from '../../../domain/events.js';
 import type { Event, SupervisorEventKind } from '../../../domain/types.js';

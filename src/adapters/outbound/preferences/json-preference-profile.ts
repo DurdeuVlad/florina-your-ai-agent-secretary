@@ -4,7 +4,7 @@
  *
  * The preference profile is the machine-checkable half of "how Vlad wants
  * work routed": ordered routing rules (`provider`, optional `model`,
- * optional `workTypes`) plus model-level deny rules. The Secretary writes
+ * optional `workTypes`) plus model-level deny rules. The Florina writes
  * entries through the `preference` tool as it learns them in conversation;
  * the CapacityRouter consumes {@link PreferenceProfileStore.toProfile}.
  *

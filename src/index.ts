@@ -1,12 +1,12 @@
 /**
- * Agent Secretary — an open-source attention broker for coding agents.
+ * Florina — an open-source attention broker for coding agents.
  *
  * Public entrypoint. Re-exports the primary public API surface from the
- * major modules so consumers can import everything from `agent-secretary`.
+ * major modules so consumers can import everything from `florina`.
  *
  * Voice and desktop are intentionally NOT re-exported here: they have
  * optional native dependencies and are separate surfaces. Import them
- * directly from `agent-secretary/voice` or `agent-secretary/desktop` when
+ * directly from `florina/voice` or `florina/desktop` when
  * needed.
  */
 export const VERSION = '0.0.1';

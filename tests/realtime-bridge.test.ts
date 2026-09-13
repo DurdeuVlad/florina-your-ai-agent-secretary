@@ -226,7 +226,7 @@ describe('RealtimeBridge', () => {
   describe('connect / disconnect lifecycle', () => {
     it('connects, sends session.update, and resolves', async () => {
       const promise = bridge.connect('sk-test', {
-        instructions: 'You are the Secretary',
+        instructions: 'You are the Florina',
         voice: 'shimmer',
       });
       const socket = sockets[0];
@@ -240,7 +240,7 @@ describe('RealtimeBridge', () => {
       expect(update).toBeDefined();
       expect(update?.type).toBe('session.update');
       if (update?.type === 'session.update') {
-        expect(update.session.instructions).toBe('You are the Secretary');
+        expect(update.session.instructions).toBe('You are the Florina');
         expect(update.session.voice).toBe('shimmer');
         expect(update.session.turn_detection).toEqual({ type: 'none' });
         expect(update.session.input_audio_format).toBe('pcm16');
@@ -840,7 +840,7 @@ describe('RealtimeBridge', () => {
   describe('duplicate listener guard', () => {
     it('sends session.update only once on connect', async () => {
       const promise = bridge.connect('sk-test', {
-        instructions: 'You are the Secretary',
+        instructions: 'You are the Florina',
       });
       sockets[0].emitOpen();
       await promise;

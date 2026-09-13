@@ -1,5 +1,5 @@
 /**
- * Typed control-plane API for the Secretary daemon (DEC-008).
+ * Typed control-plane API for the Florina daemon (DEC-008).
  *
  * Every surface (CLI, desktop, voice, remote) talks to the daemon over a
  * single localhost WebSocket. Messages are JSON envelopes of the shape:

@@ -184,7 +184,7 @@ describe('EventJournalWriter', () => {
       timestamp: ts(),
       taskId: fx.taskId,
       sessionId: fx.sessionId,
-      agentId: 'secretary',
+      agentId: 'florina',
       adapterFidelityTier: 'B',
       reason: 'quota',
       resumeAt: null,

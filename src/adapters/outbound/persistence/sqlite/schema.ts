@@ -1,5 +1,5 @@
 /**
- * SQLite schema definitions for the Agent Secretary storage layer.
+ * SQLite schema definitions for the Florina storage layer.
  *
  * Every domain object from DEC-004 maps to a table. Complex/nested fields
  * (arrays, objects) are stored as JSON text columns and (de)serialized at the

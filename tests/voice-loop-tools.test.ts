@@ -1,5 +1,5 @@
 /**
- * Voice ↔ Secretary-loop binding (DEC-021 + DEC-034, issue #73).
+ * Voice ↔ Florina-loop binding (DEC-021 + DEC-034, issue #73).
  *
  * - New loop-facing voice tools map to typed commands.
  * - `research` runs asynchronously: the speech turn closes with a
@@ -402,7 +402,7 @@ describe('createResearchRunner', () => {
       Promise.resolve({ content: 'structured findings about codex quota', toolCalls: [] }),
   };
 
-  it('runs the query through the Secretary loop and returns findings', async () => {
+  it('runs the query through the Florina loop and returns findings', async () => {
     const runner = createResearchRunner(connector);
     const result = await runner('research', { query: 'codex quota windows' });
     expect(result).toContain('Research complete');

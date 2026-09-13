@@ -11,11 +11,11 @@ import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { WebSocket } from 'ws';
 
-import { SecretaryDaemon } from '../src/bootstrap/daemon.js';
+import { FlorinaDaemon } from '../src/bootstrap/daemon.js';
 import {
-  RemoteSecretaryAdapter,
+  RemoteFlorinaAdapter,
   type RemoteClientPort,
-} from '../src/adapters/outbound/federation/remote-secretary-adapter.js';
+} from '../src/adapters/outbound/federation/remote-florina-adapter.js';
 import { buildProject } from '../src/core/domain/index.js';
 import type { SupervisorEvent } from '../src/core/domain/events.js';
 import type { Command, Response } from '../src/core/application/use-cases/tasks/command-api.js';
@@ -34,7 +34,7 @@ afterEach(async () => {
 const lockfile = (): string => join(tmpDir, `lock-${++lockSeq}.lock`);
 
 /** Seed a project + a 'stub' agent row into the daemon's DB. */
-async function seedChild(daemon: SecretaryDaemon): Promise<string> {
+async function seedChild(daemon: FlorinaDaemon): Promise<string> {
   const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
     .connection;
   const { ProjectRepository } = await import('../src/storage/index.js');
@@ -88,7 +88,7 @@ function openWs(port: number): Promise<WebSocket> {
 
 describe('control-plane auth + capability scoping', () => {
   it('rejects commands before authentication', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile: lockfile(),
@@ -107,7 +107,7 @@ describe('control-plane auth + capability scoping', () => {
   });
 
   it('rejects a bad token and accepts a good one', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile: lockfile(),
@@ -134,7 +134,7 @@ describe('control-plane auth + capability scoping', () => {
   });
 
   it('scopes remote commands to the permitted kinds', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile: lockfile(),
@@ -159,7 +159,7 @@ describe('control-plane auth + capability scoping', () => {
 
 describe('delegate-task', () => {
   it('spawns a task on the child through the normal machinery', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile: lockfile(),
@@ -182,7 +182,7 @@ describe('delegate-task', () => {
   });
 
   it('rejects delegation into an unknown project', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile: lockfile(),
@@ -202,7 +202,7 @@ describe('delegate-task', () => {
 });
 
 /* ================================================================== *
- * RemoteSecretaryAdapter — event remapping (unit seam)
+ * RemoteFlorinaAdapter — event remapping (unit seam)
  * ================================================================== */
 
 class FakeRemoteClient implements RemoteClientPort {
@@ -261,7 +261,7 @@ const childEvent = (over: Record<string, unknown>): SupervisorEvent =>
     ...over,
   }) as SupervisorEvent;
 
-describe('RemoteSecretaryAdapter', () => {
+describe('RemoteFlorinaAdapter', () => {
   const sessionConfig = {
     taskId: 'parent-task',
     sessionId: 'parent-sess',
@@ -272,7 +272,7 @@ describe('RemoteSecretaryAdapter', () => {
 
   it('delegates via delegate-task and remaps child events to parent ids', async () => {
     const client = new FakeRemoteClient();
-    const adapter = new RemoteSecretaryAdapter(null, {
+    const adapter = new RemoteFlorinaAdapter(null, {
       id: 'codex@server-x',
       remote: { host: 'x', port: 1 },
       projectId: 'proj-child',
@@ -302,7 +302,7 @@ describe('RemoteSecretaryAdapter', () => {
 
   it('drops child events for tasks this adapter did not delegate', async () => {
     const client = new FakeRemoteClient();
-    const adapter = new RemoteSecretaryAdapter(null, {
+    const adapter = new RemoteFlorinaAdapter(null, {
       id: 'codex@server-x',
       remote: { host: 'x', port: 1 },
       projectId: 'p',
@@ -328,7 +328,7 @@ describe('RemoteSecretaryAdapter', () => {
       resumeAt: null,
       reason: 'all quota exhausted',
     } as Response;
-    const adapter = new RemoteSecretaryAdapter(null, {
+    const adapter = new RemoteFlorinaAdapter(null, {
       id: 'codex@server-x',
       remote: { host: 'x', port: 1 },
       projectId: 'p',
@@ -341,7 +341,7 @@ describe('RemoteSecretaryAdapter', () => {
 
   it('cancel sends stop-task for the delegated child task', async () => {
     const client = new FakeRemoteClient();
-    const adapter = new RemoteSecretaryAdapter(null, {
+    const adapter = new RemoteFlorinaAdapter(null, {
       id: 'codex@server-x',
       remote: { host: 'x', port: 1 },
       projectId: 'p',
@@ -361,7 +361,7 @@ describe('RemoteSecretaryAdapter', () => {
 
 describe('federation end-to-end', () => {
   it('parent delegates to a live child daemon over WS and receives events', async () => {
-    const child = new SecretaryDaemon({
+    const child = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile: lockfile(),
@@ -374,7 +374,7 @@ describe('federation end-to-end', () => {
     await child.start();
     const projectId = await seedChild(child);
 
-    const adapter = new RemoteSecretaryAdapter(null, {
+    const adapter = new RemoteFlorinaAdapter(null, {
       id: 'stub@child',
       remote: { host: '127.0.0.1', port: child.port, authToken: 'pairing-tok' },
       projectId,
@@ -411,15 +411,13 @@ describe('federation end-to-end', () => {
 
   it('a remote pool registers in the adapter registry as provider@host capacity', async () => {
     // The child isn't real here — registration is what we prove.
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile: lockfile(),
       dbPath: ':memory:',
       installSignalHandlers: false,
-      remoteProviders: [
-        { id: 'codex@server-x', host: '127.0.0.1', port: 1, projectId: 'p' },
-      ],
+      remoteProviders: [{ id: 'codex@server-x', host: '127.0.0.1', port: 1, projectId: 'p' }],
     });
     await daemon.start();
     const registry = (

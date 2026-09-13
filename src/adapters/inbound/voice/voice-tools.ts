@@ -11,8 +11,8 @@
 import type { VoiceToolDefinition } from '../../../core/application/ports/outbound/voice.js';
 import type { Command } from '../../../core/application/use-cases/tasks/command-api.js';
 
-/** Default system instructions for the Secretary voice persona. */
-export const DEFAULT_VOICE_INSTRUCTIONS = `You are Agent Secretary, an attention broker for coding agents.
+/** Default system instructions for the Florina voice persona. */
+export const DEFAULT_VOICE_INSTRUCTIONS = `You are Florina, an attention broker for coding agents.
 The developer delegates work to coding agents and you route their attention.
 Use the provided tools to query status, list tasks, check the inbox, and approve or deny requests.
 Keep responses concise. When the developer asks for status, use get_inbox or list_tasks.
@@ -126,14 +126,14 @@ export function buildDefaultVoiceTools(): readonly VoiceToolDefinition[] {
       },
     },
     /* ---------------------------------------------------------------- *
-     * Secretary-loop tools (DEC-021 + DEC-034, issue #73)
+     * Florina-loop tools (DEC-021 + DEC-034, issue #73)
      * ------------------------------------------------------------------ */
     {
       type: 'function',
       name: 'research',
       description:
         'Start a background research pass on a topic while the conversation continues. ' +
-        'The Secretary investigates asynchronously and speaks again when the result is ready — ' +
+        'The Florina investigates asynchronously and speaks again when the result is ready — ' +
         'this call returns immediately.',
       parameters: {
         type: 'object',

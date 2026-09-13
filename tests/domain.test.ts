@@ -98,14 +98,14 @@ describe('domain enums', () => {
 describe('domain object construction', () => {
   it('constructs a Project with required fields', () => {
     const project: Project = buildProject({
-      name: 'agent-secretary',
+      name: 'florina',
       repo: {
-        path: '/repo/agent-secretary',
-        remoteUrl: 'git@github.com:DurdeuVlad/agent-secretary.git',
+        path: '/repo/florina',
+        remoteUrl: 'git@github.com:DurdeuVlad/florina.git',
       },
     });
     expect(project.id).toBeTruthy();
-    expect(project.name).toBe('agent-secretary');
+    expect(project.name).toBe('florina');
     expect(project.taskIds).toEqual([]);
     expect(project.policies.allowAutoApproval).toBe(false);
     expect(project.capsuleId).toBeTruthy();

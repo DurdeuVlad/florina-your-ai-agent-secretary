@@ -1,5 +1,5 @@
 /**
- * Forward-only migration framework for the Agent Secretary SQLite database.
+ * Forward-only migration framework for the Florina SQLite database.
  *
  * Migrations are an ordered, append-only list. Each migration has a unique
  * numeric `version`, a human-readable `description`, and a `run` function that

@@ -37,7 +37,7 @@ export interface SessionConfig {
   readonly autonomyLevel?: string;
   /**
    * MCP servers the agent session should register at launch (DEC-018,
-   * issue #63) — e.g. the Secretary's manager tool server for
+   * issue #63) — e.g. the Florina's manager tool server for
    * manager-role tasks. Provider-agnostic: adapters that support MCP
    * registration (ACP `session/new`) translate the spec into their
    * wire format; adapters that cannot register MCP servers ignore it.
@@ -47,12 +47,12 @@ export interface SessionConfig {
 
 /**
  * Provider-agnostic MCP server registration carried in
- * {@link SessionConfig.mcpServers}. The Secretary's own server is always
+ * {@link SessionConfig.mcpServers}. The Florina's own server is always
  * streamable HTTP; `headers` carry scoping context such as the
- * `x-secretary-project` project id.
+ * `x-florina-project` project id.
  */
 export interface McpServerSpec {
-  /** Registration name the agent sees (e.g. `secretary`). */
+  /** Registration name the agent sees (e.g. `florina`). */
   readonly name: string;
   /** HTTP(S) URL the agent connects to. */
   readonly url: string;

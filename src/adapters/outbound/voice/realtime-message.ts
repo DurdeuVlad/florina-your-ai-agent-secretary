@@ -178,7 +178,7 @@ export interface RealtimeUserTextMessage {
  * Create a new conversation item. The bridge uses this to send a
  * {@link RealtimeFunctionCallOutput} back to the server after executing a
  * tool call (DEC-021), or a {@link RealtimeUserTextMessage} when the
- * Secretary speaks again asynchronously (issue #73).
+ * Florina speaks again asynchronously (issue #73).
  */
 export interface ConversationItemCreateMessage {
   readonly type: 'conversation.item.create';

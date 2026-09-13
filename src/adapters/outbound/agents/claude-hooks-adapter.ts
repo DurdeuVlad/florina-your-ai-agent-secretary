@@ -268,7 +268,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
         agentId: this.mapperCtx.agentId,
         adapterFidelityTier: this.mapperCtx.adapterFidelityTier,
         reason: 'user',
-        details: 'Cancelled by secretary (SIGTERM sent to Claude CLI)',
+        details: 'Cancelled by Florina (SIGTERM sent to Claude CLI)',
       });
       this.completeStream();
     }

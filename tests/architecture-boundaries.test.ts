@@ -315,7 +315,7 @@ function outboundFamily(relPath: string): string {
  * Evaluate one import edge for a file under `src/adapters/outbound`.
  * Outbound adapters may import `src/core/**`, siblings inside the same
  * adapter family, node builtins, and external packages — nothing else (no
- * legacy daemon/storage/attention/secretary paths, legacy adapter facades,
+ * legacy daemon/storage/attention/florina paths, legacy adapter facades,
  * inbound adapters, bootstrap composition, or other adapter families).
  * `src/adapters/outbound/index.ts` is the only root barrel and may
  * additionally import each family's `index.ts`.
@@ -672,13 +672,13 @@ describe('src/core boundary conformance', () => {
       'attention/attention-aggregator.ts',
       'attention/diff-analyzer.ts',
       'attention/index.ts',
-      'secretary/messages.ts',
-      'secretary/tool-registry.ts',
-      'secretary/todo-tool.ts',
-      'secretary/condenser.ts',
-      'secretary/loop.ts',
-      'secretary/preference-tool.ts',
-      'secretary/index.ts',
+      'florina/messages.ts',
+      'florina/tool-registry.ts',
+      'florina/todo-tool.ts',
+      'florina/condenser.ts',
+      'florina/loop.ts',
+      'florina/preference-tool.ts',
+      'florina/index.ts',
       'voice/voice-pipeline.ts',
       'voice/response-parser.ts',
       'voice/voice-approver.ts',
@@ -792,12 +792,12 @@ describe('migrated use-case compatibility facades', () => {
     'src/attention/failure-tracker.ts',
     'src/attention/liveness-monitor.ts',
     'src/attention/attention-aggregator.ts',
-    'src/secretary/messages.ts',
-    'src/secretary/tool-registry.ts',
-    'src/secretary/todo-tool.ts',
-    'src/secretary/condenser.ts',
-    'src/secretary/loop.ts',
-    'src/secretary/preference-tool.ts',
+    'src/florina/messages.ts',
+    'src/florina/tool-registry.ts',
+    'src/florina/todo-tool.ts',
+    'src/florina/condenser.ts',
+    'src/florina/loop.ts',
+    'src/florina/preference-tool.ts',
     'src/daemon/task-lifecycle.ts',
     'src/daemon/session-manager.ts',
     'src/daemon/command-api.ts',
@@ -1263,7 +1263,7 @@ describe('migrated outbound compatibility facades', () => {
     // Preference + credential + model facades
     'src/daemon/preference-profile.ts',
     'src/daemon/credential-broker.ts',
-    'src/secretary/model-connector.ts',
+    'src/florina/model-connector.ts',
     // Diff analyzer facade
     'src/attention/diff-analyzer.ts',
     // Voice adapter facades
@@ -1388,7 +1388,7 @@ describe('src/adapters/inbound tree', () => {
     'websocket/event-stream.ts',
     'websocket/control-plane-server.ts',
     'websocket/index.ts',
-    // CLI inbound adapter family (secretary/asec binary surface)
+    // CLI inbound adapter family (florina/flor binary surface)
     'cli/client.ts',
     'cli/formatters.ts',
     'cli/deps.ts',
@@ -1399,7 +1399,7 @@ describe('src/adapters/inbound tree', () => {
     'voice/voice-session-manager.ts',
     'voice/index.ts',
     // MCP inbound adapter family (manager tool server, DEC-018, issue #63)
-    'mcp/secretary-mcp-server.ts',
+    'mcp/florina-mcp-server.ts',
     'mcp/http-server.ts',
     'mcp/manager-registration.ts',
     'mcp/index.ts',
@@ -1566,7 +1566,7 @@ const BOOTSTRAP_PREFIX = 'src/bootstrap/';
  * with core use cases. It may import `src/core/**`, canonical
  * `src/adapters/inbound/**` / `src/adapters/outbound/**` families, other
  * bootstrap files, node builtins, and external packages — never a legacy
- * facade path (`src/daemon`, `src/storage`, `src/attention`, `src/secretary`,
+ * facade path (`src/daemon`, `src/storage`, `src/attention`, `src/florina`,
  * `src/voice`, `src/desktop`, `src/domain`, or old top-level `src/adapters/*`
  * provider facades).
  */
@@ -1668,8 +1668,8 @@ describe('src/bootstrap composition root', () => {
       },
       {
         source: 'src/bootstrap/daemon.ts',
-        specifier: '../secretary/model-connector.js',
-        target: 'src/secretary/model-connector.ts',
+        specifier: '../florina/model-connector.js',
+        target: 'src/florina/model-connector.ts',
       },
       {
         source: 'src/bootstrap/daemon.ts',

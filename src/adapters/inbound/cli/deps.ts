@@ -37,7 +37,7 @@ export interface DaemonProcessManager {
 }
 
 /**
- * The voice session surface the CLI drives for `secretary voice`.
+ * The voice session surface the CLI drives for `florina voice`.
  * Satisfied by the inbound `VoiceSessionManager`.
  */
 export interface VoiceSession {
@@ -65,7 +65,7 @@ export type VoiceSessionFactory = (options: {
   readonly commandApi: CommandExecutor;
   /**
    * LiteLLM proxy config (DEC-034, issue #73). When present, the session
-   * runs heavyweight voice tools in the Secretary loop on this model.
+   * runs heavyweight voice tools in the Florina loop on this model.
    */
   readonly litellm?: {
     readonly baseUrl: string;

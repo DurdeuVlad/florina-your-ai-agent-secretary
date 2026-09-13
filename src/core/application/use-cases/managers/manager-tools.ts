@@ -1,5 +1,5 @@
 /**
- * Manager tool service — the daemon-side operations behind the Secretary's
+ * Manager tool service — the daemon-side operations behind the Florina's
  * MCP tool server (DEC-018, issue #63).
  *
  * A manager agent (itself a provider-run Task) decomposes objectives and
@@ -11,7 +11,7 @@
  * The service is transport-free and adapter-free: it depends only on core
  * ports and use cases, so it is unit-testable without a live protocol
  * session. The inbound MCP adapter
- * (`src/adapters/inbound/mcp/secretary-mcp-server.ts`) is a thin JSON-RPC
+ * (`src/adapters/inbound/mcp/florina-mcp-server.ts`) is a thin JSON-RPC
  * wrapper over this service.
  */
 import type { Task } from '../../../domain/types.js';
@@ -29,20 +29,20 @@ import type { McpServerSpec } from '../../ports/outbound/agent-runtime.js';
 
 /**
  * The MCP registration name every provider's launch config uses for the
- * Secretary's tool server (DEC-018, issue #63).
+ * Florina's tool server (DEC-018, issue #63).
  */
-export const SECRETARY_MCP_SERVER_NAME = 'secretary';
+export const FLORINA_MCP_SERVER_NAME = 'florina';
 
 /**
  * Build the {@link McpServerSpec} a manager task's launch config carries:
- * the daemon's MCP HTTP endpoint plus the `x-secretary-project` scoping
+ * the daemon's MCP HTTP endpoint plus the `x-florina-project` scoping
  * header so the server resolves this manager's project (DEC-003).
  */
-export function secretaryMcpSpec(mcpUrl: string, projectId: string): McpServerSpec {
+export function florinaMcpSpec(mcpUrl: string, projectId: string): McpServerSpec {
   return {
-    name: SECRETARY_MCP_SERVER_NAME,
+    name: FLORINA_MCP_SERVER_NAME,
     url: mcpUrl,
-    headers: { 'x-secretary-project': projectId },
+    headers: { 'x-florina-project': projectId },
   };
 }
 
@@ -97,7 +97,7 @@ export interface ManagerToolDeps {
   readonly generateId?: (prefix: string) => EntityId;
 }
 
-/** Input to {@link ManagerToolService.spawnTask} (`secretary_spawn_task`). */
+/** Input to {@link ManagerToolService.spawnTask} (`florina_spawn_task`). */
 export interface SpawnTaskInput {
   /** What the worker should accomplish. */
   readonly objective: string;
@@ -138,7 +138,7 @@ export class ManagerToolService {
   }
 
   /**
-   * `secretary_spawn_task` — route, create, and start a worker task.
+   * `florina_spawn_task` — route, create, and start a worker task.
    *
    * Order: route first (a parked decision creates no task and no worktree),
    * then persist the Task, then the worktree, then `start-task`. If the
@@ -152,8 +152,8 @@ export class ManagerToolService {
   /**
    * Spawn a **manager** task (issue #63): same route→create→worktree→start
    * path as {@link spawnTask}, but the launch config registers the
-   * Secretary's MCP server (via {@link secretaryMcpSpec}) so the provider
-   * agent discovers `secretary_spawn_task` et al. The manager itself is
+   * Florina's MCP server (via {@link florinaMcpSpec}) so the provider
+   * agent discovers `florina_spawn_task` et al. The manager itself is
    * provider-run and quota-tracked — it gets no privileged channel.
    */
   async spawnManagerTask(input: SpawnTaskInput): Promise<SpawnTaskResult> {
@@ -162,7 +162,7 @@ export class ManagerToolService {
     }
     return this.spawnTaskWithConfig(input, {
       workType: input.workType ?? 'manage',
-      mcpServers: [secretaryMcpSpec(this.deps.mcpUrl, this.deps.projectId)],
+      mcpServers: [florinaMcpSpec(this.deps.mcpUrl, this.deps.projectId)],
     });
   }
 
@@ -252,7 +252,7 @@ export class ManagerToolService {
     };
   }
 
-  /** `secretary_stop_task` — cancel a running worker task. */
+  /** `florina_stop_task` — cancel a running worker task. */
   async stopTask(input: {
     taskId: string;
     reason?: string;
@@ -265,13 +265,13 @@ export class ManagerToolService {
     return res.ok ? { ok: true } : { ok: false, error: 'error' in res ? res.error : 'failed' };
   }
 
-  /** `secretary_get_task_status` — a single task snapshot. */
+  /** `florina_get_task_status` — a single task snapshot. */
   async getTaskStatus(input: { taskId: string }): Promise<TaskSnapshot | null> {
     const res = await this.deps.commandApi.execute({ kind: 'query-task', taskId: input.taskId });
     return res.ok && 'task' in res ? res.task : null;
   }
 
-  /** `secretary_list_tasks` — all task snapshots, optionally state-filtered. */
+  /** `florina_list_tasks` — all task snapshots, optionally state-filtered. */
   async listTasks(input?: { status?: TaskStateType }): Promise<readonly TaskSnapshot[]> {
     const res = await this.deps.commandApi.execute({
       kind: 'list-tasks',
@@ -280,14 +280,14 @@ export class ManagerToolService {
     return res.ok && 'tasks' in res ? res.tasks : [];
   }
 
-  /** `secretary_get_inbox` — the manager sees open attention items. */
+  /** `florina_get_inbox` — the manager sees open attention items. */
   async getInbox(): Promise<readonly AttentionItemSnapshot[]> {
     const res = await this.deps.commandApi.execute({ kind: 'query-inbox' });
     return res.ok && 'items' in res ? res.items : [];
   }
 
   /**
-   * `secretary_request_human_input` — escalate a consequential question to
+   * `florina_request_human_input` — escalate a consequential question to
    * the human through the attention inbox (DEC-014: the manager never
    * decides what the human must answer — it asks).
    */

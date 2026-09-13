@@ -265,7 +265,7 @@ export class ClaudePtyAdapter extends BaseAdapter {
         agentId: this.mapperCtx.agentId,
         adapterFidelityTier: this.mapperCtx.adapterFidelityTier,
         reason: 'user',
-        details: 'Cancelled by secretary (Ctrl-C sent to PTY)',
+        details: 'Cancelled by Florina (Ctrl-C sent to PTY)',
       });
       this.completeStream();
     }

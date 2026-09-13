@@ -1,5 +1,5 @@
 /**
- * Terminal output formatters for the `secretary` / `asec` CLI (#20, DEC-026).
+ * Terminal output formatters for the `florina` / `flor` CLI (#20, DEC-026).
  *
  * Each formatter turns a typed response payload (from the typed command API,
  * issue #19) into a human-readable, scannable string suitable for a terminal.
@@ -138,7 +138,7 @@ function inboxItemSummary(item: AttentionItemSnapshot): string {
  * Task formatting
  * ------------------------------------------------------------------ */
 
-/** Format a single task snapshot for `secretary task <id>`. */
+/** Format a single task snapshot for `florina task <id>`. */
 export function formatTask(task: TaskSnapshot): string {
   const lines: string[] = [];
   lines.push(`${BOLD('Task')} ${task.id}`);
@@ -156,7 +156,7 @@ export function formatTask(task: TaskSnapshot): string {
   return lines.join('\n') + '\n';
 }
 
-/** Format a compact task list for `secretary tasks`. */
+/** Format a compact task list for `florina tasks`. */
 export function formatTaskList(tasks: readonly TaskSnapshot[]): string {
   if (tasks.length === 0) {
     return 'No tasks found.\n';
@@ -194,7 +194,7 @@ function formatTaskState(state: string): string {
  * Completion digest formatting
  * ------------------------------------------------------------------ */
 
-/** Format a completion digest for `secretary digest <taskId>`. */
+/** Format a completion digest for `florina digest <taskId>`. */
 export function formatDigest(digest: CompletionDigest): string {
   const lines: string[] = [];
   lines.push(`${BOLD('Completion Digest')} — task ${digest.taskId}`);
@@ -264,7 +264,7 @@ function formatDuration(ms: number): string {
  * Metrics formatting
  * ------------------------------------------------------------------ */
 
-/** Format a metrics snapshot for `secretary metrics`. */
+/** Format a metrics snapshot for `florina metrics`. */
 export function formatMetrics(snapshot: MetricsSnapshot): string {
   const lines: string[] = [];
   lines.push(`${BOLD('Metrics Snapshot')} — ${snapshot.timestamp}`);

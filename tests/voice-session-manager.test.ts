@@ -100,7 +100,7 @@ describe('VoiceSessionManager: tool call mapping', () => {
 describe('VoiceSessionManager: default voice tools', () => {
   const tools = buildDefaultVoiceTools();
 
-  it('includes the core Secretary tools', () => {
+  it('includes the core Florina tools', () => {
     const names = tools.map((t) => t.name);
     expect(names).toContain('get_inbox');
     expect(names).toContain('list_tasks');

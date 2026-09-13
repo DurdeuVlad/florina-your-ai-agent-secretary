@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { WebSocket } from 'ws';
 
 import {
-  SecretaryDaemon,
+  FlorinaDaemon,
   DEFAULT_DAEMON_PORT,
   type ApiRequest,
   type ApiResponse,
@@ -22,7 +22,7 @@ import type { SupervisorEvent } from '../src/domain/index.js';
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -129,7 +129,7 @@ describe('daemon: lifecycle', () => {
   });
 
   it('starts, listens on localhost, and stops cleanly', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -153,7 +153,7 @@ describe('daemon: lifecycle', () => {
   });
 
   it('stop is a no-op when already stopped', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -181,7 +181,7 @@ describe('daemon: single-instance enforcement', () => {
   });
 
   it('second start fails when another instance holds the lockfile', async () => {
-    const first = new SecretaryDaemon({
+    const first = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -190,7 +190,7 @@ describe('daemon: single-instance enforcement', () => {
     });
     await first.start();
 
-    const second = new SecretaryDaemon({
+    const second = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -206,7 +206,7 @@ describe('daemon: single-instance enforcement', () => {
     // Write a lockfile pointing at a pid that is definitely not alive.
     const stalePid = 999_999;
     fs.writeFileSync(lockfile, String(stalePid));
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -221,12 +221,12 @@ describe('daemon: single-instance enforcement', () => {
 
 describe('daemon: control-plane API', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: WebSocket;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -377,12 +377,12 @@ describe('daemon: control-plane API', () => {
 
 describe('daemon: live event stream', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: WebSocket;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -457,7 +457,7 @@ describe('daemon: health check', () => {
   });
 
   it('returns daemon + storage status', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -477,7 +477,7 @@ describe('daemon: health check', () => {
   });
 
   it('throws when daemon is not running', () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,
@@ -504,7 +504,7 @@ describe('daemon: integration (start, API, events, stop)', () => {
   });
 
   it('full flow: start daemon, call API, receive events, stop', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,

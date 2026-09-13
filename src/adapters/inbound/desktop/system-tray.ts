@@ -323,7 +323,7 @@ export class SystemTrayManager {
 
   /** Derive the tray tooltip text for a daemon status. */
   private tooltipFor(status: DaemonStatus): string {
-    return `Agent Secretary — ${statusLabel(status)}`;
+    return `Florina — ${statusLabel(status)}`;
   }
 }
 

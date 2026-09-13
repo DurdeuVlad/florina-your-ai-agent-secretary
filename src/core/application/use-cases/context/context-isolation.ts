@@ -1,7 +1,7 @@
 /**
  * Context isolation enforcement (DEC-003, DEC-020).
  *
- * The Secretary is a context router, not a blender: a loaded capsule's
+ * The Florina is a context router, not a blender: a loaded capsule's
  * data must never silently bleed into another scope's query. This module
  * provides the hard boundary checks that make that guarantee enforceable
  * at the call site rather than relying on prompt engineering.

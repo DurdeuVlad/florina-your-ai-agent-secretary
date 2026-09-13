@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
   ManagerToolService,
-  secretaryMcpSpec,
+  florinaMcpSpec,
 } from '../src/core/application/use-cases/managers/manager-tools.js';
 import { CommandApi } from '../src/core/application/use-cases/tasks/command-api.js';
 import type { CommandApiDeps } from '../src/core/application/use-cases/tasks/command-api.js';
@@ -92,7 +92,7 @@ function createFixture(
     profile: { rules, denied: [] },
   });
 
-  const createWorktree = vi.fn(() => '/repo/.secretary-worktrees/task-1');
+  const createWorktree = vi.fn(() => '/repo/.florina-worktrees/task-1');
   const service = new ManagerToolService({
     commandApi: api,
     router,
@@ -129,7 +129,7 @@ describe('ManagerToolService', () => {
     const task = fx.taskStore.getById(res.taskId);
     expect(task).not.toBeNull();
     expect(task!.projectId).toBe(fx.projectId);
-    expect(task!.worktreePath).toBe('/repo/.secretary-worktrees/task-1');
+    expect(task!.worktreePath).toBe('/repo/.florina-worktrees/task-1');
     const status = await fx.service.getTaskStatus({ taskId: res.taskId });
     expect(status).not.toBeNull();
   });
@@ -203,15 +203,15 @@ describe('ManagerToolService', () => {
 describe('manager launch config (issue #63)', () => {
   const MCP_URL = 'http://127.0.0.1:9090/mcp';
 
-  it('secretaryMcpSpec carries the project-scoping header', () => {
-    expect(secretaryMcpSpec(MCP_URL, 'proj-1')).toEqual({
-      name: 'secretary',
+  it('florinaMcpSpec carries the project-scoping header', () => {
+    expect(florinaMcpSpec(MCP_URL, 'proj-1')).toEqual({
+      name: 'florina',
       url: MCP_URL,
-      headers: { 'x-secretary-project': 'proj-1' },
+      headers: { 'x-florina-project': 'proj-1' },
     });
   });
 
-  it('spawnManagerTask registers the Secretary MCP server in the launch config', async () => {
+  it('spawnManagerTask registers the Florina MCP server in the launch config', async () => {
     const fx = createFixture([{ provider: 'codex' }], MCP_URL);
     const execute = vi.spyOn(fx.api, 'execute');
     const res = await fx.service.spawnManagerTask({ objective: 'manage project alpha' });
@@ -221,9 +221,9 @@ describe('manager launch config (issue #63)', () => {
     if (startCall?.kind === 'start-task') {
       expect(startCall.sessionConfig.mcpServers).toEqual([
         {
-          name: 'secretary',
+          name: 'florina',
           url: MCP_URL,
-          headers: { 'x-secretary-project': fx.projectId },
+          headers: { 'x-florina-project': fx.projectId },
         },
       ]);
     }

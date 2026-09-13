@@ -6,13 +6,13 @@
  * CapacityRouter.
  */
 export {
-  createSecretaryMcpServer,
-  runSecretaryMcpStdio,
-  SECRETARY_MCP_SERVER_NAME,
-  SECRETARY_MCP_SERVER_VERSION,
-} from './secretary-mcp-server.js';
-export { SecretaryMcpHttpServer, MCP_HTTP_PATH, mcpProjectId } from './http-server.js';
-export type { ManagerServiceFactory, SecretaryMcpHttpServerOptions } from './http-server.js';
+  createFlorinaMcpServer,
+  runFlorinaMcpStdio,
+  FLORINA_MCP_SERVER_NAME,
+  FLORINA_MCP_SERVER_VERSION,
+} from './florina-mcp-server.js';
+export { FlorinaMcpHttpServer, MCP_HTTP_PATH, mcpProjectId } from './http-server.js';
+export type { ManagerServiceFactory, FlorinaMcpHttpServerOptions } from './http-server.js';
 export {
   managerMcpRegistration,
   managerMcpRegistrations,

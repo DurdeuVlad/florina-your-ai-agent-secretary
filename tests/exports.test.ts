@@ -11,8 +11,8 @@ describe('public API exports', () => {
     expect(api.VERSION).toBe('0.0.1');
   });
 
-  it('exports the SecretaryDaemon from the daemon module', () => {
-    expect(typeof api.SecretaryDaemon).toBe('function');
+  it('exports the FlorinaDaemon from the daemon module', () => {
+    expect(typeof api.FlorinaDaemon).toBe('function');
   });
 
   it('exports CommandApi from the daemon module', () => {

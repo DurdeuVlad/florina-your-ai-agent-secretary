@@ -7,7 +7,7 @@ import { vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-import { SecretaryMcpHttpServer, mcpProjectId } from '../src/adapters/inbound/mcp/http-server.js';
+import { FlorinaMcpHttpServer, mcpProjectId } from '../src/adapters/inbound/mcp/http-server.js';
 import { managerServiceFactory } from '../src/bootstrap/mcp-server.js';
 import {
   managerMcpRegistration,
@@ -32,7 +32,7 @@ import {
 import { buildProject } from '../src/core/domain/index.js';
 
 interface Fixture {
-  server: SecretaryMcpHttpServer;
+  server: FlorinaMcpHttpServer;
   db: StorageDatabase;
   projectId: string;
   tmpDir: string;
@@ -80,7 +80,7 @@ async function createFixture(): Promise<Fixture> {
   const api = new CommandApi(deps);
   const preferenceStore = await PreferenceProfileStore.load(join(tmpDir, 'preferences.json'));
 
-  const server = new SecretaryMcpHttpServer({
+  const server = new FlorinaMcpHttpServer({
     port: 0,
     serviceFactory: managerServiceFactory({
       commandApi: api,
@@ -101,7 +101,7 @@ async function mcpClient(url: string): Promise<Client> {
   return client;
 }
 
-describe('SecretaryMcpHttpServer', () => {
+describe('FlorinaMcpHttpServer', () => {
   let fx: Fixture;
   beforeEach(async () => {
     fx = await createFixture();
@@ -118,16 +118,16 @@ describe('SecretaryMcpHttpServer', () => {
       const tools = await client.listTools();
       const names = tools.tools.map((t) => t.name).sort();
       expect(names).toEqual([
-        'secretary_get_inbox',
-        'secretary_get_task_status',
-        'secretary_list_tasks',
-        'secretary_request_human_input',
-        'secretary_spawn_task',
-        'secretary_stop_task',
+        'florina_get_inbox',
+        'florina_get_task_status',
+        'florina_list_tasks',
+        'florina_request_human_input',
+        'florina_spawn_task',
+        'florina_stop_task',
       ]);
 
       const result = await client.callTool({
-        name: 'secretary_list_tasks',
+        name: 'florina_list_tasks',
         arguments: {},
       });
       expect(result.isError).toBeFalsy();
@@ -138,15 +138,15 @@ describe('SecretaryMcpHttpServer', () => {
     }
   });
 
-  it('resolves the project scope from the x-secretary-project header', async () => {
+  it('resolves the project scope from the x-florina-project header', async () => {
     const client = new Client({ name: 'test-client', version: '0.0.1' });
     const transport = new StreamableHTTPClientTransport(new URL(fx.server.url), {
-      requestInit: { headers: { 'x-secretary-project': fx.projectId } },
+      requestInit: { headers: { 'x-florina-project': fx.projectId } },
     });
     await client.connect(transport);
     try {
       const result = await client.callTool({
-        name: 'secretary_get_inbox',
+        name: 'florina_get_inbox',
         arguments: {},
       });
       expect(result.isError).toBeFalsy();
@@ -194,7 +194,7 @@ describe('SecretaryMcpHttpServer', () => {
 
   it('mcpProjectId prefers the header over the query param', () => {
     const req = {
-      headers: { 'x-secretary-project': 'p_header' },
+      headers: { 'x-florina-project': 'p_header' },
       url: '/mcp?project=p_query',
     } as Parameters<typeof mcpProjectId>[0];
     expect(mcpProjectId(req)).toBe('p_header');

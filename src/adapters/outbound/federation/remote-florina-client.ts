@@ -1,5 +1,5 @@
 /**
- * Remote Secretary client (DEC-036, issue #78) — a persistent WebSocket
+ * Remote Florina client (DEC-036, issue #78) — a persistent WebSocket
  * connection to a child daemon's control plane, parent side.
  *
  * Unlike {@link DaemonClient} (one connection per request, for the CLI),
@@ -22,8 +22,8 @@ import { WebSocket } from 'ws';
 import type { Command, Response } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { SupervisorEvent } from '../../../core/domain/events.js';
 
-/** Options for {@link RemoteSecretaryClient}. */
-export interface RemoteSecretaryClientOptions {
+/** Options for {@link RemoteFlorinaClient}. */
+export interface RemoteFlorinaClientOptions {
   /** Child daemon host (e.g. `server-x` or `127.0.0.1`). */
   readonly host: string;
   /** Child daemon control-plane port. */
@@ -35,10 +35,13 @@ export interface RemoteSecretaryClientOptions {
 }
 
 /** Raised for connection, auth, or protocol failures. */
-export class RemoteSecretaryError extends Error {
-  constructor(message: string, readonly cause?: Error) {
+export class RemoteFlorinaError extends Error {
+  constructor(
+    message: string,
+    readonly cause?: Error,
+  ) {
     super(message);
-    this.name = 'RemoteSecretaryError';
+    this.name = 'RemoteFlorinaError';
   }
 }
 
@@ -47,8 +50,8 @@ export class RemoteSecretaryError extends Error {
  * three inbound message shapes (auth replies, event envelopes, command
  * responses) over one socket.
  */
-export class RemoteSecretaryClient {
-  private readonly options: RemoteSecretaryClientOptions;
+export class RemoteFlorinaClient {
+  private readonly options: RemoteFlorinaClientOptions;
   private socket: WebSocket | null = null;
   /** FIFO queue of resolvers for in-flight command responses. */
   private readonly pendingResponses: Array<{
@@ -61,7 +64,7 @@ export class RemoteSecretaryClient {
   private authResolve?: (ok: boolean, error?: string) => void;
   private closed = false;
 
-  constructor(options: RemoteSecretaryClientOptions) {
+  constructor(options: RemoteFlorinaClientOptions) {
     this.options = options;
   }
 
@@ -85,7 +88,7 @@ export class RemoteSecretaryClient {
       const socket = new WebSocket(this.url);
       this.socket = socket;
       const timer = setTimeout(() => {
-        reject(new RemoteSecretaryError(`connection to ${this.url} timed out`));
+        reject(new RemoteFlorinaError(`connection to ${this.url} timed out`));
         socket.close();
       }, timeoutMs);
 
@@ -94,7 +97,7 @@ export class RemoteSecretaryClient {
       socket.on('error', (err: Error) => {
         clearTimeout(timer);
         if (this.authResolve === undefined && this.pendingResponses.length === 0) {
-          reject(new RemoteSecretaryError(`cannot reach child daemon at ${this.url}`, err));
+          reject(new RemoteFlorinaError(`cannot reach child daemon at ${this.url}`, err));
         }
       });
 
@@ -110,7 +113,7 @@ export class RemoteSecretaryClient {
           if (ok) {
             resolve();
           } else {
-            reject(new RemoteSecretaryError(error ?? 'authentication rejected'));
+            reject(new RemoteFlorinaError(error ?? 'authentication rejected'));
           }
         };
         socket.send(JSON.stringify({ type: 'auth', token: this.options.authToken }));
@@ -159,7 +162,7 @@ export class RemoteSecretaryClient {
       resolve(null);
     }
     for (const pending of this.pendingResponses.splice(0)) {
-      pending.reject(new RemoteSecretaryError('connection closed'));
+      pending.reject(new RemoteFlorinaError('connection closed'));
     }
     this.socket?.close();
     this.socket = null;
@@ -171,7 +174,7 @@ export class RemoteSecretaryClient {
 
   private requireSocket(): WebSocket {
     if (this.socket === null || this.socket.readyState !== WebSocket.OPEN) {
-      throw new RemoteSecretaryError('not connected');
+      throw new RemoteFlorinaError('not connected');
     }
     return this.socket;
   }
@@ -189,7 +192,10 @@ export class RemoteSecretaryClient {
     const msg = parsed as Record<string, unknown>;
 
     if (msg['type'] === 'auth') {
-      this.authResolve?.(msg['ok'] === true, typeof msg['error'] === 'string' ? msg['error'] : undefined);
+      this.authResolve?.(
+        msg['ok'] === true,
+        typeof msg['error'] === 'string' ? msg['error'] : undefined,
+      );
       this.authResolve = undefined;
       return;
     }

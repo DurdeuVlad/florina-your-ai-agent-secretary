@@ -3,7 +3,7 @@
  * querying the event journal and composing relevant context (#30, DEC-020,
  * DEC-012).
  *
- * When a session resumes or a new session picks up a task, the Secretary
+ * When a session resumes or a new session picks up a task, the Florina
  * must assemble the relevant context from:
  * - The immutable event journal (DEC-012) — the source of truth.
  * - Task metadata (objective, state, agent/session assignments).

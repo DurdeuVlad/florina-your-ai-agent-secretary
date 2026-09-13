@@ -1,5 +1,5 @@
 /**
- * Secretary MCP tool server — the inbound surface manager agents use to
+ * Florina MCP tool server — the inbound surface manager agents use to
  * dispatch work through the daemon (DEC-018, DEC-037, issue #63).
  *
  * Provider CLIs register this server (`devin mcp add`, `claude mcp add`,
@@ -18,8 +18,8 @@ import { z } from 'zod';
 import type { ManagerToolService } from '../../../core/application/use-cases/managers/manager-tools.js';
 
 /** Server identity reported in the MCP handshake. */
-export const SECRETARY_MCP_SERVER_NAME = 'agent-secretary';
-export const SECRETARY_MCP_SERVER_VERSION = '0.1.0';
+export const FLORINA_MCP_SERVER_NAME = 'florina';
+export const FLORINA_MCP_SERVER_VERSION = '0.1.0';
 
 function text(value: unknown): { content: [{ type: 'text'; text: string }] } {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
@@ -29,17 +29,17 @@ function text(value: unknown): { content: [{ type: 'text'; text: string }] } {
  * Build an {@link McpServer} exposing the manager tool set. The caller
  * connects it to a transport — stdio in production, in-memory in tests.
  */
-export function createSecretaryMcpServer(service: ManagerToolService): McpServer {
+export function createFlorinaMcpServer(service: ManagerToolService): McpServer {
   const server = new McpServer({
-    name: SECRETARY_MCP_SERVER_NAME,
-    version: SECRETARY_MCP_SERVER_VERSION,
+    name: FLORINA_MCP_SERVER_NAME,
+    version: FLORINA_MCP_SERVER_VERSION,
   });
 
   server.registerTool(
-    'secretary_spawn_task',
+    'florina_spawn_task',
     {
       description:
-        'Delegate a piece of work to a worker agent through the Secretary daemon. ' +
+        'Delegate a piece of work to a worker agent through the Florina daemon. ' +
         'Routes through the quota-aware CapacityRouter and preference rules; returns ' +
         'the spawned task/session ids, or a parked result with the earliest quota reset. ' +
         'All work dispatched to agents must go through this tool.',
@@ -64,7 +64,7 @@ export function createSecretaryMcpServer(service: ManagerToolService): McpServer
   );
 
   server.registerTool(
-    'secretary_stop_task',
+    'florina_stop_task',
     {
       description: 'Cancel a running worker task.',
       inputSchema: {
@@ -76,7 +76,7 @@ export function createSecretaryMcpServer(service: ManagerToolService): McpServer
   );
 
   server.registerTool(
-    'secretary_get_task_status',
+    'florina_get_task_status',
     {
       description: 'Get the current state snapshot of a task by id.',
       inputSchema: { taskId: z.string() },
@@ -85,7 +85,7 @@ export function createSecretaryMcpServer(service: ManagerToolService): McpServer
   );
 
   server.registerTool(
-    'secretary_list_tasks',
+    'florina_list_tasks',
     {
       description: 'List tasks, optionally filtered by lifecycle state.',
       inputSchema: {
@@ -109,7 +109,7 @@ export function createSecretaryMcpServer(service: ManagerToolService): McpServer
   );
 
   server.registerTool(
-    'secretary_get_inbox',
+    'florina_get_inbox',
     {
       description: 'List open attention items the human has not yet resolved.',
       inputSchema: {},
@@ -118,7 +118,7 @@ export function createSecretaryMcpServer(service: ManagerToolService): McpServer
   );
 
   server.registerTool(
-    'secretary_request_human_input',
+    'florina_request_human_input',
     {
       description:
         'Ask the human a consequential question. Creates an attention item in the ' +
@@ -138,10 +138,10 @@ export function createSecretaryMcpServer(service: ManagerToolService): McpServer
 }
 
 /**
- * Run the Secretary MCP server over stdio — the transport provider CLIs use
+ * Run the Florina MCP server over stdio — the transport provider CLIs use
  * when the daemon is registered as a local MCP server.
  */
-export async function runSecretaryMcpStdio(service: ManagerToolService): Promise<void> {
-  const server = createSecretaryMcpServer(service);
+export async function runFlorinaMcpStdio(service: ManagerToolService): Promise<void> {
+  const server = createFlorinaMcpServer(service);
   await server.connect(new StdioServerTransport());
 }

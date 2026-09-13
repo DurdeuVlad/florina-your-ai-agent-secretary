@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { SecretaryDaemon } from '../src/daemon/index.js';
+import { FlorinaDaemon } from '../src/daemon/index.js';
 import {
   StorageDatabase,
   EventRepository,
@@ -42,7 +42,7 @@ import {
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-adapter-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-adapter-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -393,7 +393,7 @@ function seedJournal(
 
 describe('integration: daemon + stub adapter + event journal', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let journalDb: StorageDatabase;
   let events: EventRepository;
 
@@ -408,7 +408,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
     journalDb.open();
     events = new EventRepository(journalDb.connection);
 
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,

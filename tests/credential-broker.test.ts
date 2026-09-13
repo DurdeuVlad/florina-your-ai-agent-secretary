@@ -27,7 +27,7 @@ import type { Policy } from '../src/domain/policy.js';
 
 /** Create a unique temp directory for the file-based credential store. */
 function tempCredentialDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'asec-cred-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flor-cred-'));
   return path.join(dir, 'credentials');
 }
 

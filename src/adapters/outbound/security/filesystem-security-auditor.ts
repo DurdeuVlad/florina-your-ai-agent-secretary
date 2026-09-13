@@ -13,7 +13,7 @@
  *
  * Related decisions:
  * - DEC-010: Approve the underlying capability, never an LLM summary.
- * - DEC-011: The secretary narrows permissions, never silently widens them.
+ * - DEC-011: Florina narrows permissions, never silently widens them.
  * - DEC-022: Credential/secret brokering model.
  */
 
@@ -311,7 +311,7 @@ export class SecurityAuditor {
   }
 
   /**
-   * Audit for DEC-011 compliance: the secretary must narrow permissions, never
+   * Audit for DEC-011 compliance: Florina must narrow permissions, never
    * silently widen them.
    *
    * Flags:

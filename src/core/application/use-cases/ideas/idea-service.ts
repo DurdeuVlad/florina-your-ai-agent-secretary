@@ -12,7 +12,7 @@
  * before a single `spawnTask` runs — same normal daemon path every
  * manager uses (DEC-018), no special channel.
  *
- * Voice/monologue capture and the Secretary's editorial role in the
+ * Voice/monologue capture and the Florina's editorial role in the
  * ledger arrive with #73 — this service is the surface they drive.
  */
 import type {
@@ -30,7 +30,7 @@ import type { SpawnTaskInput, SpawnTaskResult } from '../managers/manager-tools.
 /**
  * Dispatch surface for confirmed Briefs. The daemon satisfies it by
  * constructing the per-project {@link ManagerToolService} — the same
- * routing/worktree/start path `secretary_spawn_task` uses.
+ * routing/worktree/start path `florina_spawn_task` uses.
  */
 export interface BriefDispatcherPort {
   spawnTask(projectId: string, input: SpawnTaskInput): Promise<SpawnTaskResult>;
@@ -117,7 +117,7 @@ export class IdeaService {
 
   /**
    * Compile the ledger into a reviewable Brief — the spec is the frozen
-   * markdown snapshot; the caller (the Secretary, today; voice later)
+   * markdown snapshot; the caller (the Florina, today; voice later)
    * supplies the delegation plan. Returns the persisted `draft`.
    */
   compileBrief(ideaId: string, plan: DelegationPlan): Brief {

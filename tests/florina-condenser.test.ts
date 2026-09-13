@@ -2,13 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   Condenser,
   extractiveSummarizer,
-  SecretaryLoop,
+  FlorinaLoop,
   ToolRegistry,
   type ChatMessage,
   type CompletionResponse,
   type LoopEvent,
   type ModelConnector,
-} from '../src/secretary/index.js';
+} from '../src/florina/index.js';
 
 const user = (n: number): ChatMessage => ({ role: 'user', content: `message ${n}` });
 
@@ -84,7 +84,7 @@ describe('Condenser', () => {
   });
 });
 
-describe('SecretaryLoop + Condenser', () => {
+describe('FlorinaLoop + Condenser', () => {
   it('condenses the model view each iteration and emits provenance', async () => {
     const seen: number[] = [];
     const connector: ModelConnector = {
@@ -95,7 +95,7 @@ describe('SecretaryLoop + Condenser', () => {
     };
     const condenser = new Condenser({ threshold: 4, keepFirst: 1, keepLast: 1 });
     const events: LoopEvent[] = [];
-    const loop = new SecretaryLoop({
+    const loop = new FlorinaLoop({
       connector,
       tools: new ToolRegistry(),
       condenser,

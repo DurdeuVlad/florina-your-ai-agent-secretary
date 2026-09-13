@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CLI entrypoint shim for the `secretary` / `asec` binary (DEC-026,
+ * CLI entrypoint shim for the `florina` / `flor` binary (DEC-026,
  * issue #20, DEC-037).
  *
  * The package.json `bin` entry stays at `dist/cli/index.js`. This shim

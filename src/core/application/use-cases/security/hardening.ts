@@ -8,7 +8,7 @@
  *
  * Related decisions:
  * - DEC-010: Approve the underlying capability, never an LLM summary.
- * - DEC-011: The secretary narrows permissions, never silently widens them.
+ * - DEC-011: Florina narrows permissions, never silently widens them.
  * - DEC-022: Credential/secret brokering model — workers never receive raw
  *   credentials.
  */

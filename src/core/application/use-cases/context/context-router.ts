@@ -1,7 +1,7 @@
 /**
  * Context Capsule routing (DEC-003, DEC-020).
  *
- * The Secretary acts as a context router: it loads the relevant Context
+ * The Florina acts as a context router: it loads the relevant Context
  * Capsule on demand when discussion enters a scope, and unloads it
  * (discards it from working memory) when switching away. Only one
  * capsule is active at a time, and the isolation layer guarantees a
@@ -34,7 +34,7 @@ export type CapsuleSource = CapsuleSourcePort;
  * a single scoped fetch.
  */
 export interface GlobalAwareness {
-  /** Project capsules currently known to the Secretary. */
+  /** Project capsules currently known to the Florina. */
   readonly projects: readonly ProjectCapsule[];
 }
 
@@ -141,7 +141,7 @@ export class ContextRouter {
   }
 
   /**
-   * Global Secretary level: lightweight awareness of which projects
+   * Global Florina level: lightweight awareness of which projects
    * exist and where detailed context can be retrieved. This enumerates
    * project capsules only — it does not load task or session capsules
    * into working memory.

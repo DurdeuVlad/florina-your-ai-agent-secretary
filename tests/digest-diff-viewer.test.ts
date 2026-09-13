@@ -86,7 +86,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
     decisions: [{ id: 'DEC-007', note: 'Autonomy is user-configurable.' }],
     riskHighlights: [],
     commitHash: 'abc1234',
-    branchName: 'secretary/add-pagination',
+    branchName: 'florina/add-pagination',
     ...overrides,
   };
 }
@@ -94,7 +94,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
 /** Build a DiffDigest with sensible defaults. */
 function makeDiff(overrides: Partial<DiffDigest> = {}): DiffDigest {
   return {
-    branch: 'secretary/add-pagination',
+    branch: 'florina/add-pagination',
     baseCommit: 'base000',
     headCommit: 'head000',
     author: 'Test <test@example.com>',
@@ -122,7 +122,7 @@ describe('DigestDiffViewerModel.buildView', () => {
     expect(data.hasDiff).toBe(true);
     expect(data.digest.taskId).toBe('add-pagination');
     expect(data.diff).not.toBeNull();
-    expect(data.diff!.branch).toBe('secretary/add-pagination');
+    expect(data.diff!.branch).toBe('florina/add-pagination');
   });
 
   it('falls back to digest.diffSummary when no standalone diff is given', () => {

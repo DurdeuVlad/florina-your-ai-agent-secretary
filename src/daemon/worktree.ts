@@ -12,22 +12,22 @@
  *
  * Every task worktree is created on a branch named exactly:
  *
- *     secretary/<task-slug>
+ *     florina/<task-slug>
  *
  * where `<task-slug>` is a sanitized, filesystem- and git-safe identifier
- * derived from the task (e.g. `add-cursor-pagination`). The `secretary/`
- * prefix namespaces all Secretary-managed branches so they are clearly
+ * derived from the task (e.g. `add-cursor-pagination`). The `florina/`
+ * prefix namespaces all Florina-managed branches so they are clearly
  * distinguishable from human-authored feature branches and can be listed /
  * cleaned up safely. This convention is documented here, in AGENTS.md, and
  * recorded as the resolution of DEC-024 in the Decision Ledger.
  *
  * ## Prune policy (DEC-024 — resolved)
  *
- * Worktrees are retained until an explicit prune (`secretary prune`).
+ * Worktrees are retained until an explicit prune (`florina prune`).
  * `pruneWorktree` removes a worktree only when it is **clean** (no
  * uncommitted changes). Dirty worktrees are never silently deleted —
  * `pruneWorktree` throws so the human can decide what to do with the
- * uncommitted work (DEC-011: the Secretary narrows permissions and never
+ * uncommitted work (DEC-011: the Florina narrows permissions and never
  * silently widens them; destroying uncommitted work would be a destructive
  * widening).
  */
@@ -42,10 +42,10 @@ import { GitWorktreeAdapter } from '../adapters/outbound/git/worktree-manager.js
  * `src/adapters/outbound/git/worktree-manager.ts` (issue #92).
  */
 export {
-  SECRETARY_BRANCH_PREFIX,
-  SECRETARY_WORKTREE_DIR,
+  FLORINA_BRANCH_PREFIX,
+  FLORINA_WORKTREE_DIR,
   sanitizeSlug,
-  secretaryBranchName,
+  florinaBranchName,
 } from '../adapters/outbound/git/worktree-manager.js';
 
 /**
@@ -95,11 +95,11 @@ export class WorktreeManager extends GitWorktreeAdapter {
 
   /**
    * Create a new git worktree for a task on the branch
-   * `secretary/<task-slug>` (DEC-024).
+   * `florina/<task-slug>` (DEC-024).
    *
    * The worktree is placed at a deterministic path derived from the
    * repository path and the task slug:
-   * `<parent-of-repo>/.secretary-worktrees/<repo-basename>-<task-slug>`.
+   * `<parent-of-repo>/.florina-worktrees/<repo-basename>-<task-slug>`.
    *
    * @param repoPath   Absolute path to the main repository (the worktree's
    *                   base).

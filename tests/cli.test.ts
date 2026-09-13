@@ -122,7 +122,7 @@ function emptyMetrics(): MetricsSnapshot {
 function uniquePidFile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-test-${process.pid}-${Math.random().toString(36).slice(2)}.pid`,
+    `florina-test-${process.pid}-${Math.random().toString(36).slice(2)}.pid`,
   );
 }
 
@@ -130,7 +130,7 @@ function uniquePidFile(): string {
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -138,7 +138,7 @@ function uniqueLockfile(): string {
 function uniqueDbPath(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-test-${process.pid}-${Math.random().toString(36).slice(2)}.db`,
+    `florina-test-${process.pid}-${Math.random().toString(36).slice(2)}.db`,
   );
 }
 
@@ -832,6 +832,6 @@ describe('subcommand dispatch (mocked transport)', () => {
 describe('constants', () => {
   it('DEFAULT_PID_FILE is in the OS tmpdir', () => {
     expect(DEFAULT_PID_FILE).toContain(os.tmpdir());
-    expect(DEFAULT_PID_FILE).toContain('agent-secretary');
+    expect(DEFAULT_PID_FILE).toContain('florina');
   });
 });

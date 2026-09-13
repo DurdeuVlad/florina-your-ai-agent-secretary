@@ -15,7 +15,7 @@
  * Any state may transition to `Error`; reconnection moves back through
  * `Connecting`.
  *
- * Security (DEC-011): the voice model is given only the Secretary's typed
+ * Security (DEC-011): the voice model is given only the Florina's typed
  * tool definitions (`start_task`, `get_inbox`, `approve_permission`, ...).
  * Spoken intent triggers tool calls executed on the localhost daemon; the
  * voice model never executes arbitrary shell commands directly.
@@ -121,7 +121,7 @@ export interface RealtimeBridgeOptions {
   readonly model?: string;
   /** Voice for AI responses (e.g. `alloy`, `echo`, `shimmer`). */
   readonly voice?: string;
-  /** System prompt / instructions for the Secretary persona. */
+  /** System prompt / instructions for the Florina persona. */
   readonly instructions?: string;
   /** Typed tool definitions exposed to the voice model. */
   readonly tools?: readonly RealtimeTool[];
@@ -422,7 +422,7 @@ export class RealtimeBridge implements RealtimeSessionPort {
    *
    * Long-running tool work finishes after the speech turn that triggered
    * it; the result is injected as a user message followed by
-   * `response.create` so the Secretary speaks again when the result is
+   * `response.create` so the Florina speaks again when the result is
    * ready — the original turn was never blocked.
    */
   sendUserMessage(text: string): void {

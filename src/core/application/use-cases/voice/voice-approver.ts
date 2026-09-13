@@ -18,7 +18,7 @@
  *
  * Fail-safe (DEC-011): on timeout (no spoken response within the configurable
  * window) or on any uncertain parse, the approver returns a **deny**. The
- * Secretary narrows permissions, never silently widens them.
+ * Florina narrows permissions, never silently widens them.
  *
  * The approver depends on a minimal {@link VoiceInteractionBridge} interface
  * rather than {@link RealtimeBridge} directly, so the voice interaction logic

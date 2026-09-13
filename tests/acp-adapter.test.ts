@@ -141,9 +141,9 @@ describe('AcpAdapter', () => {
       ...config,
       mcpServers: [
         {
-          name: 'secretary',
+          name: 'florina',
           url: 'http://127.0.0.1:9090/mcp',
-          headers: { 'x-secretary-project': 'proj-1' },
+          headers: { 'x-florina-project': 'proj-1' },
         },
       ],
     });
@@ -154,9 +154,9 @@ describe('AcpAdapter', () => {
     expect(sessionNew?.params?.['mcpServers']).toEqual([
       {
         type: 'http',
-        name: 'secretary',
+        name: 'florina',
         url: 'http://127.0.0.1:9090/mcp',
-        headers: [{ name: 'x-secretary-project', value: 'proj-1' }],
+        headers: [{ name: 'x-florina-project', value: 'proj-1' }],
       },
     ]);
     await adapter.disconnect();

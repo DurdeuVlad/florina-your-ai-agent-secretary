@@ -1,8 +1,8 @@
 /**
- * CLI surface for the `secretary` / `asec` binary (DEC-026, issue #20,
+ * CLI surface for the `florina` / `flor` binary (DEC-026, issue #20,
  * DEC-037).
  *
- * Terminal-first surface over the local Secretary daemon. Parses argv with a
+ * Terminal-first surface over the local Florina daemon. Parses argv with a
  * lightweight, dependency-free parser and dispatches to subcommands that talk
  * to the daemon via {@link DaemonClient} (typed Command API, #19) or manage
  * the daemon lifecycle via an injected {@link DaemonProcessManager}.
@@ -139,10 +139,10 @@ function isValueToken(tok: string): boolean {
  * Help text
  * ================================================================== */
 
-const HELP_TEXT = `secretary — an open-source attention broker for coding agents
+const HELP_TEXT = `florina — an open-source attention broker for coding agents
 
-Usage: secretary <command> [options] [args]
-       asec      <command> [options] [args]
+Usage: florina <command> [options] [args]
+       flor      <command> [options] [args]
 
 Commands:
   start                       Start the daemon (in-process for MVP)
@@ -164,8 +164,8 @@ Commands:
   metrics [--since <ms>]      Show metrics snapshot
   prune <taskId>              Prune the worktree for a task
   voice [--api-key <key>]     Start a voice session (push-to-talk)
-      [--litellm-url <url>]   LiteLLM proxy for Secretary-loop tools
-      [--model <name>]        Model on the proxy (SECRETARY_MODEL)
+      [--litellm-url <url>]   LiteLLM proxy for Florina-loop tools
+      [--model <name>]        Model on the proxy (FLORINA_MODEL)
   version                     Print version
   help                        Print this help
 
@@ -245,7 +245,7 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
     default:
       return {
         exitCode: 1,
-        message: `Unknown command: ${ctx.args.command}\nRun 'secretary help' for usage.`,
+        message: `Unknown command: ${ctx.args.command}\nRun 'florina help' for usage.`,
       };
   }
 }
@@ -303,7 +303,7 @@ async function cmdApprove(ctx: CommandContext): Promise<CommandResult> {
   if (!taskId || !approvalId) {
     return {
       exitCode: 1,
-      message: 'Usage: secretary approve <taskId> <approvalId> [--grant|--deny] [--note <text>]\n',
+      message: 'Usage: florina approve <taskId> <approvalId> [--grant|--deny] [--note <text>]\n',
     };
   }
   const decision = resolveDecision(ctx.args.flags);
@@ -336,7 +336,7 @@ async function cmdApprove(ctx: CommandContext): Promise<CommandResult> {
 async function cmdAck(ctx: CommandContext): Promise<CommandResult> {
   const [itemId] = ctx.args.positionals;
   if (!itemId) {
-    return { exitCode: 1, message: 'Usage: secretary ack <itemId>\n' };
+    return { exitCode: 1, message: 'Usage: florina ack <itemId>\n' };
   }
   const command: AcknowledgeItemCommand = { kind: 'ack-item', itemId };
   const response = await sendCommand(ctx.deps.client, command);
@@ -351,7 +351,7 @@ async function cmdAck(ctx: CommandContext): Promise<CommandResult> {
 async function cmdResolve(ctx: CommandContext): Promise<CommandResult> {
   const [itemId] = ctx.args.positionals;
   if (!itemId) {
-    return { exitCode: 1, message: 'Usage: secretary resolve <itemId>\n' };
+    return { exitCode: 1, message: 'Usage: florina resolve <itemId>\n' };
   }
   const command: ResolveItemCommand = { kind: 'resolve-item', itemId };
   const response = await sendCommand(ctx.deps.client, command);
@@ -366,7 +366,7 @@ async function cmdResolve(ctx: CommandContext): Promise<CommandResult> {
 async function cmdEscalate(ctx: CommandContext): Promise<CommandResult> {
   const [itemId] = ctx.args.positionals;
   if (!itemId) {
-    return { exitCode: 1, message: 'Usage: secretary escalate <itemId>\n' };
+    return { exitCode: 1, message: 'Usage: florina escalate <itemId>\n' };
   }
   const command: EscalateItemCommand = { kind: 'escalate-item', itemId };
   const response = await sendCommand(ctx.deps.client, command);
@@ -396,7 +396,7 @@ async function cmdTasks(ctx: CommandContext): Promise<CommandResult> {
 async function cmdTask(ctx: CommandContext): Promise<CommandResult> {
   const [taskId] = ctx.args.positionals;
   if (!taskId) {
-    return { exitCode: 1, message: 'Usage: secretary task <taskId>\n' };
+    return { exitCode: 1, message: 'Usage: florina task <taskId>\n' };
   }
   const response = await sendCommand(ctx.deps.client, { kind: 'query-task', taskId });
   if (!response.ok) {
@@ -413,7 +413,7 @@ async function cmdTask(ctx: CommandContext): Promise<CommandResult> {
 async function cmdDigest(ctx: CommandContext): Promise<CommandResult> {
   const [taskId] = ctx.args.positionals;
   if (!taskId) {
-    return { exitCode: 1, message: 'Usage: secretary digest <taskId>\n' };
+    return { exitCode: 1, message: 'Usage: florina digest <taskId>\n' };
   }
   const command: GetDigestCommand = { kind: 'get-digest', taskId };
   const response = await sendCommand(ctx.deps.client, command);
@@ -451,7 +451,7 @@ async function cmdMetrics(ctx: CommandContext): Promise<CommandResult> {
 async function cmdPrune(ctx: CommandContext): Promise<CommandResult> {
   const [taskId] = ctx.args.positionals;
   if (!taskId) {
-    return { exitCode: 1, message: 'Usage: secretary prune <taskId>\n' };
+    return { exitCode: 1, message: 'Usage: florina prune <taskId>\n' };
   }
   const response = await sendCommand(ctx.deps.client, { kind: 'prune-worktree', taskId });
   if (!response.ok) {
@@ -463,7 +463,7 @@ async function cmdPrune(ctx: CommandContext): Promise<CommandResult> {
 
 /* --- version --- */
 function cmdVersion(_ctx: CommandContext): CommandResult {
-  return { exitCode: 0, message: `secretary ${VERSION}\n` };
+  return { exitCode: 0, message: `florina ${VERSION}\n` };
 }
 
 /* --- voice --- */
@@ -486,7 +486,7 @@ async function cmdVoice(ctx: CommandContext): Promise<CommandResult> {
     return {
       exitCode: 1,
       message:
-        'Daemon is not running. Start it first with `secretary start` in another terminal.\n',
+        'Daemon is not running. Start it first with `florina start` in another terminal.\n',
     };
   }
 
@@ -506,21 +506,21 @@ async function cmdVoice(ctx: CommandContext): Promise<CommandResult> {
     };
 
     // DEC-034 / issue #73: heavyweight voice tools (research, ledger
-    // notes, brief compilation) run in the Secretary loop on a LiteLLM
-    // proxy. Config comes from flags or SECRETARY_LITELLM_* env vars;
+    // notes, brief compilation) run in the Florina loop on a LiteLLM
+    // proxy. Config comes from flags or FLORINA_LITELLM_* env vars;
     // when absent the async tools report "not wired" instead of hanging.
     const litellmUrl =
       typeof ctx.args.flags['litellm-url'] === 'string'
         ? ctx.args.flags['litellm-url']
-        : process.env['SECRETARY_LITELLM_URL'];
+        : process.env['FLORINA_LITELLM_URL'];
     const litellmModel =
       typeof ctx.args.flags['model'] === 'string'
         ? ctx.args.flags['model']
-        : process.env['SECRETARY_MODEL'];
+        : process.env['FLORINA_MODEL'];
     const litellmKey =
       typeof ctx.args.flags['litellm-key'] === 'string'
         ? ctx.args.flags['litellm-key']
-        : process.env['SECRETARY_LITELLM_KEY'];
+        : process.env['FLORINA_LITELLM_KEY'];
     const litellm =
       typeof litellmUrl === 'string' && typeof litellmModel === 'string'
         ? {
@@ -680,7 +680,7 @@ export async function runCli(argv: readonly string[], deps: CliDependencies): Pr
 
   // `version` and `help` don't need a client/runner.
   if (args.command === 'version') {
-    out(`secretary ${VERSION}\n`);
+    out(`florina ${VERSION}\n`);
     return 0;
   }
   if (args.command === 'help') {

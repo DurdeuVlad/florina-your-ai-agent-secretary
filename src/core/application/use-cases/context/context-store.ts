@@ -2,7 +2,7 @@
  * In-memory cache of the currently active Context Capsule (DEC-020).
  *
  * The store holds exactly one active capsule at a time — the lightweight,
- * on-demand working context the Secretary reasons over. When the active
+ * on-demand working context the Florina reasons over. When the active
  * scope is switched away, the old capsule is discarded from memory (not
  * retained), enforcing the "context router, not blender" model (DEC-003).
  *
@@ -34,7 +34,7 @@ export interface LoadRecord {
  *
  * The store is deliberately minimal: it does not cache multiple capsules
  * and it does not persist anything. Its job is to be the single source of
- * truth for "what scope is the Secretary currently reasoning over" so the
+ * truth for "what scope is the Florina currently reasoning over" so the
  * isolation layer can guard against cross-scope contamination.
  */
 export class ContextStore {

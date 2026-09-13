@@ -1,5 +1,5 @@
 /**
- * TodoStore + todo tool — the Secretary maintains its own working plan
+ * TodoStore + todo tool — the Florina maintains its own working plan
  * (DEC-034, issue #70; goose plan-maintenance pattern).
  *
  * The store is plain in-memory state owned by whoever hosts the loop (the
@@ -12,7 +12,7 @@ import type { ToolDefinition, ToolResult } from './tool-registry.js';
 /** Status of one todo item. */
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
-/** One item in the Secretary's working plan. */
+/** One item in the Florina's working plan. */
 export interface TodoItem {
   readonly id: string;
   readonly content: string;
@@ -77,9 +77,7 @@ function render(items: readonly TodoItem[]): string {
   if (items.length === 0) {
     return 'todo list is empty';
   }
-  return items
-    .map((item) => `[${item.status}] ${item.id}: ${item.content}`)
-    .join('\n');
+  return items.map((item) => `[${item.status}] ${item.id}: ${item.content}`).join('\n');
 }
 
 function requireString(args: Record<string, unknown>, key: string): string {

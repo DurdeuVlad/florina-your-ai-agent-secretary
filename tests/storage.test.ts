@@ -240,14 +240,14 @@ describe('storage: round-trip persistence for every domain object', () => {
 
   it('Project round-trips through the database', () => {
     const project = buildProject({
-      name: 'agent-secretary',
+      name: 'florina',
       repo: { path: '/repo', remoteUrl: 'git@github.com:foo/bar.git', defaultBranch: 'main' },
       policies: { allowAutoApproval: true, livenessTimeoutMs: 30000, alwaysApprove: ['push'] },
     });
     ctx.projects.insert(project);
     const retrieved = ctx.projects.getById(project.id);
     expect(retrieved).not.toBeNull();
-    expect(retrieved!.name).toBe('agent-secretary');
+    expect(retrieved!.name).toBe('florina');
     expect(retrieved!.repo.path).toBe('/repo');
     expect(retrieved!.repo.remoteUrl).toBe('git@github.com:foo/bar.git');
     expect(retrieved!.policies.allowAutoApproval).toBe(true);
@@ -897,7 +897,7 @@ describe('storage: migration framework is forward-only', () => {
 
   it('a second open on a persistent db does not re-apply migrations', () => {
     // Use a temp file to simulate a persistent database.
-    const tmp = path.join(os.tmpdir(), `asec-test-${Date.now()}.db`);
+    const tmp = path.join(os.tmpdir(), `flor-test-${Date.now()}.db`);
     const db1 = new StorageDatabase({ path: tmp });
     const r1 = db1.open();
     expect(r1.appliedVersion).toBe(3);

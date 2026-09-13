@@ -1,5 +1,5 @@
 /**
- * DaemonClient — WebSocket client for the `secretary` / `asec` CLI (#20).
+ * DaemonClient — WebSocket client for the `florina` / `flor` CLI (#20).
  *
  * The CLI talks to the running daemon over the same localhost WebSocket the
  * daemon exposes (DEC-008). Each request is a typed {@link Command} from the
@@ -178,7 +178,7 @@ function toConnectionError(err: unknown, url: string): DaemonConnectionError {
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes('ECONNREFUSED')) {
     return new DaemonConnectionError(
-      `Cannot connect to daemon at ${url}. Is it running? Try 'secretary start'.`,
+      `Cannot connect to daemon at ${url}. Is it running? Try 'florina start'.`,
       err instanceof Error ? err : undefined,
     );
   }

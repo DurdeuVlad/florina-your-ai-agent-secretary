@@ -28,9 +28,9 @@ import {
   renderPreferencesView,
 } from '../src/adapters/inbound/desktop/views/preferences-view.js';
 import {
-  buildSecretaryView,
-  renderSecretaryView,
-} from '../src/adapters/inbound/desktop/views/secretary-view.js';
+  buildFlorinaView,
+  renderFlorinaView,
+} from '../src/adapters/inbound/desktop/views/florina-view.js';
 import {
   buildContextHealthView,
   renderContextHealthView,
@@ -348,12 +348,12 @@ describe('preferences view', () => {
 });
 
 /* ================================================================== *
- * Secretary view
+ * Florina view
  * ================================================================== */
 
-describe('secretary view', () => {
+describe('florina view', () => {
   it('renders plan, in-flight research, and pending memories', () => {
-    const view = buildSecretaryView({
+    const view = buildFlorinaView({
       todos: [
         { id: 't1', content: 'research quota APIs', status: 'in_progress' },
         { id: 't2', content: 'draft brief', status: 'pending' },
@@ -363,7 +363,7 @@ describe('secretary view', () => {
       ],
       pendingMemories: [{ id: 'm1', summary: 'prefers codex for heavy work', scope: 'user' }],
     });
-    const tree = renderSecretaryView(view);
+    const tree = renderFlorinaView(view);
     expect(findAll(tree, 'TodoRow')).toHaveLength(2);
     expect(findAll(tree, 'ResearchJob')).toHaveLength(1);
     expect(findAll(tree, 'PendingMemory')).toHaveLength(1);

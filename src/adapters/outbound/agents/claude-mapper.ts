@@ -17,7 +17,7 @@
  * - Permission prompts map to `ApprovalRequested` per DEC-010. Because PTY
  *   output does not expose structured capability fields, unparseable fields
  *   fall back to `unknown`/conservative defaults (DEC-010 fallback). The
- *   Secretary never silently widens permissions (DEC-011): an unparseable
+ *   Florina never silently widens permissions (DEC-011): an unparseable
  *   permission prompt defaults to the highest risk level (`critical`) so it
  *   always requires human confirmation.
  * - The mapper never invents data: fields absent from the text are defaulted

@@ -1,4 +1,4 @@
-# Agent Secretary
+# Florina
 
 > **An open-source attention broker for coding agents.**
 
@@ -6,7 +6,7 @@ One inbox that lets developers delegate work, monitors heterogeneous agent
 sessions, suppresses routine noise, and interrupts only when a human decision
 is genuinely needed.
 
-Agent Secretary sits between **human attention** and **agent sessions**,
+Florina sits between **human attention** and **agent sessions**,
 turning a messy collection of parallel agent work into a manageable stream of
 tasks, deliverables, decisions, and attention requests.
 
@@ -22,7 +22,7 @@ tasks, deliverables, decisions, and attention requests.
 
 | Component | Description |
 |-----------|-------------|
-| **Secretary loop** | The only self-owned agent loop — reasoning, plan/todo tool, typed tool registry, context management — connected to any model via a LiteLLM proxy (DEC-034). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
+| **Florina loop** | The only self-owned agent loop — reasoning, plan/todo tool, typed tool registry, context management — connected to any model via a LiteLLM proxy (DEC-034). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
 | **Daemon** | Local control plane — a WebSocket server on `ws://127.0.0.1:17419` that fans out to concurrent agent sessions (DEC-005). Hosts the MCP tool server managers dispatch through (DEC-018). |
 | **Capacity router** | Quota-aware provider routing: `QuotaLedger` tracks per-provider windows (`used_pct`, `resets_at`), `CapacityRouter` enforces the hard floor — quota, deny rules — while managers express NL preferences (DEC-029). |
 | **Adapters** | Bridges into a canonical `SupervisorEvent` stream (DEC-019): Codex (JSON-RPC, Tier A), Claude Code (hooks, Tier B), ACP-native CLIs — `devin acp`, `gemini --acp` (Tier C, DEC-030), `agy` headless stream-json (Tier D). A stub adapter is included for local testing. |
@@ -30,7 +30,7 @@ tasks, deliverables, decisions, and attention requests.
 | **Voice pipeline** | OpenAI Realtime API with a `whisper.cpp` fallback; supports voice approvals and spoken notifications (DEC-021). |
 | **Desktop skeleton** | Electron/Tauri-ready client with an IPC bridge and view components (DEC-028). |
 | **Storage** | Immutable SQLite event journal, context capsules, completion digests, and per-idea markdown ledgers (DEC-012/020/033). |
-| **Security** | Audit framework and hardening utilities enforcing DEC-011 (the Secretary narrows permissions, never silently widens them). |
+| **Security** | Audit framework and hardening utilities enforcing DEC-011 (the Florina narrows permissions, never silently widens them). |
 
 ## Quick Start
 
@@ -48,52 +48,52 @@ npm run build
 
 ### Run
 
-The daemon runs in-process for the MVP — `secretary start` blocks the calling
+The daemon runs in-process for the MVP — `florina start` blocks the calling
 terminal until stopped. Use two terminals:
 
 ```bash
 # Terminal 1 — start the daemon (blocks until stopped)
-secretary start
+florina start
 
 # Terminal 2 — query the running daemon
-secretary inbox     # view attention items
-secretary tasks     # list tasks
-secretary help      # see all commands
-secretary stop      # stop the daemon (from Terminal 2)
+florina inbox     # view attention items
+florina tasks     # list tasks
+florina help      # see all commands
+florina stop      # stop the daemon (from Terminal 2)
 ```
 
-The CLI connects to the daemon at `ws://127.0.0.1:17419` by default. `asec` is
-available as an alias for `secretary` (DEC-026).
+The CLI connects to the daemon at `ws://127.0.0.1:17419` by default. `flor` is
+available as an alias for `florina` (DEC-026).
 
 ## CLI Usage
 
 ```bash
-secretary start                              # start the daemon (blocks; use a separate terminal for other commands)
-secretary stop                               # stop the running daemon
-secretary status                             # show daemon status
+florina start                              # start the daemon (blocks; use a separate terminal for other commands)
+florina stop                               # stop the running daemon
+florina status                             # show daemon status
 
-secretary inbox                              # list attention inbox items
-secretary inbox --priority Critical           # filter by priority
-secretary inbox --status Pending              # filter by item state
+florina inbox                              # list attention inbox items
+florina inbox --priority Critical           # filter by priority
+florina inbox --status Pending              # filter by item state
 
-secretary approve <taskId> <approvalId> --grant   # grant a pending approval
-secretary approve <taskId> <approvalId> --deny    # deny a pending approval
-secretary ack <itemId>                       # acknowledge an attention item
-secretary resolve <itemId>                   # resolve an attention item
-secretary escalate <itemId>                  # escalate an item to Critical
+florina approve <taskId> <approvalId> --grant   # grant a pending approval
+florina approve <taskId> <approvalId> --deny    # deny a pending approval
+florina ack <itemId>                       # acknowledge an attention item
+florina resolve <itemId>                   # resolve an attention item
+florina escalate <itemId>                  # escalate an item to Critical
 
-secretary tasks                              # list tasks
-secretary tasks --status InProgress           # filter by task state
-secretary task <taskId>                      # show task details
-secretary digest <taskId>                    # show completion digest for a task
+florina tasks                              # list tasks
+florina tasks --status InProgress           # filter by task state
+florina task <taskId>                      # show task details
+florina digest <taskId>                    # show completion digest for a task
 
-secretary metrics                            # show metrics snapshot
-secretary metrics --since 3600000             # metrics for the last hour
+florina metrics                            # show metrics snapshot
+florina metrics --since 3600000             # metrics for the last hour
 
-secretary prune <taskId>                     # prune a task's worktree
-secretary voice [--api-key <key>]            # start a voice session (push-to-talk)
-secretary version                            # print version
-secretary help                               # print full help
+florina prune <taskId>                     # prune a task's worktree
+florina voice [--api-key <key>]            # start a voice session (push-to-talk)
+florina version                            # print version
+florina help                               # print full help
 ```
 
 ## Development
@@ -117,8 +117,8 @@ src/
   daemon/      # local control plane (IPC/WebSocket server), quota ledger, capacity router
   adapters/    # Codex / Claude Code / ACP bridges -> SupervisorEvent
   attention/   # deterministic attention engine (DEC-014)
-  secretary/   # the self-owned agent loop (DEC-034)
-  cli/         # `secretary` / `asec` binary (DEC-026)
+  florina/   # the self-owned agent loop (DEC-034)
+  cli/         # `florina` / `flor` binary (DEC-026)
   voice/       # Realtime + whisper.cpp pipeline (DEC-021)
   desktop/     # Electron/Tauri client (DEC-028)
   storage/     # SQLite event journal + Context Capsules (DEC-012/020)
@@ -152,15 +152,15 @@ architecture, contracts, models, and code are derived from them.
 - Codex (JSON-RPC, Tier A) and Claude Code (hooks, Tier B) adapters
 - Deterministic attention engine with priority inbox
 - SQLite event journal, context capsules, completion digests
-- CLI (`secretary` / `asec`) with inbox, approvals, tasks, digest, metrics, voice
+- CLI (`florina` / `flor`) with inbox, approvals, tasks, digest, metrics, voice
 - Voice pipeline (OpenAI Realtime + whisper.cpp fallback) wired into daemon + CLI
 - Desktop skeleton (Electron/Tauri-ready IPC bridge)
 - Security/audit framework (DEC-011 compliance)
 - Git worktree lifecycle per task (DEC-024)
 
-**Planned (milestone [M6-Multi-Provider-Orchestration](https://github.com/DurdeuVlad/agent-secretary/milestone/7)):**
+**Planned (milestone [M6-Multi-Provider-Orchestration](https://github.com/DurdeuVlad/florina/milestone/7)):**
 
-- Secretary agentic loop + LiteLLM model connector (DEC-034, #70)
+- Florina agentic loop + LiteLLM model connector (DEC-034, #70)
 - Quota-aware capacity routing across subscriptions (DEC-029, #60, #71)
 - ACP generic adapter → Devin + Gemini; `agy` headless (DEC-030, #61, #62)
 - Per-project manager agents dispatching via daemon MCP tools (DEC-018, #63)

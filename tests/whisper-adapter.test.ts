@@ -653,7 +653,7 @@ describe('WhisperCppBackend (via MockProcessRunner)', () => {
   let modelPath: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'secretary-whisper-test-'));
+    tempDir = await mkdtemp(join(tmpdir(), 'florina-whisper-test-'));
     modelPath = join(tempDir, 'model.bin');
     await writeFile(modelPath, 'fake-model');
   });
