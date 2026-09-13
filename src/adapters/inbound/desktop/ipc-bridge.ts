@@ -25,6 +25,9 @@ export const IPC_CHANNELS = [
   'digest:update',
   'metrics:update',
   'voice:state',
+  'daemon:status',
+  'command',
+  'command:result',
 ] as const;
 
 /** A single IPC channel name. */

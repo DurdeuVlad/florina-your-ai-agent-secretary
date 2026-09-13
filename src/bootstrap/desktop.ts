@@ -38,6 +38,11 @@ const RENDERER_HTML = fileURLToPath(
   new URL('../../src/adapters/inbound/desktop/renderer/index.html', import.meta.url),
 );
 
+/** CJS preload exposing the whitelisted `window.florina` bridge API. */
+const PRELOAD = fileURLToPath(
+  new URL('../../src/adapters/inbound/desktop/renderer/preload.cjs', import.meta.url),
+);
+
 /** Repo root — used to resolve the CLI entry for tray daemon actions. */
 const CLI_ENTRY = fileURLToPath(new URL('../cli/index.js', import.meta.url));
 
@@ -52,7 +57,7 @@ function runCli(action: 'start' | 'stop'): void {
 async function main(): Promise<void> {
   await app.whenReady();
 
-  const window = new ElectronWindowBackend();
+  const window = new ElectronWindowBackend(PRELOAD);
   const ipc = new ElectronIpcTransport();
   const desktopApp = new DesktopApp({
     window,
@@ -89,8 +94,14 @@ async function main(): Promise<void> {
   }
   window.loadFile(RENDERER_HTML);
 
+  // Renderer → daemon commands (approve, preferences, …) route through the
+  // main process socket so the sandboxed page never holds a connection.
+  ipc.onMessage('command', (msg) => void desktopApp.handleRendererCommand(msg));
+
   try {
     await desktopApp.connectToDaemon(DAEMON_URL, readLocalAuthToken());
+    desktopApp.subscribeToEvents();
+    void desktopApp.refreshNow();
   } catch {
     // The renderer surfaces the disconnected state and retries on its own.
   }

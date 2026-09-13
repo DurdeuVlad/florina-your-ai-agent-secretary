@@ -36,6 +36,13 @@ export class ElectronWindowBackend implements WindowBackend {
   private win: BrowserWindow | null = null;
   private readonly handlers = new Map<WindowEvent, Set<WindowEventHandler>>();
 
+  /**
+   * @param preloadPath - Absolute path to the CJS preload script
+   *   (`renderer/preload.cjs`). Required for the sandboxed renderer to
+   *   receive RenderTrees and dispatch commands over the IPC bridge.
+   */
+  constructor(private readonly preloadPath?: string) {}
+
   createWindow(options: WindowOptions = {}): void {
     if (this.win !== null && !this.win.isDestroyed()) {
       throw new Error('ElectronWindowBackend: window already created');
@@ -52,11 +59,12 @@ export class ElectronWindowBackend implements WindowBackend {
       show: false,
       backgroundColor: '#0d1117',
       webPreferences: {
-        // Renderer needs only DOM + WebSocket (daemon control plane). No
-        // Node APIs, no preload — the strictest default surface (DEC-011).
+        // Renderer gets DOM + the whitelisted contextBridge API only. No
+        // Node integration; the CJS preload exposes florina.on/command.
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
+        ...(this.preloadPath !== undefined ? { preload: this.preloadPath } : {}),
       },
     });
     for (const event of this.handlers.keys()) {
