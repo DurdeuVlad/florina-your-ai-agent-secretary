@@ -6,6 +6,8 @@
  * Claude", "Haiku for repeatable reading"), the Secretary records it here:
  * a routing rule or a model-level deny. Denies are machine-enforced by the
  * daemon — a prompt preference can never be prompt-engineered around.
+ * Every mutation is persisted immediately so learned preferences survive
+ * restarts.
  */
 import type { PreferenceProfileStore } from '../daemon/preference-profile.js';
 import { PreferenceProfileError } from '../daemon/preference-profile.js';
@@ -87,21 +89,27 @@ export function createPreferenceTool(store: PreferenceProfileStore): ToolDefinit
             model: model as string | undefined,
             workTypes: workTypes as string[] | undefined,
           });
+          await store.save();
           return { content: `rule added\n${render(store)}` };
         case 'deny':
           store.addDeny({ provider: needProvider(), model: model as string | undefined });
+          await store.save();
           return { content: `deny added\n${render(store)}` };
         case 'remove-rule': {
           const removed = store.removeRule(needProvider(), model as string | undefined);
-          return removed
-            ? { content: `rule removed\n${render(store)}` }
-            : { content: 'no matching rule', isError: true };
+          if (!removed) {
+            return { content: 'no matching rule', isError: true };
+          }
+          await store.save();
+          return { content: `rule removed\n${render(store)}` };
         }
         case 'remove-deny': {
           const removed = store.removeDeny(needProvider(), model as string | undefined);
-          return removed
-            ? { content: `deny removed\n${render(store)}` }
-            : { content: 'no matching deny', isError: true };
+          if (!removed) {
+            return { content: 'no matching deny', isError: true };
+          }
+          await store.save();
+          return { content: `deny removed\n${render(store)}` };
         }
         default:
           throw new PreferenceProfileError(`unknown action "${String(action)}"`);

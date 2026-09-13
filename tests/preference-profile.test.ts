@@ -75,7 +75,8 @@ describe('PreferenceProfileStore', () => {
 
 describe('preference tool', () => {
   it('drives the store through the tool interface', async () => {
-    const store = await PreferenceProfileStore.load(await tempPath());
+    const path = await tempPath();
+    const store = await PreferenceProfileStore.load(path);
     const registry = new ToolRegistry();
     registry.register(createPreferenceTool(store));
 
@@ -98,6 +99,11 @@ describe('preference tool', () => {
     const list = await registry.execute('preference', { action: 'list' });
     expect(list.content).toContain('claude-code');
     expect(list.content).toContain('deny');
+
+    // Tool writes are durable — a fresh load sees the learned preferences.
+    const reloaded = await PreferenceProfileStore.load(path);
+    expect(reloaded.toProfile().denied[0].model).toBe('opus');
+    expect(reloaded.toProfile().rules[0].model).toBe('haiku');
 
     const missing = await registry.execute('preference', {
       action: 'remove-rule',
