@@ -184,7 +184,7 @@ describe('e2e: full daemon lifecycle (#39)', () => {
     }
 
     // --- wait for stub adapter events to flow through the bus -------
-    // The stub emits 13 events; plus the AgentStarted from CommandApi.
+    // The stub emits 21 events; plus the AgentStarted from CommandApi.
     // Wait until the metrics collector has recorded a healthy number.
     await waitFor(() => {
       const snap = daemon.commandPlane;

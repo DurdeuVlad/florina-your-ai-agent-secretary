@@ -61,7 +61,7 @@ export function buildDefaultStubEvents(ctx: {
   };
   return [
     { ...base, type: 'AgentStarted', objective: 'Stub objective', workingDir: '/repo/stub' },
-    { ...base, type: 'AgentProgress', message: 'Stub progress', step: 1, totalSteps: 13 },
+    { ...base, type: 'AgentProgress', message: 'Stub progress', step: 1, totalSteps: 21 },
     { ...base, type: 'ToolStarted', toolName: 'shell', args: { cmd: 'echo stub' } },
     {
       ...base,
@@ -126,13 +126,57 @@ export function buildDefaultStubEvents(ctx: {
     },
     { ...base, type: 'AgentFailed', error: 'Stub failure', exitCode: 1, recoverable: true },
     { ...base, type: 'AgentStopped', reason: 'user', details: 'Stub cancelled' },
+    {
+      ...base,
+      type: 'UsageReported',
+      provider: 'stub',
+      model: 'stub-model',
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+    },
+    {
+      ...base,
+      type: 'QuotaObserved',
+      provider: 'stub',
+      window: 'five_hour',
+      usedPct: 0.5,
+      resetsAt: null,
+      status: 'allowed',
+      source: 'polled',
+    },
+    {
+      ...base,
+      type: 'TaskFailedOver',
+      fromProvider: 'stub',
+      toProvider: 'stub-2',
+      reason: 'quota_exhausted',
+    },
+    { ...base, type: 'TaskParked', reason: 'stub park', resumeAt: null },
+    { ...base, type: 'TaskResumed', provider: 'stub-2' },
+    {
+      ...base,
+      type: 'ContextCondensed',
+      summary: 'stub condensation',
+      forgottenEventIds: ['evt-1'],
+      keptEventCount: 2,
+    },
+    { ...base, type: 'ContextHealthChanged', status: 'ok', windowFillPct: 0.1 },
+    {
+      ...base,
+      type: 'VerificationObserved',
+      kind: 'test',
+      success: true,
+      command: 'npm test',
+      summary: 'stub verified',
+    },
   ];
 }
 
 /**
  * A Tier E stub adapter for pipeline testing.
  *
- * Emits synthetic events across all 13 {@link SupervisorEvent} variants. The
+ * Emits synthetic events across all 21 {@link SupervisorEvent} variants. The
  * event sequence is configurable via {@link StubAdapterOptions.events}; by
  * default the stub emits one of each variant in canonical order.
  */
