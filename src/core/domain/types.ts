@@ -229,6 +229,8 @@ export type SupervisorEventKind =
   | 'TestFinished'
   | 'ApprovalRequested'
   | 'HumanInputRequested'
+  | 'ApprovalGranted'
+  | 'ApprovalRevoked'
   | 'AgentBlocked'
   | 'AgentCompleted'
   | 'AgentFailed'

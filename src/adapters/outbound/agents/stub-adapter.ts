@@ -61,7 +61,7 @@ export function buildDefaultStubEvents(ctx: {
   };
   return [
     { ...base, type: 'AgentStarted', objective: 'Stub objective', workingDir: '/repo/stub' },
-    { ...base, type: 'AgentProgress', message: 'Stub progress', step: 1, totalSteps: 21 },
+    { ...base, type: 'AgentProgress', message: 'Stub progress', step: 1, totalSteps: 23 },
     { ...base, type: 'ToolStarted', toolName: 'shell', args: { cmd: 'echo stub' } },
     {
       ...base,
@@ -71,8 +71,21 @@ export function buildDefaultStubEvents(ctx: {
       durationMs: 10,
       result: { stdout: 'stub' },
     },
-    { ...base, type: 'FileChanged', path: 'src/stub.ts', changeType: 'modified', additions: 1, deletions: 0 },
-    { ...base, type: 'TestStarted', framework: 'vitest', target: 'tests/stub.test.ts', command: 'npm test' },
+    {
+      ...base,
+      type: 'FileChanged',
+      path: 'src/stub.ts',
+      changeType: 'modified',
+      additions: 1,
+      deletions: 0,
+    },
+    {
+      ...base,
+      type: 'TestStarted',
+      framework: 'vitest',
+      target: 'tests/stub.test.ts',
+      command: 'npm test',
+    },
     {
       ...base,
       type: 'TestFinished',
@@ -108,6 +121,22 @@ export function buildDefaultStubEvents(ctx: {
       prompt: 'Stub: which branch?',
       inputType: 'choice',
       choices: ['main', 'develop'],
+    },
+    {
+      ...base,
+      type: 'ApprovalGranted',
+      grantId: 'stub-grant-1',
+      capability: 'network',
+      duration: 'task',
+      scopes: [{ type: 'network', targets: ['registry.npmjs.org'] }],
+      grantedBy: 'stub-human',
+      authorityLevel: 'authenticatedUI',
+    },
+    {
+      ...base,
+      type: 'ApprovalRevoked',
+      grantId: 'stub-grant-1',
+      reason: 'stub revocation',
     },
     {
       ...base,
@@ -176,7 +205,7 @@ export function buildDefaultStubEvents(ctx: {
 /**
  * A Tier E stub adapter for pipeline testing.
  *
- * Emits synthetic events across all 21 {@link SupervisorEvent} variants. The
+ * Emits synthetic events across all 23 {@link SupervisorEvent} variants. The
  * event sequence is configurable via {@link StubAdapterOptions.events}; by
  * default the stub emits one of each variant in canonical order.
  */
@@ -201,7 +230,9 @@ export class StubAdapter extends BaseAdapter {
   async startRun(taskId: string, sessionConfig: SessionConfig): Promise<StartRunResult> {
     this.requireConnected();
     if (this.activeSession !== null) {
-      throw new Error(`Stub adapter already has an active session: ${this.activeSession.sessionId}`);
+      throw new Error(
+        `Stub adapter already has an active session: ${this.activeSession.sessionId}`,
+      );
     }
     this.activeSession = sessionConfig;
     this.cancelled = false;

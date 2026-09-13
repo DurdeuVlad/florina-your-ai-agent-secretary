@@ -44,11 +44,45 @@ export const MIGRATION_001_INITIAL: Migration = {
 };
 
 /**
+ * Migration 2 (issue #67): the `capability_grants` table — durable,
+ * journaled scope grants the grant service auto-approves against
+ * (DEC-010/011). Grants are never deleted; revocation sets `revoked_at`.
+ */
+export const MIGRATION_002_CAPABILITY_GRANTS: Migration = {
+  version: 2,
+  description: 'Create the capability_grants table',
+  run: (db: Database.Database) => {
+    db.exec(/* sql */ `
+      CREATE TABLE IF NOT EXISTS capability_grants (
+        id              TEXT PRIMARY KEY,
+        project_id      TEXT NOT NULL,
+        task_id         TEXT,
+        capability      TEXT NOT NULL,
+        scopes          TEXT NOT NULL,
+        duration        TEXT NOT NULL,
+        granted_by      TEXT NOT NULL,
+        authority_level TEXT NOT NULL,
+        granted_at      TEXT NOT NULL,
+        expires_at      TEXT,
+        revoked_at      TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_capability_grants_project
+        ON capability_grants (project_id);
+      CREATE INDEX IF NOT EXISTS idx_capability_grants_task
+        ON capability_grants (task_id);
+    `);
+  },
+};
+
+/**
  * The ordered list of all known migrations. New migrations are appended here
  * with an incrementing version number; the framework applies only those not
  * yet recorded in the `_migrations` table.
  */
-export const MIGRATIONS: readonly Migration[] = [MIGRATION_001_INITIAL];
+export const MIGRATIONS: readonly Migration[] = [
+  MIGRATION_001_INITIAL,
+  MIGRATION_002_CAPABILITY_GRANTS,
+];
 
 /**
  * SQL for the `_migrations` bookkeeping table that records which migration

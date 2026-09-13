@@ -7,7 +7,7 @@
  * journal, or any human-facing surface.
  *
  * Design rules enforced by this module:
- * - The `type` field is the discriminant for the 21-variant union.
+ * - The `type` field is the discriminant for the 23-variant union.
  * - Every variant carries the common envelope: `timestamp`, `taskId`,
  *   `sessionId`, `agentId`, and `adapterFidelityTier`.
  * - `ApprovalRequested` and `HumanInputRequested` carry structured capability
@@ -52,13 +52,14 @@
  * ```
  */
 
-import type { AdapterFidelityTier } from './enums.js';
+import type { AdapterFidelityTier, ApprovalAuthorityLevel } from './enums.js';
 import type { SupervisorEventKind } from './types.js';
 import { CAPABILITY_TYPE_VALUES, CAPABILITY_RISK_LEVEL_VALUES } from './capabilities.js';
 import type {
   CapabilityType,
   CapabilityRiskLevel,
   CapabilityRequest,
+  CapabilityScope,
   ISO8601Timestamp,
 } from './capabilities.js';
 
@@ -264,6 +265,40 @@ export interface HumanInputRequestedEvent extends SupervisorEventBase, Capabilit
   inputType?: 'text' | 'choice' | 'confirm';
   /** Predefined choices when `inputType` is `choice`. */
   choices?: string[];
+}
+
+/**
+ * Emitted when a capability grant is recorded — the human (or a covering
+ * grant, for an auto-approve application) authorized a structured scope
+ * (DEC-010/011, issue #67). The `scopes` are deterministic grant data,
+ * never an LLM summary.
+ */
+export interface ApprovalGrantedEvent extends SupervisorEventBase {
+  type: 'ApprovalGranted';
+  /** The grant record id. */
+  grantId: string;
+  /** Capability class covered. */
+  capability: CapabilityType;
+  /** Grant duration: 'task' | 'project' (one-time grants aren't durable). */
+  duration: 'task' | 'project';
+  /** Structured scope targets granted. */
+  scopes: CapabilityScope[];
+  /** Who authorized: 'voice' | 'cli' | 'desktop' | 'api' | 'scope-grant'. */
+  grantedBy: string;
+  /** The authority level used (auditable hierarchy). */
+  authorityLevel: ApprovalAuthorityLevel;
+}
+
+/**
+ * Emitted when a capability grant is revoked — revocation is a journaled
+ * record, not a deletion, and takes effect on the next request (DEC-012).
+ */
+export interface ApprovalRevokedEvent extends SupervisorEventBase {
+  type: 'ApprovalRevoked';
+  /** The revoked grant record id. */
+  grantId: string;
+  /** Optional human-readable reason. */
+  reason?: string;
 }
 
 /** Why an agent is blocked. */
@@ -476,13 +511,7 @@ export interface ContextHealthChangedEvent extends SupervisorEventBase {
 }
 
 /** Kinds of verification evidence (DEC-032 — done means proven). */
-export type VerificationKind =
-  | 'test'
-  | 'build'
-  | 'lint'
-  | 'typecheck'
-  | 'behavioral'
-  | 'other';
+export type VerificationKind = 'test' | 'build' | 'lint' | 'typecheck' | 'behavioral' | 'other';
 
 /**
  * Emitted when a verification step runs against a task's work — an
@@ -516,6 +545,8 @@ export type SupervisorEvent =
   | TestFinishedEvent
   | ApprovalRequestedEvent
   | HumanInputRequestedEvent
+  | ApprovalGrantedEvent
+  | ApprovalRevokedEvent
   | AgentBlockedEvent
   | AgentCompletedEvent
   | AgentFailedEvent
@@ -540,6 +571,8 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
   'TestFinished',
   'ApprovalRequested',
   'HumanInputRequested',
+  'ApprovalGranted',
+  'ApprovalRevoked',
   'AgentBlocked',
   'AgentCompleted',
   'AgentFailed',
@@ -555,6 +588,15 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
 ] as const;
 
 const ADAPTER_FIDELITY_TIERS: readonly AdapterFidelityTier[] = ['A', 'B', 'C', 'D', 'E'] as const;
+
+const GRANT_DURATIONS: readonly string[] = ['task', 'project'] as const;
+
+const AUTHORITY_LEVELS: readonly ApprovalAuthorityLevel[] = [
+  'voiceOnly',
+  'voiceScopedPhrase',
+  'authenticatedUI',
+  'strongDevice',
+] as const;
 
 const RISK_LEVELS: readonly RiskLevel[] = CAPABILITY_RISK_LEVEL_VALUES;
 
@@ -728,6 +770,12 @@ export function validateEvent(value: unknown): SupervisorEvent {
     case 'HumanInputRequested':
       validateCapabilityRequest(value, problems);
       validateHumanInputRequested(value, problems);
+      break;
+    case 'ApprovalGranted':
+      validateApprovalGranted(value, problems);
+      break;
+    case 'ApprovalRevoked':
+      validateApprovalRevoked(value, problems);
       break;
     case 'AgentBlocked':
       validateAgentBlocked(value, problems);
@@ -970,6 +1018,40 @@ function validateHumanInputRequested(value: Record<string, unknown>, problems: s
   }
 }
 
+function validateApprovalGranted(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['grantId']) || value['grantId'].length === 0) {
+    problems.push('ApprovalGranted: missing or empty required field "grantId".');
+  }
+  if (!isOneOf(value['capability'], CAPABILITY_TYPES)) {
+    problems.push(
+      `ApprovalGranted: field "capability" must be one of ${CAPABILITY_TYPES.join(', ')}.`,
+    );
+  }
+  if (!isOneOf(value['duration'], GRANT_DURATIONS)) {
+    problems.push('ApprovalGranted: field "duration" must be one of task, project.');
+  }
+  if (!Array.isArray(value['scopes'])) {
+    problems.push('ApprovalGranted: missing or non-array required field "scopes".');
+  }
+  if (!isString(value['grantedBy']) || value['grantedBy'].length === 0) {
+    problems.push('ApprovalGranted: missing or empty required field "grantedBy".');
+  }
+  if (!isOneOf(value['authorityLevel'], AUTHORITY_LEVELS)) {
+    problems.push(
+      `ApprovalGranted: field "authorityLevel" must be one of ${AUTHORITY_LEVELS.join(', ')}.`,
+    );
+  }
+}
+
+function validateApprovalRevoked(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['grantId']) || value['grantId'].length === 0) {
+    problems.push('ApprovalRevoked: missing or empty required field "grantId".');
+  }
+  if (value['reason'] !== undefined && !isString(value['reason'])) {
+    problems.push('ApprovalRevoked: optional field "reason" must be a string.');
+  }
+}
+
 function validateAgentBlocked(value: Record<string, unknown>, problems: string[]): void {
   if (!isString(value['reason']) || value['reason'].length === 0) {
     problems.push('AgentBlocked: missing or empty required field "reason".');
@@ -1064,7 +1146,11 @@ function validateQuotaObserved(value: Record<string, unknown>, problems: string[
   if (!isNumber(value['usedPct'])) {
     problems.push('QuotaObserved: missing or non-number required field "usedPct".');
   }
-  if (value['resetsAt'] !== undefined && value['resetsAt'] !== null && !isString(value['resetsAt'])) {
+  if (
+    value['resetsAt'] !== undefined &&
+    value['resetsAt'] !== null &&
+    !isString(value['resetsAt'])
+  ) {
     problems.push('QuotaObserved: optional field "resetsAt" must be a string or null.');
   }
   if (!isOneOf(value['status'], QUOTA_OBSERVATION_STATUSES)) {
@@ -1087,9 +1173,7 @@ function validateTaskFailedOver(value: Record<string, unknown>, problems: string
     problems.push('TaskFailedOver: missing or empty required field "toProvider".');
   }
   if (!isOneOf(value['reason'], FAILOVER_REASONS)) {
-    problems.push(
-      `TaskFailedOver: field "reason" must be one of ${FAILOVER_REASONS.join(', ')}.`,
-    );
+    problems.push(`TaskFailedOver: field "reason" must be one of ${FAILOVER_REASONS.join(', ')}.`);
   }
   for (const key of ['fromModel', 'toModel']) {
     if (value[key] !== undefined && !isString(value[key])) {
@@ -1102,7 +1186,11 @@ function validateTaskParked(value: Record<string, unknown>, problems: string[]):
   if (!isString(value['reason']) || value['reason'].length === 0) {
     problems.push('TaskParked: missing or empty required field "reason".');
   }
-  if (value['resumeAt'] !== undefined && value['resumeAt'] !== null && !isString(value['resumeAt'])) {
+  if (
+    value['resumeAt'] !== undefined &&
+    value['resumeAt'] !== null &&
+    !isString(value['resumeAt'])
+  ) {
     problems.push('TaskParked: optional field "resumeAt" must be a string or null.');
   }
 }
@@ -1121,7 +1209,9 @@ function validateContextCondensed(value: Record<string, unknown>, problems: stri
     problems.push('ContextCondensed: missing or non-string required field "summary".');
   }
   if (!Array.isArray(value['forgottenEventIds']) || !value['forgottenEventIds'].every(isString)) {
-    problems.push('ContextCondensed: required field "forgottenEventIds" must be an array of strings.');
+    problems.push(
+      'ContextCondensed: required field "forgottenEventIds" must be an array of strings.',
+    );
   }
   if (!isNumber(value['keptEventCount'])) {
     problems.push('ContextCondensed: missing or non-number required field "keptEventCount".');

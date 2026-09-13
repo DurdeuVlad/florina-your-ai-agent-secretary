@@ -30,6 +30,7 @@ import * as path from 'node:path';
 import {
   ApprovalRepository,
   AttentionItemRepository,
+  CapabilityGrantRepository,
   CompletionDigestRepository,
   ContextCapsuleRepository,
   DecisionRepository,
@@ -55,7 +56,11 @@ import { TaskStateMachine } from '../core/application/use-cases/tasks/task-lifec
 import { SessionManager } from '../core/application/use-cases/tasks/session-manager.js';
 import { MetricsCollector } from '../core/application/use-cases/metrics.js';
 import { AttentionInbox } from '../core/application/use-cases/attention/attention-inbox.js';
-import { AttentionAggregator } from '../core/application/use-cases/attention/attention-aggregator.js';
+import {
+  AttentionAggregator,
+  type ApprovalGate,
+} from '../core/application/use-cases/attention/attention-aggregator.js';
+import { GrantService } from '../core/application/use-cases/capabilities/grant-service.js';
 import { collectHealth } from '../core/application/use-cases/health.js';
 import type { HealthStatus } from '../core/application/use-cases/health.js';
 import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
@@ -151,6 +156,7 @@ export class SecretaryDaemon extends EventEmitter {
   private preferenceStore: PreferenceProfileStore | null = null;
   private failoverService: FailoverService | null = null;
   private capsuleRollup: CapsuleRollupService | null = null;
+  private grantService: GrantService | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -228,6 +234,14 @@ export class SecretaryDaemon extends EventEmitter {
   }
 
   /**
+   * The wired scoped-approval grant service (issue #67). Grants durable
+   * capability scopes; auto-approves covered adapter requests.
+   */
+  get grants(): GrantService | null {
+    return this.grantService;
+  }
+
+  /**
    * The `http://` URL managers register with their provider CLIs to reach
    * the Secretary MCP tool surface, or `null` when the MCP server is
    * disabled or not yet started (DEC-018, issue #63).
@@ -270,7 +284,39 @@ export class SecretaryDaemon extends EventEmitter {
         attentionItemsPendingProvider: () => this.attentionInbox?.pendingCount ?? 0,
       });
       this.metricsCollector.attach(this.bus);
-      this.attentionAggregator = new AttentionAggregator(this.attentionInbox, this.bus);
+
+      // Wire scoped approvals (issue #67): durable capability grants that
+      // auto-approve adapter permission requests inside granted scopes.
+      // The gate sits between ApprovalRequested and the inbox — a covered
+      // request is auto-approved and journaled instead of producing an
+      // approval card. Uncovered requests escalate normally. An
+      // `ApprovalRequested` event means the adapter already escalated, so
+      // the gate can only satisfy that — never widen a deny (DEC-011).
+      this.grantService = new GrantService({
+        grantStore: repos.capabilityGrants,
+        journal: repos.events,
+        eventBus: this.bus,
+      });
+      const grantService = this.grantService;
+      const taskStoreForGrants = repos.tasks;
+      const approvalGate: ApprovalGate = {
+        evaluateApprovalRequest: (event) => {
+          const task = taskStoreForGrants.getById(event.taskId);
+          if (task === null) return 'escalate';
+          return grantService.evaluate(event, {
+            projectId: task.projectId,
+            taskId: event.taskId,
+            sessionId: event.sessionId,
+            adapterFidelityTier: event.adapterFidelityTier,
+            policyDecision: 'escalate',
+          }).autoApproved
+            ? 'auto-approved'
+            : 'escalate';
+        },
+      };
+      this.attentionAggregator = new AttentionAggregator(this.attentionInbox, this.bus, {
+        approvalGate,
+      });
       this.attentionAggregator.start();
       this.worktreeManager = new GitWorktreeAdapter();
       this.taskStateMachine = new TaskStateMachine(repos.tasks, repos.events);
@@ -444,6 +490,7 @@ export class SecretaryDaemon extends EventEmitter {
       decisions: new DecisionRepository(raw),
       capsules: new ContextCapsuleRepository(raw),
       completionDigests: new CompletionDigestRepository(raw),
+      capabilityGrants: new CapabilityGrantRepository(raw),
     };
   }
 
@@ -587,6 +634,7 @@ export class SecretaryDaemon extends EventEmitter {
     this.preferenceStore = null;
     this.failoverService = null;
     this.capsuleRollup = null;
+    this.grantService = null;
   }
 
   private setState(state: DaemonState): void {

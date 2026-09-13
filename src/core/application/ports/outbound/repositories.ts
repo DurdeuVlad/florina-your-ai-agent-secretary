@@ -22,6 +22,7 @@ import type {
   Task,
 } from '../../../domain/types.js';
 import type { ContextCapsuleScope } from '../../../domain/enums.js';
+import type { CapabilityGrant } from '../../../domain/grants.js';
 
 /** Task store (DEC-004). */
 export interface TaskRepositoryPort {
@@ -47,6 +48,21 @@ export interface ApprovalRepositoryPort {
   getById(id: EntityId): Approval | null;
   listByTask(taskId: EntityId): Approval[];
   update(approval: Approval): void;
+}
+
+/**
+ * Capability grant store (DEC-010/011, issue #67). Grants are durable,
+ * journaled scope records; revocation sets `revokedAt` via {@link update}
+ * — grants are never deleted.
+ */
+export interface CapabilityGrantRepositoryPort {
+  insert(grant: CapabilityGrant): void;
+  getById(id: EntityId): CapabilityGrant | null;
+  /** All grants for a project (active and revoked — audit surface). */
+  listByProject(projectId: EntityId): CapabilityGrant[];
+  /** Task-scoped grants for a task. */
+  listByTask(taskId: EntityId): CapabilityGrant[];
+  update(grant: CapabilityGrant): void;
 }
 
 /** Session (run) store. */

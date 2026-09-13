@@ -33,6 +33,23 @@ import type { AttentionInbox } from './attention-inbox.js';
  * Config
  * ------------------------------------------------------------------ */
 
+/**
+ * Scoped-approval gate (issue #67). When configured, the aggregator asks
+ * the gate before creating an `ApprovalRequest` inbox item: a request
+ * covered by an active capability grant is auto-approved (journaled by
+ * the gate) and never reaches the inbox. Uncovered requests escalate
+ * normally.
+ */
+export interface ApprovalGate {
+  /**
+   * Evaluate an `ApprovalRequested` event against the active grants.
+   *
+   * @returns `'auto-approved'` when a covering grant authorized the
+   *   request (no inbox item is created), `'escalate'` otherwise.
+   */
+  evaluateApprovalRequest(event: ApprovalRequestedEvent): 'auto-approved' | 'escalate';
+}
+
 /** Configuration for {@link AttentionAggregator}. */
 export interface AttentionAggregatorConfig {
   /**
@@ -43,6 +60,11 @@ export interface AttentionAggregatorConfig {
   readonly dedupWindowMs?: number;
   /** Time provider (ms since epoch) for deterministic testing. */
   readonly now?: () => number;
+  /**
+   * Optional scoped-approval gate (issue #67). Auto-approves
+   * `ApprovalRequested` events covered by an active grant.
+   */
+  readonly approvalGate?: ApprovalGate;
 }
 
 /** Default deduplication window: 30 seconds. */
@@ -71,15 +93,21 @@ export class AttentionAggregator {
   private readonly bus: EventSubscriberPort;
   private readonly dedupWindowMs: number;
   private readonly now: () => number;
+  private readonly approvalGate?: ApprovalGate;
   private unsubscribe?: () => void;
   /** Last creation time (ms) per dedup key `${taskId}:${kind}`. */
   private readonly lastCreated = new Map<string, number>();
 
-  constructor(inbox: AttentionInbox, bus: EventSubscriberPort, config: AttentionAggregatorConfig = {}) {
+  constructor(
+    inbox: AttentionInbox,
+    bus: EventSubscriberPort,
+    config: AttentionAggregatorConfig = {},
+  ) {
     this.inbox = inbox;
     this.bus = bus;
     this.dedupWindowMs = config.dedupWindowMs ?? DEFAULT_DEDUP_WINDOW_MS;
     this.now = config.now ?? (() => Date.now());
+    this.approvalGate = config.approvalGate;
   }
 
   /**
@@ -163,6 +191,11 @@ export class AttentionAggregator {
 
   /** ApprovalRequested → ApprovalRequest, priority from riskLevel. */
   private addApprovalItem(event: ApprovalRequestedEvent): void {
+    // Scoped approvals (issue #67): a request covered by an active grant
+    // is auto-approved and journaled by the gate — no inbox item.
+    if (this.approvalGate?.evaluateApprovalRequest(event) === 'auto-approved') {
+      return;
+    }
     const priority = riskLevelToPriority(event.riskLevel);
     this.maybeAddItem({
       taskId: event.taskId,

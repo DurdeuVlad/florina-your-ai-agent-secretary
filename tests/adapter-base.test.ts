@@ -145,22 +145,22 @@ describe('fidelity tier declaration', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * 3. Stub adapter emits synthetic events across all 21 variants
+ * 3. Stub adapter emits synthetic events across all 23 variants
  * ------------------------------------------------------------------ */
 describe('StubAdapter event emission', () => {
-  it('buildDefaultStubEvents produces all 21 variants', () => {
+  it('buildDefaultStubEvents produces all 23 variants', () => {
     const events = buildDefaultStubEvents({
       taskId: 'task-1',
       sessionId: 'sess-1',
       agentId: 'stub',
     });
-    expect(events).toHaveLength(21);
+    expect(events).toHaveLength(23);
     const types = events.map((e) => e.type);
     // Every canonical variant is present exactly once.
     for (const kind of SUPERVISOR_EVENT_TYPES) {
       expect(types).toContain(kind);
     }
-    expect(new Set(types).size).toBe(21);
+    expect(new Set(types).size).toBe(23);
   });
 
   it('every default stub event validates against the schema', () => {
@@ -174,7 +174,7 @@ describe('StubAdapter event emission', () => {
     }
   });
 
-  it('connects, starts a run, and streams all 21 events', async () => {
+  it('connects, starts a run, and streams all 23 events', async () => {
     const stub = new StubAdapter(null);
     expect(stub.connectionState).toBe('disconnected');
 
@@ -189,7 +189,7 @@ describe('StubAdapter event emission', () => {
     for await (const event of stub.streamEvents()) {
       collected.push(event);
     }
-    expect(collected).toHaveLength(21);
+    expect(collected).toHaveLength(23);
     expect(collected.map((e) => e.type)).toEqual([...SUPERVISOR_EVENT_TYPES]);
 
     await stub.disconnect();
@@ -463,9 +463,9 @@ describe('integration: daemon + stub adapter + event journal', () => {
 
       await stub.disconnect();
 
-      // Verify all 21 events landed in the journal for this session.
+      // Verify all 23 events landed in the journal for this session.
       const journaled = events.listBySession(sessionConfig.sessionId);
-      expect(journaled).toHaveLength(21);
+      expect(journaled).toHaveLength(23);
 
       const journaledKinds = journaled.map((e) => e.kind);
       for (const kind of SUPERVISOR_EVENT_TYPES) {
@@ -499,7 +499,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
       }
       await stub.disconnect();
 
-      expect(received).toHaveLength(21);
+      expect(received).toHaveLength(23);
     } finally {
       unsubscribe();
     }
@@ -542,7 +542,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
       await adapter.disconnect();
 
       const journaled = events.listBySession('sess-registry');
-      expect(journaled).toHaveLength(21);
+      expect(journaled).toHaveLength(23);
     } finally {
       unsubscribe();
     }

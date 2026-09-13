@@ -13,6 +13,7 @@ export { EventRepository } from './event.js';
 export { AttentionItemRepository } from './attention-item.js';
 export { DecisionRepository } from './decision.js';
 export { ApprovalRepository } from './approval.js';
+export { CapabilityGrantRepository } from './capability-grant.js';
 export { ContextCapsuleRepository } from './context-capsule.js';
 export { CompletionDigestRepository } from './completion-digest.js';
 export type { ListDigestsOptions } from './completion-digest.js';

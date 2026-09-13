@@ -37,6 +37,8 @@ import {
   type PolicyEvaluationResult,
   evaluatePolicy,
 } from '../../../domain/policy.js';
+import type { AdapterFidelityTier } from '../../../domain/enums.js';
+import type { GrantEvalContext, GrantEvaluation } from './grant-service.js';
 
 /**
  * A function that executes an action using a retrieved credential.
@@ -103,6 +105,13 @@ export interface CapabilityBrokerOptions {
   readonly events: EventJournalPort;
   /** A function that resolves the active policy for a project/task. */
   readonly policyResolver: (projectId: string, taskId?: string) => Policy;
+  /**
+   * Optional scoped-approval evaluator (issue #67). Consulted when policy
+   * returns `escalate`: a covering active grant turns the decision into
+   * `allow` (journaled by the evaluator). Grants never override a `deny`
+   * — deny paths return before this evaluator runs (DEC-011).
+   */
+  readonly grantEvaluator?: (request: CapabilityRequest, ctx: GrantEvalContext) => GrantEvaluation;
 }
 
 /**
@@ -119,12 +128,17 @@ export class CapabilityBroker {
   private readonly credentials: CredentialVaultPort;
   private readonly events: EventJournalPort;
   private readonly policyResolver: (projectId: string, taskId?: string) => Policy;
+  private readonly grantEvaluator?: (
+    request: CapabilityRequest,
+    ctx: GrantEvalContext,
+  ) => GrantEvaluation;
   private readonly registrations = new Map<string, ActionRegistration>();
 
   constructor(options: CapabilityBrokerOptions) {
     this.credentials = options.credentials;
     this.events = options.events;
     this.policyResolver = options.policyResolver;
+    this.grantEvaluator = options.grantEvaluator;
   }
 
   /**
@@ -196,12 +210,40 @@ export class CapabilityBroker {
       };
     }
 
+    let effectiveReason = evaluation.reason;
+
     if (evaluation.decision === 'escalate') {
-      return {
-        decision: 'escalate',
-        policyReason: evaluation.reason,
-        credentialUsed: false,
-      };
+      // Scoped approvals (issue #67): a covering grant may satisfy the
+      // escalation. Requires a real task + session for the journaled
+      // auto-approve event — without them the escalation stands.
+      if (
+        this.grantEvaluator !== undefined &&
+        context.taskId !== undefined &&
+        context.sessionId !== undefined
+      ) {
+        const grantEval = this.grantEvaluator(request, {
+          projectId: context.projectId,
+          taskId: context.taskId,
+          sessionId: context.sessionId,
+          // Unknown tier → conservative 'D' (never auto-approves).
+          adapterFidelityTier: context.adapterFidelityTier ?? 'D',
+          policyDecision: 'escalate',
+        });
+        if (grantEval.decision !== 'allow') {
+          return {
+            decision: 'escalate',
+            policyReason: grantEval.reason,
+            credentialUsed: false,
+          };
+        }
+        effectiveReason = grantEval.reason;
+      } else {
+        return {
+          decision: 'escalate',
+          policyReason: evaluation.reason,
+          credentialUsed: false,
+        };
+      }
     }
 
     // Decision is 'allow' — retrieve the credential.
@@ -216,7 +258,7 @@ export class CapabilityBroker {
       );
       return {
         decision: 'allow',
-        policyReason: evaluation.reason,
+        policyReason: effectiveReason,
         result: {
           success: false,
           message: `Credential "${credentialName}" not found in vault.`,
@@ -246,7 +288,7 @@ export class CapabilityBroker {
 
     return {
       decision: 'allow',
-      policyReason: evaluation.reason,
+      policyReason: effectiveReason,
       result,
       eventId,
       credentialUsed: true,
@@ -299,6 +341,11 @@ export interface ActionContext {
   readonly taskId?: string;
   /** Optional session identifier for event journal logging. */
   readonly sessionId?: string;
+  /**
+   * Adapter fidelity tier of the requesting agent (issue #67). Tier D/E
+   * adapters never auto-approve under a grant; absent → conservative 'D'.
+   */
+  readonly adapterFidelityTier?: AdapterFidelityTier;
   /** Human-readable task name/objective. */
   readonly task: string;
   /** Agent requesting the action (e.g. `codex`, `claude-code`). */
