@@ -133,3 +133,7 @@ export type {
   AcpSpawner,
   PermissionResponder,
 } from './acp-adapter.js';
+
+/* Antigravity agy headless adapter (Tier D, issue #62) */
+export { AgyAdapter, AGY_ADAPTER_ID, nodeAgySpawner } from './agy-adapter.js';
+export type { AgyAdapterOptions, AgyProcess, AgySpawner } from './agy-adapter.js';
