@@ -19,6 +19,14 @@ import {
   type AgentCompletedEvent,
   type AgentFailedEvent,
   type AgentStoppedEvent,
+  type UsageReportedEvent,
+  type QuotaObservedEvent,
+  type TaskFailedOverEvent,
+  type TaskParkedEvent,
+  type TaskResumedEvent,
+  type ContextCondensedEvent,
+  type ContextHealthChangedEvent,
+  type VerificationObservedEvent,
 } from '../src/domain/events.js';
 
 /** Common envelope shared by every test event. */
@@ -144,12 +152,74 @@ const validExamples: SupervisorEvent[] = [
     reason: 'user',
     details: 'User cancelled via CLI',
   } satisfies AgentStoppedEvent,
+  {
+    ...base,
+    type: 'UsageReported',
+    provider: 'codex',
+    model: 'gpt-5',
+    promptTokens: 1200,
+    completionTokens: 300,
+    totalTokens: 1500,
+    costUsd: 0.02,
+  } satisfies UsageReportedEvent,
+  {
+    ...base,
+    type: 'QuotaObserved',
+    provider: 'codex',
+    window: 'five_hour',
+    usedPct: 0.92,
+    resetsAt: '2026-08-19T17:00:00.000Z',
+    status: 'warning',
+    source: 'polled',
+  } satisfies QuotaObservedEvent,
+  {
+    ...base,
+    type: 'TaskFailedOver',
+    fromProvider: 'codex',
+    toProvider: 'gemini',
+    reason: 'quota_exhausted',
+  } satisfies TaskFailedOverEvent,
+  {
+    ...base,
+    type: 'TaskParked',
+    reason: 'all candidate providers exhausted',
+    resumeAt: '2026-08-19T17:00:00.000Z',
+  } satisfies TaskParkedEvent,
+  {
+    ...base,
+    type: 'TaskResumed',
+    provider: 'claude-code',
+    model: 'sonnet',
+  } satisfies TaskResumedEvent,
+  {
+    ...base,
+    type: 'ContextCondensed',
+    summary: 'Explored auth flow; decided on JWT refresh',
+    forgottenEventIds: ['evt-1', 'evt-2', 'evt-3'],
+    keptEventCount: 6,
+  } satisfies ContextCondensedEvent,
+  {
+    ...base,
+    type: 'ContextHealthChanged',
+    status: 'degraded',
+    windowFillPct: 0.87,
+    lastCondensationAt: '2026-08-19T11:30:00.000Z',
+  } satisfies ContextHealthChangedEvent,
+  {
+    ...base,
+    type: 'VerificationObserved',
+    kind: 'test',
+    success: true,
+    command: 'npm test',
+    summary: '1623 passed, 0 failed',
+    evidence: { exitCode: 0 },
+  } satisfies VerificationObservedEvent,
 ];
 
 describe('SupervisorEvent schema', () => {
   describe('SUPERVISOR_EVENT_TYPES', () => {
-    it('lists exactly the 13 canonical variants', () => {
-      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(13);
+    it('lists exactly the 21 canonical variants', () => {
+      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(21);
       expect(SUPERVISOR_EVENT_TYPES).toEqual([
         'AgentStarted',
         'AgentProgress',
@@ -164,6 +234,14 @@ describe('SupervisorEvent schema', () => {
         'AgentCompleted',
         'AgentFailed',
         'AgentStopped',
+        'UsageReported',
+        'QuotaObserved',
+        'TaskFailedOver',
+        'TaskParked',
+        'TaskResumed',
+        'ContextCondensed',
+        'ContextHealthChanged',
+        'VerificationObserved',
       ]);
     });
   });
