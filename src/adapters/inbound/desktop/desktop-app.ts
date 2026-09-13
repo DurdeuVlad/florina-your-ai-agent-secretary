@@ -23,8 +23,7 @@ import type {
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
-import { InboxViewModel } from './views/inbox-view.js';
-import { renderInboxList } from './views/inbox-templates.js';
+import { renderHomeView } from './views/home-view.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
@@ -519,14 +518,25 @@ export class DesktopApp {
     return this.refreshViews();
   }
 
-  /** Pull current inbox state and push the rendered tree to the renderer. */
+  /**
+   * Pull current inbox + task state and push the rendered home tree to the
+   * renderer (NEEDS YOU / WORKING / DONE — issue #120).
+   */
   private async refreshViews(): Promise<void> {
-    const res = await this.sendCommand({ kind: 'query-inbox' });
-    if (res.ok && 'items' in res) {
-      const items = (res as { items: AttentionItemSnapshot[] }).items;
-      this.state.update({ inboxItems: items });
-      const view = new InboxViewModel().buildViewFromItems(items as AttentionItem[]);
-      this.bridge.sendToRenderer('inbox:update', renderInboxList(view));
-    }
+    const [inboxRes, tasksRes] = await Promise.all([
+      this.sendCommand({ kind: 'query-inbox' }),
+      this.sendCommand({ kind: 'list-tasks' }),
+    ]);
+    const items =
+      inboxRes.ok && 'items' in inboxRes
+        ? (inboxRes as { items: AttentionItemSnapshot[] }).items
+        : [];
+    const tasks =
+      tasksRes.ok && 'tasks' in tasksRes ? (tasksRes as { tasks: TaskSnapshot[] }).tasks : [];
+    this.state.update({ inboxItems: items });
+    this.bridge.sendToRenderer(
+      'inbox:update',
+      renderHomeView(items as AttentionItem[], tasks),
+    );
   }
 }

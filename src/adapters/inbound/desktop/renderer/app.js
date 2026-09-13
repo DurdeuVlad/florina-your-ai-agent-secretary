@@ -29,7 +29,7 @@ if (bridge) {
 
   bridge.on('inbox:update', (tree) => {
     mount(tree, $('inbox'));
-    const n = tree.props && tree.props.totalCount ? tree.props.totalCount : 0;
+    const n = tree.props && tree.props.needsYou ? tree.props.needsYou : 0;
     const badge = $('navInbox');
     badge.textContent = n;
     badge.className = 'navbadge' + (n ? '' : ' zero');

@@ -18,6 +18,13 @@ const ICONS = {
 };
 
 const TAG_CLASS = {
+  HomeView: 'home-view',
+  SectionHeader: 'sect',
+  SectionCount: 'n',
+  TaskRow: 'taskrow',
+  TaskObjective: 'obj',
+  ProviderChip: 'chip',
+  StatusWord: 'stat',
   InboxList: 'inbox-list',
   PriorityGroup: 'pgroup',
   GroupHeader: 'sect',
@@ -77,13 +84,19 @@ function renderNode(node) {
   if (isButton) {
     if (props && props.variant === 'danger') el.classList.add('danger');
     else if (props && props.variant === 'ghost') el.classList.add('ghost');
-    if (props && props.command) el.dataset.command = String(props.command);
   }
-  if (tag === 'ChipClear' && props && props.command) {
-    el.dataset.command = String(props.command);
+  if (props && props.command) el.dataset.command = String(props.command);
+  if (tag === 'ChipClear') el.style.cursor = 'pointer';
+  if (tag === 'InboxItem' || tag === 'TaskRow') {
+    el.dataset.selectable = 'true';
     el.style.cursor = 'pointer';
   }
-  if (tag === 'InboxItem') el.dataset.selectable = 'true';
+  if (tag === 'SectionHeader' && props && props.label) {
+    const label = document.createElement('span');
+    label.className = 'sect-label';
+    label.textContent = String(props.label);
+    el.appendChild(label);
+  }
 
   for (const child of children || []) el.appendChild(renderNode(child));
   return el;
