@@ -9,3 +9,6 @@ export * from './runtime-registry.js';
 export * from './credential-vault.js';
 export * from './context-sources.js';
 export * from './preference-profile.js';
+export * from './quota-reader.js';
+export * from './git-client.js';
+export * from './voice.js';
