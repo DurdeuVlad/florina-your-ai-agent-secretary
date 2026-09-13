@@ -100,3 +100,22 @@ export type {
   ParsedPtyChunk,
   ParsedPtyKind,
 } from './claude-mapper.js';
+
+/* Provider quota readers (DEC-029, issue #71) */
+export {
+  CodexQuotaReader,
+  ClaudeQuotaReader,
+  QuotaReaderError,
+  isQuotaExhaustion,
+  reportExhaustion,
+  normalizeReset,
+  normalizeUsedPct,
+  statusFromUsage,
+} from './quota-readers.js';
+export type {
+  QuotaReader,
+  JsonRpcRequest,
+  CodexQuotaReaderOptions,
+  StatuslineSource,
+  ClaudeQuotaReaderOptions,
+} from './quota-readers.js';
