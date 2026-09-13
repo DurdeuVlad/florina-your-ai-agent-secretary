@@ -15,6 +15,8 @@ import {
   type TestFinishedEvent,
   type ApprovalRequestedEvent,
   type HumanInputRequestedEvent,
+  type ApprovalGrantedEvent,
+  type ApprovalRevokedEvent,
   type AgentBlockedEvent,
   type AgentCompletedEvent,
   type AgentFailedEvent,
@@ -124,6 +126,22 @@ const validExamples: SupervisorEvent[] = [
   } satisfies HumanInputRequestedEvent,
   {
     ...base,
+    type: 'ApprovalGranted',
+    grantId: 'grant-9',
+    capability: 'network',
+    duration: 'task',
+    scopes: [{ type: 'network', targets: ['registry.npmjs.org'] }],
+    grantedBy: 'voice',
+    authorityLevel: 'authenticatedUI',
+  } satisfies ApprovalGrantedEvent,
+  {
+    ...base,
+    type: 'ApprovalRevoked',
+    grantId: 'grant-9',
+    reason: 'Scope no longer needed',
+  } satisfies ApprovalRevokedEvent,
+  {
+    ...base,
     type: 'AgentBlocked',
     reason: 'Waiting on PR review',
     blockerType: 'dependency',
@@ -218,8 +236,8 @@ const validExamples: SupervisorEvent[] = [
 
 describe('SupervisorEvent schema', () => {
   describe('SUPERVISOR_EVENT_TYPES', () => {
-    it('lists exactly the 21 canonical variants', () => {
-      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(21);
+    it('lists exactly the 23 canonical variants', () => {
+      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(23);
       expect(SUPERVISOR_EVENT_TYPES).toEqual([
         'AgentStarted',
         'AgentProgress',
@@ -230,6 +248,8 @@ describe('SupervisorEvent schema', () => {
         'TestFinished',
         'ApprovalRequested',
         'HumanInputRequested',
+        'ApprovalGranted',
+        'ApprovalRevoked',
         'AgentBlocked',
         'AgentCompleted',
         'AgentFailed',
