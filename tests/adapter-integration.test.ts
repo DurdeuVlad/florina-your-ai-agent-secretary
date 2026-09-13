@@ -209,12 +209,10 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     expect(types).toContain('ApprovalRequested');
     expect(types).toContain('AgentCompleted');
 
-    // Exactly-once publication: adapters are created without a bus, so the
-    // SessionManager is the sole publisher of streamed events. Any double
-    // publication would surface as duplicate (sessionId, type, timestamp)
-    // triples on the bus.
-    const keys = events.map((e) => `${e.sessionId}:${e.type}:${e.timestamp}`);
-    expect(new Set(keys).size).toBe(events.length);
+    // Exactly-once publication: EventBus forwards the exact object yielded by
+    // the adapter. If both the adapter and SessionManager published it, the
+    // same object reference would occur twice in the collected array.
+    expect(new Set(events).size).toBe(events.length);
 
     // The session manager tracked the session while the stream was active.
     // With auto-cleanup (Bug 2 fix), the session is removed after the stream
