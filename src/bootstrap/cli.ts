@@ -9,6 +9,7 @@
  */
 import { DaemonClient } from '../adapters/inbound/cli/client.js';
 import { runCli } from '../adapters/inbound/cli/cli.js';
+import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
 import { DaemonRunner } from './daemon-runner.js';
 import { createStdinVoiceSession } from './voice-session.js';
 
@@ -20,6 +21,9 @@ import { createStdinVoiceSession } from './voice-session.js';
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
 ): Promise<number> {
+  // `.env` convenience: populate OPENAI_API_KEY / FLORINA_* from the project
+  // file before the CLI reads process.env. Real env vars always win.
+  loadEnvFile();
   return runCli(argv, {
     client: new DaemonClient(),
     runner: new DaemonRunner(),

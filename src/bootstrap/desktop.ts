@@ -24,6 +24,11 @@ import { ElectronWindowBackend } from '../adapters/inbound/desktop/electron/wind
 import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-transport.js';
 import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-backend.js';
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
+import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
+
+// Same `.env` convenience as the CLI (#116) — FLORINA_DAEMON_URL and friends
+// resolve from the project file when the caller didn't export them.
+loadEnvFile();
 
 const DAEMON_URL = process.env['FLORINA_DAEMON_URL'] ?? 'ws://127.0.0.1:17419';
 
