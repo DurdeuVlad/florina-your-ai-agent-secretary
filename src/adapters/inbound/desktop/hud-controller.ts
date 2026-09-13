@@ -140,6 +140,16 @@ export class HudController {
     this.vm.setResponsePreview(text);
   }
 
+  /**
+   * Force-push the current state to the HUD renderer. Used on
+   * `did-finish-load` — the initial `ready-to-show` push can race the page
+   * load, and the view model's dedup would otherwise leave a stale default
+   * frame (e.g. "offline" while the daemon is connected).
+   */
+  refresh(): void {
+    this.pushState(this.vm.getState());
+  }
+
   /** Current HUD state snapshot. */
   getState(): PttHudState {
     return this.vm.getState();

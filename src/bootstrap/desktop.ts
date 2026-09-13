@@ -116,6 +116,9 @@ async function main(): Promise<void> {
   hud.start();
   if (hudWindow.contents !== null) {
     hudIpc.attachContents(hudWindow.contents);
+    // Re-push once the page finishes loading — the ready-to-show push can
+    // race the renderer, and dedup would leave the default offline frame.
+    hudWindow.contents.once('did-finish-load', () => hud.refresh());
   }
 
   // Renderer → daemon commands (approve, preferences, …) route through the
