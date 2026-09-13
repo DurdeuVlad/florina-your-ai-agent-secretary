@@ -7,10 +7,14 @@
  * Inbound surfaces never compose concrete engines themselves — this is the
  * only place the combination happens.
  */
-import type { CommandExecutor } from '../core/application/use-cases/tasks/command-api.js';
+import type {
+  CommandExecutor,
+  PreferenceResponse,
+} from '../core/application/use-cases/tasks/command-api.js';
 import type { VoiceSessionManager } from '../adapters/inbound/voice/voice-session-manager.js';
 import type { AsyncVoiceToolRunner } from '../adapters/inbound/voice/voice-session-manager.js';
 import type { ModelPort } from '../core/application/ports/outbound/model.js';
+import { isProfileEmpty } from '../core/application/ports/outbound/preference-profile.js';
 
 /**
  * Compose a {@link VoiceSessionManager} backed by the stdin audio
@@ -80,11 +84,10 @@ export async function createStdinVoiceSession(options: {
   let instructions = options.instructions;
   if (instructions === undefined) {
     try {
-      const prefs = (await options.commandApi.execute({ kind: 'query-preferences' })) as {
-        ok: boolean;
-        summary?: string;
-      };
-      if (prefs.ok && prefs.summary === 'no preferences recorded') {
+      const prefs = (await options.commandApi.execute({
+        kind: 'query-preferences',
+      })) as PreferenceResponse;
+      if (prefs.ok && prefs.profile !== undefined && isProfileEmpty(prefs.profile)) {
         const { DEFAULT_VOICE_INSTRUCTIONS, SETUP_INTERVIEW_INSTRUCTIONS } =
           await import('../adapters/inbound/voice/voice-tools.js');
         instructions = DEFAULT_VOICE_INSTRUCTIONS + SETUP_INTERVIEW_INSTRUCTIONS;

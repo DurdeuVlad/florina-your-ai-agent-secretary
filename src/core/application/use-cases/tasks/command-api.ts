@@ -347,9 +347,10 @@ export interface UpdatePreferenceCommand {
   /** Work-type tags a routing rule applies to (add-rule only). */
   readonly workTypes?: readonly string[];
   /**
-   * Project scope for the rule/deny; omitted = global default
+   * Project scope for the rule/deny. Omitted = the global default
    * (DEC-003 need-to-know — project rules are shown only to that
-   * project's manager).
+   * project's manager). On remove, an explicit `projectId` targets only
+   * that scoped entry; omitting it targets the global entry.
    */
   readonly projectId?: string;
   /**
@@ -610,6 +611,12 @@ export interface PreferenceResponse {
    * with `projectId`) — global rules plus that project's own.
    */
   readonly promptText?: string;
+  /**
+   * Structured profile visible to the caller (query-preferences only):
+   * the full profile when `projectId` is omitted, otherwise global entries
+   * plus that project's own entries.
+   */
+  readonly profile?: PreferenceProfile;
   readonly error?: string;
 }
 
@@ -1564,12 +1571,12 @@ export class CommandApi {
           });
           break;
         case 'remove-rule':
-          if (!store.removeRule(cmd.provider, cmd.model)) {
+          if (!store.removeRule(cmd.provider, cmd.model, cmd.projectId)) {
             return { ok: false, error: `no rule for provider ${cmd.provider}` };
           }
           break;
         case 'remove-deny':
-          if (!store.removeDeny(cmd.provider, cmd.model)) {
+          if (!store.removeDeny(cmd.provider, cmd.model, cmd.projectId)) {
             return { ok: false, error: `no deny for provider ${cmd.provider}` };
           }
           break;
@@ -1597,6 +1604,7 @@ export class CommandApi {
     return {
       ok: true,
       summary: renderPreferenceSummary(profile, cmd.projectId),
+      profile: preferenceProfileForProject(profile, cmd.projectId),
       ...(promptText !== null ? { promptText } : {}),
     };
   }
@@ -1731,36 +1739,48 @@ function generateId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
 
-/** Extract a human-readable message from an unknown error. */
+/**
+ * Return the profile visible to `projectId` (global entries plus that
+ * project's own); omitted `projectId` returns the full user-level profile.
+ */
+function preferenceProfileForProject(
+  profile: PreferenceProfile,
+  projectId?: string,
+): PreferenceProfile {
+  if (projectId === undefined) return profile;
+  const visible = (r: { readonly projectId?: string }): boolean =>
+    r.projectId === undefined || r.projectId === projectId;
+  return {
+    rules: profile.rules.filter(visible),
+    denied: profile.denied.filter(visible),
+  };
+}
+
 /**
  * Render the preference profile for CLI/voice echo (issue #65). With
  * `projectId`, only rules visible to that project are listed (global +
  * project-scoped — DEC-003 need-to-know).
  */
 function renderPreferenceSummary(profile: PreferenceProfile, projectId?: string): string {
-  const visible = (r: { readonly projectId?: string }): boolean =>
-    r.projectId === undefined || r.projectId === projectId;
+  const visibleProfile = preferenceProfileForProject(profile, projectId);
   const lines = [
-    ...profile.rules
-      .filter(visible)
-      .map(
-        (r) =>
-          `rule: ${r.provider}${r.model !== undefined ? `/${r.model}` : ''}` +
-          `${r.projectId !== undefined ? ` [project ${r.projectId}]` : ''}` +
-          `${r.note !== undefined ? ` — ${r.note}` : ''}`,
-      ),
-    ...profile.denied
-      .filter(visible)
-      .map(
-        (d) =>
-          `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}` +
-          `${d.projectId !== undefined ? ` [project ${d.projectId}]` : ''}` +
-          `${d.note !== undefined ? ` — ${d.note}` : ''}`,
-      ),
+    ...visibleProfile.rules.map(
+      (r) =>
+        `rule: ${r.provider}${r.model !== undefined ? `/${r.model}` : ''}` +
+        `${r.projectId !== undefined ? ` [project ${r.projectId}]` : ''}` +
+        `${r.note !== undefined ? ` — ${r.note}` : ''}`,
+    ),
+    ...visibleProfile.denied.map(
+      (d) =>
+        `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}` +
+        `${d.projectId !== undefined ? ` [project ${d.projectId}]` : ''}` +
+        `${d.note !== undefined ? ` — ${d.note}` : ''}`,
+    ),
   ];
   return lines.length === 0 ? 'no preferences recorded' : lines.join('\n');
 }
 
+/** Extract a human-readable message from an unknown error. */
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);

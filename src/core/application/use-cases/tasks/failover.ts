@@ -211,6 +211,7 @@ export class FailoverService {
     const route = this.resolveRouter().failover({
       workType: request.workType,
       excludeProviders: [fromProvider],
+      projectId: task.projectId,
     });
 
     if (route.kind === 'parked') {
@@ -282,7 +283,7 @@ export class FailoverService {
       };
     }
 
-    const route = this.resolveRouter().route({});
+    const route = this.resolveRouter().route({ projectId: task.projectId });
     if (route.kind === 'parked') {
       return { kind: 'still-parked', taskId, resumeAt: route.resumeAt, reason: route.reason };
     }

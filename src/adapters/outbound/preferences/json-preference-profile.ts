@@ -137,23 +137,36 @@ export class PreferenceProfileStore implements PreferenceProfilePort {
     this.profile = { ...this.profile, rules: [...this.profile.rules, rule] };
   }
 
-  /** Add a model-level deny rule. `{provider}` denies the provider; with `model`, denies just that model. */
+  /**
+   * Add a model-level deny rule. `{provider}` denies the provider; with
+   * `model`, denies just that model. Dedup is scope-aware: a global deny
+   * and a project-scoped deny for the same provider/model are distinct
+   * entries and can coexist.
+   */
   addDeny(deny: DenyRule): void {
     if (deny.provider.length === 0) {
       throw new PreferenceProfileError('deny provider must be non-empty');
     }
     const exists = this.profile.denied.some(
-      (d) => d.provider === deny.provider && d.model === deny.model,
+      (d) =>
+        d.provider === deny.provider && d.model === deny.model && d.projectId === deny.projectId,
     );
     if (!exists) {
       this.profile = { ...this.profile, denied: [...this.profile.denied, deny] };
     }
   }
 
-  /** Remove the first routing rule matching provider (+model when given). */
-  removeRule(provider: string, model?: string): boolean {
+  /**
+   * Remove the first routing rule matching provider (+model when given) in
+   * the selected scope. `projectId` selects a project-scoped entry; omitted
+   * targets the global entry.
+   */
+  removeRule(provider: string, model?: string, projectId?: string): boolean {
     const index = this.profile.rules.findIndex(
-      (r) => r.provider === provider && (model === undefined || r.model === model),
+      (r) =>
+        r.provider === provider &&
+        (model === undefined || r.model === model) &&
+        r.projectId === projectId,
     );
     if (index === -1) {
       return false;
@@ -164,10 +177,17 @@ export class PreferenceProfileStore implements PreferenceProfilePort {
     return true;
   }
 
-  /** Remove a deny rule matching provider (+model when given). */
-  removeDeny(provider: string, model?: string): boolean {
+  /**
+   * Remove a deny rule matching provider (+model when given) in the
+   * selected scope. `projectId` selects a project-scoped entry; omitted
+   * targets the global entry.
+   */
+  removeDeny(provider: string, model?: string, projectId?: string): boolean {
     const index = this.profile.denied.findIndex(
-      (d) => d.provider === provider && (model === undefined || d.model === model),
+      (d) =>
+        d.provider === provider &&
+        (model === undefined || d.model === model) &&
+        d.projectId === projectId,
     );
     if (index === -1) {
       return false;
