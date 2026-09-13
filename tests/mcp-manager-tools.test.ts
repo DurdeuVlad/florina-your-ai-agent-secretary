@@ -17,7 +17,6 @@ import {
   SessionRepository,
 } from '../src/adapters/outbound/persistence/sqlite/index.js';
 import { buildProject, TaskState } from '../src/core/domain/index.js';
-import type { Task } from '../src/core/domain/types.js';
 
 interface Fixture {
   service: ManagerToolService;
