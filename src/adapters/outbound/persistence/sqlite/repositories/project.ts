@@ -4,6 +4,7 @@
 import type Database from 'better-sqlite3';
 
 import type { EntityId, Project, ProjectPolicies, RepoMetadata } from '../../../../../core/domain/types.js';
+import type { ProjectRepositoryPort } from '../../../../../core/application/ports/outbound/repositories.js';
 import { BaseRepository } from './base.js';
 
 /** Database row shape for the `projects` table. */
@@ -17,7 +18,7 @@ interface ProjectRow {
   updated_at: string;
 }
 
-export class ProjectRepository extends BaseRepository {
+export class ProjectRepository extends BaseRepository implements ProjectRepositoryPort {
   private readonly insertStmt: Database.Statement;
   private readonly getByIdStmt: Database.Statement;
   private readonly listAllStmt: Database.Statement;

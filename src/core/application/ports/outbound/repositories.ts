@@ -11,10 +11,13 @@
  */
 import type {
   Approval,
+  AttentionItem as DomainAttentionItem,
   ContextCapsule,
   Decision,
+  Deliverable,
   EntityId,
   Event,
+  Project,
   Session,
   Task,
 } from '../../../domain/types.js';
@@ -68,6 +71,36 @@ export interface ContextCapsuleRepositoryPort {
 /** Decision Ledger store (read surface used by context resolution). */
 export interface DecisionRepositoryPort {
   listByTask(taskId: EntityId): Decision[];
+}
+
+/** Project store (DEC-004). */
+export interface ProjectRepositoryPort {
+  insert(project: Project): void;
+  getById(id: EntityId): Project | null;
+  listAll(): Project[];
+  update(project: Project): void;
+}
+
+/**
+ * Persisted attention-item store (DEC-014). The domain {@link AttentionItem}
+ * projection is aliased to distinguish it from the in-memory inbox item the
+ * attention engine manages.
+ */
+export interface AttentionRecordRepositoryPort {
+  insert(item: DomainAttentionItem): void;
+  getById(id: EntityId): DomainAttentionItem | null;
+  listByTask(taskId: EntityId): DomainAttentionItem[];
+  listByResolved(resolved: boolean): DomainAttentionItem[];
+  update(item: DomainAttentionItem): void;
+}
+
+/** Deliverable store (DEC-004). */
+export interface DeliverableRepositoryPort {
+  insert(deliverable: Deliverable): void;
+  getById(id: EntityId): Deliverable | null;
+  listByTask(taskId: EntityId): Deliverable[];
+  listBySession(sessionId: EntityId): Deliverable[];
+  update(deliverable: Deliverable): void;
 }
 
 /**

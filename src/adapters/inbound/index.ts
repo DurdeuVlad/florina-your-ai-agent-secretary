@@ -6,3 +6,4 @@
  * outbound adapters happen in bootstrap, never inside a family.
  */
 export * from './desktop/index.js';
+export * from './websocket/index.js';

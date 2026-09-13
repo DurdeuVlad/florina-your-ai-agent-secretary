@@ -9,6 +9,7 @@ import type {
   DeliverableType,
   EntityId,
 } from '../../../../../core/domain/types.js';
+import type { DeliverableRepositoryPort } from '../../../../../core/application/ports/outbound/repositories.js';
 import { BaseRepository } from './base.js';
 
 /** Database row shape for the `deliverables` table. */
@@ -23,7 +24,7 @@ interface DeliverableRow {
   created_at: string;
 }
 
-export class DeliverableRepository extends BaseRepository {
+export class DeliverableRepository extends BaseRepository implements DeliverableRepositoryPort {
   private readonly insertStmt: Database.Statement;
   private readonly getByIdStmt: Database.Statement;
   private readonly listByTaskStmt: Database.Statement;

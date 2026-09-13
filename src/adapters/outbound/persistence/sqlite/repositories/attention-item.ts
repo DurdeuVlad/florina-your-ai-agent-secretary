@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 
 import type { AttentionCategory, AttentionPriority } from '../../../../../core/domain/enums.js';
 import type { AttentionItem, EntityId } from '../../../../../core/domain/types.js';
+import type { AttentionRecordRepositoryPort } from '../../../../../core/application/ports/outbound/repositories.js';
 import { BaseRepository } from './base.js';
 
 /** Database row shape for the `attention_items` table. */
@@ -24,7 +25,7 @@ interface AttentionItemRow {
   created_at: string;
 }
 
-export class AttentionItemRepository extends BaseRepository {
+export class AttentionItemRepository extends BaseRepository implements AttentionRecordRepositoryPort {
   private readonly insertStmt: Database.Statement;
   private readonly getByIdStmt: Database.Statement;
   private readonly listByTaskStmt: Database.Statement;

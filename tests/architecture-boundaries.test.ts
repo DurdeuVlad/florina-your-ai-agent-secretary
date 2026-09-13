@@ -137,6 +137,99 @@ function collectSpecifiersFromSource(text: string, fileName = 'source.ts'): stri
   return specifiers;
 }
 
+/**
+ * Node.js globals core modules may never reference: `Buffer`, `process`,
+ * `NodeJS`, `__dirname`, `__filename`, `require`. Core is platform-neutral —
+ * byte decoding, environment access, and Node-specific types belong to
+ * adapters (DEC-037).
+ */
+const FORBIDDEN_CORE_GLOBALS: ReadonlySet<string> = new Set([
+  'Buffer',
+  'process',
+  'NodeJS',
+  '__dirname',
+  '__filename',
+  'require',
+]);
+
+/**
+ * True when `node` occupies a name position rather than a reference
+ * position: property names (`x.process`, `{ process: 1 }`), declaration
+ * names (`const process = ...`), import/export specifier names, qualified-
+ * name right sides, and labels. References — including `require(x)` callees,
+ * `NodeJS.Timeout` left sides, and shorthand `{ process }` values — return
+ * false and are flagged.
+ */
+function isNameOnlyPosition(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (parent === undefined) {
+    return false;
+  }
+  if (
+    (ts.isPropertyAccessExpression(parent) ||
+      ts.isPropertyAssignment(parent) ||
+      ts.isPropertySignature(parent) ||
+      ts.isPropertyDeclaration(parent) ||
+      ts.isMethodSignature(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isGetAccessorDeclaration(parent) ||
+      ts.isSetAccessorDeclaration(parent) ||
+      ts.isEnumMember(parent) ||
+      ts.isVariableDeclaration(parent) ||
+      ts.isParameter(parent) ||
+      ts.isBindingElement(parent) ||
+      ts.isFunctionDeclaration(parent) ||
+      ts.isClassDeclaration(parent) ||
+      ts.isInterfaceDeclaration(parent) ||
+      ts.isTypeAliasDeclaration(parent) ||
+      ts.isEnumDeclaration(parent) ||
+      ts.isModuleDeclaration(parent) ||
+      ts.isImportSpecifier(parent) ||
+      ts.isImportClause(parent) ||
+      ts.isNamespaceImport(parent) ||
+      ts.isImportEqualsDeclaration(parent) ||
+      ts.isExportSpecifier(parent)) &&
+    parent.name === node
+  ) {
+    return true;
+  }
+  if (ts.isQualifiedName(parent) && parent.right === node) {
+    return true;
+  }
+  if (ts.isLabeledStatement(parent) && parent.label === node) {
+    return true;
+  }
+  if (
+    (ts.isBreakStatement(parent) || ts.isContinueStatement(parent)) &&
+    parent.label === node
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Collect every forbidden Node.js global *reference* in a TypeScript source
+ * text. Comments and string literals are not AST identifiers and are never
+ * flagged.
+ */
+function collectForbiddenGlobalRefs(text: string, fileName = 'source.ts'): string[] {
+  const sourceFile = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
+  const refs: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isIdentifier(node) &&
+      FORBIDDEN_CORE_GLOBALS.has(node.text) &&
+      !isNameOnlyPosition(node)
+    ) {
+      refs.push(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return refs;
+}
+
 /** Collect every module specifier edge in a file on disk. */
 function collectEdges(fileAbs: string): ImportEdge[] {
   const text = fs.readFileSync(fileAbs, 'utf8');
@@ -536,6 +629,7 @@ describe('src/core boundary conformance', () => {
       'quota-reader',
       'git-client',
       'voice',
+      'health',
       'index',
     ]) {
       expect(
@@ -548,6 +642,9 @@ describe('src/core boundary conformance', () => {
     for (const rel of [
       'index.ts',
       'metrics.ts',
+      'health.ts',
+      'control-plane/control-plane-api.ts',
+      'control-plane/index.ts',
       'routing/quota-ledger.ts',
       'routing/quota-exhaustion.ts',
       'security/audit-report.ts',
@@ -621,6 +718,50 @@ describe('src/core boundary conformance', () => {
     expect(violations).toEqual([]);
   });
 
+  it('flags Node.js global references but not names, strings, or comments', () => {
+    const flagged = collectForbiddenGlobalRefs(
+      [
+        `const buf = Buffer.from('x');`,
+        `const env = process.env.HOME;`,
+        `let t: NodeJS.Timeout;`,
+        `const mod = require(name);`,
+        `const dir = __dirname;`,
+        `const file = __filename;`,
+      ].join('\n'),
+    );
+    expect(flagged.sort()).toEqual([
+      'Buffer',
+      'NodeJS',
+      '__dirname',
+      '__filename',
+      'process',
+      'require',
+    ]);
+
+    const clean = collectForbiddenGlobalRefs(
+      [
+        `// process and Buffer are mentioned in comments`,
+        `const s = 'Buffer process NodeJS __dirname require';`,
+        `const o = { process: 1, Buffer: 2 };`,
+        `const p = cfg.process;`,
+        `function f(require_: string): void {}`,
+        `type T = { NodeJS: number };`,
+      ].join('\n'),
+    );
+    expect(clean).toEqual([]);
+  });
+
+  it('no src/core module references Node.js globals', () => {
+    const violations = coreFiles.flatMap((fileAbs) => {
+      const rel = toRelPosix(fileAbs);
+      const text = fs.readFileSync(fileAbs, 'utf8');
+      return collectForbiddenGlobalRefs(text, rel).map(
+        (name) => `${rel} -> forbidden global ${name}`,
+      );
+    });
+    expect(violations).toEqual([]);
+  });
+
   it('application and core-root layers contain index.ts barrels only', () => {
     const violations = coreFiles
       .map((fileAbs) => barrelViolation(toRelPosix(fileAbs)))
@@ -666,6 +807,8 @@ describe('migrated use-case compatibility facades', () => {
     'src/daemon/task-lifecycle.ts',
     'src/daemon/session-manager.ts',
     'src/daemon/command-api.ts',
+    'src/daemon/api.ts',
+    'src/daemon/health.ts',
     'src/daemon/capability-broker.ts',
     'src/storage/context-estimator.ts',
     'src/storage/context-resolver.ts',
@@ -754,6 +897,18 @@ describe('migrated use-case compatibility facades', () => {
       'src/adapters/outbound/persistence/sqlite/repositories/completion-digest.ts': [
         'src/core/application/ports/outbound/repositories.ts',
       ],
+      'src/adapters/outbound/persistence/sqlite/repositories/project.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/attention-item.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/deliverable.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/database.ts': [
+        'src/core/application/ports/outbound/health.ts',
+      ],
       'src/adapters/outbound/credentials/os-credential-vault.ts': [
         'src/core/application/ports/outbound/credential-vault.ts',
       ],
@@ -786,12 +941,26 @@ describe('migrated use-case compatibility facades', () => {
       'src/adapters/outbound/security/filesystem-security-auditor.ts': [
         'src/core/application/use-cases/security/audit-report.ts',
       ],
-      // The daemon event stream is an inbound WebSocket surface: it keeps
-      // the transport but must depend on the subscriber port and re-export
-      // the outbound EventBus for compatibility.
-      'src/daemon/event-stream.ts': [
+      // The canonical inbound event stream keeps the WebSocket transport but
+      // must depend on the subscriber port, never a concrete bus.
+      'src/adapters/inbound/websocket/event-stream.ts': [
         'src/core/application/ports/outbound/event-stream.ts',
-        'src/adapters/outbound/events/in-memory-event-bus.ts',
+      ],
+      // The inbound WebSocket control-plane server routes envelopes to the
+      // core use cases only — no storage or outbound imports.
+      'src/adapters/inbound/websocket/control-plane-server.ts': [
+        'src/core/application/use-cases/control-plane/control-plane-api.ts',
+        'src/core/application/use-cases/tasks/command-api.ts',
+        'src/adapters/inbound/websocket/event-stream.ts',
+      ],
+      // The core control-plane and health use cases talk to ports only.
+      'src/core/application/use-cases/control-plane/control-plane-api.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+        'src/core/application/ports/outbound/event-stream.ts',
+      ],
+      'src/core/application/use-cases/health.ts': [
+        'src/core/application/ports/outbound/health.ts',
+        'src/core/application/ports/outbound/event-stream.ts',
       ],
       'src/adapters/outbound/git/node-git-client.ts': [
         'src/core/application/ports/outbound/git-client.ts',
@@ -1195,6 +1364,10 @@ describe('src/adapters/inbound tree', () => {
     'desktop/views/ptt-hud.ts',
     'desktop/views/ptt-templates.ts',
     'desktop/views/view-types.ts',
+    // WebSocket inbound adapter family (event stream + control-plane server)
+    'websocket/event-stream.ts',
+    'websocket/control-plane-server.ts',
+    'websocket/index.ts',
     // Inbound barrel
     'index.ts',
   ];
@@ -1339,5 +1512,214 @@ describe('migrated inbound compatibility facades', () => {
       facadeViolations(path.join(REPO_ROOT, rel), 'src/adapters/inbound/'),
     );
     expect(violations).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Bootstrap composition root (issue #93 sub-slice B)
+ * ------------------------------------------------------------------ */
+
+const BOOTSTRAP_PREFIX = 'src/bootstrap/';
+
+/**
+ * Evaluate one import edge for a file under `src/bootstrap`. The composition
+ * root is the ONLY place concrete inbound and outbound adapters are combined
+ * with core use cases. It may import `src/core/**`, canonical
+ * `src/adapters/inbound/**` / `src/adapters/outbound/**` families, other
+ * bootstrap files, node builtins, and external packages — never a legacy
+ * facade path (`src/daemon`, `src/storage`, `src/attention`, `src/secretary`,
+ * `src/voice`, `src/desktop`, `src/domain`, or old top-level `src/adapters/*`
+ * provider facades).
+ */
+function bootstrapEdgeViolation(edge: ImportEdge): string | null {
+  if (!edge.source.startsWith(BOOTSTRAP_PREFIX)) {
+    return null;
+  }
+  if (!isRelativeSpecifier(edge.specifier)) {
+    return null; // node builtin or external package — allowed in bootstrap
+  }
+  if (edge.target === null) {
+    return `${edge.source} -> ${edge.specifier} (unresolvable module specifier)`;
+  }
+  const allowed =
+    edge.target.startsWith('src/core/') ||
+    edge.target.startsWith('src/adapters/inbound/') ||
+    edge.target.startsWith('src/adapters/outbound/') ||
+    edge.target.startsWith(BOOTSTRAP_PREFIX);
+  if (allowed) {
+    return null;
+  }
+  return (
+    `${edge.source} -> ${edge.target} ` +
+    '(bootstrap may only import src/core, canonical adapter families, or ' +
+    'other bootstrap files — never legacy facade paths)'
+  );
+}
+
+describe('src/bootstrap composition root', () => {
+  const BOOTSTRAP_EXPECTED: readonly string[] = ['daemon.ts', 'index.ts'];
+
+  it('the expected bootstrap tree exists', () => {
+    const missing = BOOTSTRAP_EXPECTED.filter(
+      (rel) => !fs.existsSync(path.join(SRC_DIR, 'bootstrap', rel)),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('bootstrap edge classification allows core, canonical adapters, node, and packages', () => {
+    const legal: readonly ImportEdge[] = [
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../core/application/use-cases/health.js',
+        target: 'src/core/application/use-cases/health.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../adapters/outbound/git/worktree-manager.js',
+        target: 'src/adapters/outbound/git/worktree-manager.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../adapters/inbound/websocket/control-plane-server.js',
+        target: 'src/adapters/inbound/websocket/control-plane-server.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: 'node:fs',
+        target: null,
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: 'ws',
+        target: null,
+      },
+      {
+        source: 'src/bootstrap/index.ts',
+        specifier: './daemon.js',
+        target: 'src/bootstrap/daemon.ts',
+      },
+    ];
+    for (const edge of legal) {
+      expect(bootstrapEdgeViolation(edge)).toBeNull();
+    }
+  });
+
+  it('bootstrap edge classification rejects legacy facade roots', () => {
+    const illegal: readonly ImportEdge[] = [
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../daemon/daemon.js',
+        target: 'src/daemon/daemon.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../storage/index.js',
+        target: 'src/storage/index.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../adapters/base.js',
+        target: 'src/adapters/base.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../secretary/model-connector.js',
+        target: 'src/secretary/model-connector.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../voice/index.js',
+        target: 'src/voice/index.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: '../domain/types.js',
+        target: 'src/domain/types.ts',
+      },
+      {
+        source: 'src/bootstrap/daemon.ts',
+        specifier: './does-not-exist.js',
+        target: null,
+      },
+    ];
+    for (const edge of illegal) {
+      expect(bootstrapEdgeViolation(edge)).not.toBeNull();
+    }
+    // Non-bootstrap sources are never flagged by the bootstrap rule.
+    expect(
+      bootstrapEdgeViolation({
+        source: 'src/daemon/daemon.ts',
+        specifier: '../storage/index.js',
+        target: 'src/storage/index.ts',
+      }),
+    ).toBeNull();
+  });
+
+  it('no file under src/bootstrap imports a legacy facade root', () => {
+    const bootstrapDir = path.join(SRC_DIR, 'bootstrap');
+    const bootstrapFiles = listTsFiles(bootstrapDir);
+    expect(bootstrapFiles.length).toBeGreaterThan(0);
+    const violations = bootstrapFiles
+      .flatMap((f) => collectEdges(f))
+      .map(bootstrapEdgeViolation)
+      .filter((v): v is string => v !== null);
+    expect(violations).toEqual([]);
+  });
+
+  it('bootstrap daemon composes canonical families directly', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'bootstrap', 'daemon.ts'));
+    const requiredTargets: readonly string[] = [
+      // Core application use cases
+      'src/core/application/use-cases/control-plane/control-plane-api.ts',
+      'src/core/application/use-cases/health.ts',
+      'src/core/application/use-cases/tasks/command-api.ts',
+      'src/core/application/use-cases/tasks/session-manager.ts',
+      'src/core/application/use-cases/tasks/task-lifecycle.ts',
+      'src/core/application/use-cases/metrics.ts',
+      'src/core/application/use-cases/attention/attention-inbox.ts',
+      'src/core/application/use-cases/attention/attention-aggregator.ts',
+      // Canonical outbound adapter families
+      'src/adapters/outbound/persistence/sqlite/index.ts',
+      'src/adapters/outbound/events/in-memory-event-bus.ts',
+      'src/adapters/outbound/git/worktree-manager.ts',
+      'src/adapters/outbound/agents/registry.ts',
+      'src/adapters/outbound/agents/stub-adapter.ts',
+      // Canonical inbound adapter family
+      'src/adapters/inbound/websocket/event-stream.ts',
+      'src/adapters/inbound/websocket/control-plane-server.ts',
+    ];
+    const violations: string[] = [];
+    for (const target of requiredTargets) {
+      if (!edges.some((e) => e.target === target)) {
+        violations.push(`src/bootstrap/daemon.ts must directly import ${target}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('legacy daemon facades (issue #93)', () => {
+  it('src/daemon/daemon.ts is a facade into the bootstrap composition root', () => {
+    expect(
+      facadeViolations(
+        path.join(REPO_ROOT, 'src/daemon/daemon.ts'),
+        'src/bootstrap/',
+      ),
+    ).toEqual([]);
+  });
+
+  it('src/daemon/event-stream.ts is a pure barrel for the inbound stream and outbound bus', () => {
+    // Allowed statements: re-export declarations only — the inbound
+    // EventStream implementation and the outbound in-memory EventBus. No
+    // imports, functions, classes, or other implementation statements.
+    expect(
+      wrapperViolations(path.join(SRC_DIR, 'daemon', 'event-stream.ts'), {
+        allowedImportPrefixes: [],
+        allowedExportPrefixes: [
+          'src/adapters/inbound/websocket/',
+          'src/adapters/outbound/events/',
+        ],
+      }),
+    ).toEqual([]);
   });
 });
