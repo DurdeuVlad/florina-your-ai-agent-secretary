@@ -8,15 +8,8 @@ import {
   buildSession,
   buildTask,
 } from '../src/domain/index.js';
-import {
-  EventRepository,
-  StorageDatabase,
-  TaskRepository,
-} from '../src/storage/index.js';
-import {
-  IllegalTransitionError,
-  TaskStateMachine,
-} from '../src/daemon/task-lifecycle.js';
+import { EventRepository, StorageDatabase, TaskRepository } from '../src/storage/index.js';
+import { IllegalTransitionError, TaskStateMachine } from '../src/daemon/task-lifecycle.js';
 import type { TaskState as TaskStateType } from '../src/domain/index.js';
 import type { TransitionContext } from '../src/daemon/task-lifecycle.js';
 
@@ -120,6 +113,8 @@ const VALID_TRANSITIONS: ReadonlyArray<[TaskStateType, TaskStateType]> = [
   [TaskState.Created, TaskState.Failed],
   // delegated
   [TaskState.Delegated, TaskState.Running],
+  // A delegated task may block before first progress (failover freeze, #64).
+  [TaskState.Delegated, TaskState.Blocked],
   [TaskState.Delegated, TaskState.Cancelled],
   [TaskState.Delegated, TaskState.Failed],
   // running
@@ -181,6 +176,7 @@ const EXPECTED_EVENT_KIND: Readonly<Record<string, string>> = {
   'created->cancelled': 'AgentStopped',
   'created->failed': 'AgentFailed',
   'delegated->running': 'AgentProgress',
+  'delegated->blocked': 'AgentBlocked',
   'delegated->cancelled': 'AgentStopped',
   'delegated->failed': 'AgentFailed',
   'running->attention-needed': 'ApprovalRequested',
@@ -288,17 +284,13 @@ describe('TaskStateMachine: every illegal transition is rejected', () => {
   for (const from of ALL_STATES) {
     for (const to of ALL_STATES) {
       const key = `${from}->${to}`;
-      const isValid = VALID_TRANSITIONS.some(
-        ([vFrom, vTo]) => vFrom === from && vTo === to,
-      );
+      const isValid = VALID_TRANSITIONS.some(([vFrom, vTo]) => vFrom === from && vTo === to);
       if (isValid) {
         continue;
       }
       it(`${key} is rejected with IllegalTransitionError`, () => {
         seedState(f, from);
-        expect(() => f.sm.transition(f.taskId, from, to, f.ctx)).toThrow(
-          IllegalTransitionError,
-        );
+        expect(() => f.sm.transition(f.taskId, from, to, f.ctx)).toThrow(IllegalTransitionError);
         // State must remain unchanged.
         if (!TERMINAL_STATES.includes(from)) {
           expect(f.sm.getCurrentState(f.taskId)).toBe(from);
@@ -329,9 +321,9 @@ describe('TaskStateMachine: completion requires explicit review/acceptance', () 
   it('completed is not the same as accepted — cannot jump completed -> cancelled-only path closes it', () => {
     seedState(f, TaskState.Completed);
     // completed cannot go back to running or be re-delegated.
-    expect(() =>
-      f.sm.transition(f.taskId, TaskState.Completed, TaskState.Running, f.ctx),
-    ).toThrow(IllegalTransitionError);
+    expect(() => f.sm.transition(f.taskId, TaskState.Completed, TaskState.Running, f.ctx)).toThrow(
+      IllegalTransitionError,
+    );
     expect(() =>
       f.sm.transition(f.taskId, TaskState.Completed, TaskState.Delegated, f.ctx),
     ).toThrow(IllegalTransitionError);
@@ -485,9 +477,9 @@ describe('TaskStateMachine: every transition appends an event to the journal', (
 
   it('illegal transitions do NOT append an event', () => {
     const before = f.events.listByTask(f.taskId).length;
-    expect(() =>
-      f.sm.transition(f.taskId, TaskState.Created, TaskState.Completed, f.ctx),
-    ).toThrow(IllegalTransitionError);
+    expect(() => f.sm.transition(f.taskId, TaskState.Created, TaskState.Completed, f.ctx)).toThrow(
+      IllegalTransitionError,
+    );
     expect(f.events.listByTask(f.taskId).length).toBe(before);
   });
 });
@@ -505,9 +497,9 @@ describe('TaskStateMachine: fromState mismatch and missing task', () => {
 
   it('throws IllegalTransitionError when fromState does not match current state', () => {
     // Task is in 'created' but caller claims 'running'.
-    expect(() =>
-      f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx),
-    ).toThrow(IllegalTransitionError);
+    expect(() => f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx)).toThrow(
+      IllegalTransitionError,
+    );
   });
 
   it('throws when the task does not exist', () => {
