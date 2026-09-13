@@ -275,7 +275,9 @@ describe('StubAdapter event emission', () => {
     const stub = new StubAdapter(null);
     await stub.connect();
     await stub.startRun('t', sampleSessionConfig());
-    await expect(stub.startRun('t', sampleSessionConfig())).rejects.toThrow(/already has an active/);
+    await expect(stub.startRun('t', sampleSessionConfig())).rejects.toThrow(
+      /already has an active/,
+    );
     await stub.disconnect();
   });
 });
@@ -308,9 +310,7 @@ describe('AdapterRegistry', () => {
   it('register throws DuplicateAdapterError on double registration', () => {
     const registry = new AdapterRegistry();
     registry.register('stub', () => new StubAdapter());
-    expect(() => registry.register('stub', () => new StubAdapter())).toThrow(
-      DuplicateAdapterError,
-    );
+    expect(() => registry.register('stub', () => new StubAdapter())).toThrow(DuplicateAdapterError);
   });
 
   it('can register multiple adapters and list them', () => {
@@ -342,7 +342,10 @@ describe('AdapterRegistry', () => {
  * session) required by the events table's foreign-key constraints. Returns
  * the ids used so the test can reference them.
  */
-function seedJournal(db: StorageDatabase, cfg: SessionConfig): {
+function seedJournal(
+  db: StorageDatabase,
+  cfg: SessionConfig,
+): {
   projectId: string;
   taskId: string;
   agentId: string;
@@ -407,6 +410,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
 
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,

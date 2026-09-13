@@ -11,6 +11,14 @@ export {
   SECRETARY_MCP_SERVER_NAME,
   SECRETARY_MCP_SERVER_VERSION,
 } from './secretary-mcp-server.js';
+export { SecretaryMcpHttpServer, MCP_HTTP_PATH, mcpProjectId } from './http-server.js';
+export type { ManagerServiceFactory, SecretaryMcpHttpServerOptions } from './http-server.js';
+export {
+  managerMcpRegistration,
+  managerMcpRegistrations,
+  MCP_CAPABLE_PROVIDERS,
+} from './manager-registration.js';
+export type { McpRegistration } from './manager-registration.js';
 export {
   ManagerToolService,
   ManagerToolError,

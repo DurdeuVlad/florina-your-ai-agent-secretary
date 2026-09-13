@@ -58,10 +58,17 @@ import { AttentionInbox } from '../core/application/use-cases/attention/attentio
 import { AttentionAggregator } from '../core/application/use-cases/attention/attention-aggregator.js';
 import { collectHealth } from '../core/application/use-cases/health.js';
 import type { HealthStatus } from '../core/application/use-cases/health.js';
+import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
+import { PreferenceProfileStore } from '../adapters/outbound/preferences/json-preference-profile.js';
+import { SecretaryMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
+import { managerServiceFactory } from './mcp-server.js';
 import type { SupervisorEvent } from '../core/domain/events.js';
 
 /** Default localhost port for the control plane (DEC-008). */
 export const DEFAULT_DAEMON_PORT = 17419;
+
+/** Default localhost port for the manager MCP HTTP surface (DEC-018). */
+export const DEFAULT_MCP_PORT = 17420;
 
 /** Default lockfile location (per-user OS temp dir). */
 export const DEFAULT_LOCKFILE = path.join(os.tmpdir(), 'agent-secretary.lock');
@@ -77,6 +84,17 @@ export interface DaemonOptions {
   readonly lockfile?: string;
   /** SQLite database path. Use `:memory:` for ephemeral (tests). */
   readonly dbPath?: string;
+  /**
+   * Localhost port for the manager MCP HTTP surface (DEC-018, issue #63).
+   * Defaults to {@link DEFAULT_MCP_PORT}. Pass `null` to disable the MCP
+   * server. Pass `0` for an OS-assigned port (tests).
+   */
+  readonly mcpPort?: number | null;
+  /**
+   * Preference profile JSON path backing the CapacityRouter (DEC-029).
+   * Defaults to `~/.agent-secretary/preferences.json`.
+   */
+  readonly preferenceProfilePath?: string;
   /** When true, do not install SIGINT/SIGTERM handlers (useful for tests). */
   readonly installSignalHandlers?: boolean;
 }
@@ -107,10 +125,13 @@ export class SecretaryDaemon extends EventEmitter {
     port: number;
     lockfile: string;
     dbPath: string;
+    mcpPort: number | null;
+    preferenceProfilePath: string;
     installSignalHandlers: boolean;
   };
   private state: DaemonState = 'stopped';
   private server: WebSocketControlPlaneServer | null = null;
+  private mcpServer: SecretaryMcpHttpServer | null = null;
   private db: StorageDatabase | null = null;
   private api: ControlPlaneApi | null = null;
   private commandApi: CommandApi | null = null;
@@ -123,6 +144,8 @@ export class SecretaryDaemon extends EventEmitter {
   private taskStateMachine: TaskStateMachine | null = null;
   private adapterRegistry: AdapterRegistry | null = null;
   private sessionManager: SessionManager | null = null;
+  private quotaLedger: QuotaLedger | null = null;
+  private preferenceStore: PreferenceProfileStore | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -134,6 +157,10 @@ export class SecretaryDaemon extends EventEmitter {
       port: options.port ?? DEFAULT_DAEMON_PORT,
       lockfile: options.lockfile ?? DEFAULT_LOCKFILE,
       dbPath: options.dbPath ?? path.join(os.homedir(), '.agent-secretary', 'secretary.db'),
+      mcpPort: options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort,
+      preferenceProfilePath:
+        options.preferenceProfilePath ??
+        path.join(os.homedir(), '.agent-secretary', 'preferences.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
     };
   }
@@ -176,6 +203,20 @@ export class SecretaryDaemon extends EventEmitter {
   /** Exposed for tests to inspect the wired SessionManager. */
   get sessionManager$(): SessionManager | null {
     return this.sessionManager;
+  }
+
+  /**
+   * The `http://` URL managers register with their provider CLIs to reach
+   * the Secretary MCP tool surface, or `null` when the MCP server is
+   * disabled or not yet started (DEC-018, issue #63).
+   */
+  get mcpUrl(): string | null {
+    return this.mcpServer?.isListening === true ? this.mcpServer.url : null;
+  }
+
+  /** Exposed for tests to inspect the wired QuotaLedger (DEC-029). */
+  get quotaLedger$(): QuotaLedger | null {
+    return this.quotaLedger;
   }
 
   /**
@@ -241,6 +282,30 @@ export class SecretaryDaemon extends EventEmitter {
           void this.stop();
         },
       });
+
+      // Wire the quota ledger + preference profile that the CapacityRouter
+      // (and through it every manager spawn) enforces (DEC-029, issue #63).
+      this.quotaLedger = new QuotaLedger();
+      this.preferenceStore = await PreferenceProfileStore.load(this.options.preferenceProfilePath);
+
+      // Wire the manager MCP surface (DEC-018, issue #63): an HTTP
+      // transport on its own localhost port serving the per-project
+      // manager tool service. Disabled when mcpPort is null.
+      if (this.options.mcpPort !== null) {
+        this.mcpServer = new SecretaryMcpHttpServer({
+          port: this.options.mcpPort,
+          serviceFactory: managerServiceFactory({
+            commandApi: this.commandApi,
+            taskStore: repos.tasks,
+            worktreeManager: this.worktreeManager,
+            quotaLedger: this.quotaLedger,
+            preferenceStore: this.preferenceStore,
+            projects: repos.projects,
+          }),
+          onError: (err) => this.emit('error', err),
+        });
+        await this.mcpServer.start();
+      }
 
       // The inbound WebSocket server owns the socket; the daemon re-emits
       // connection/error events for its own lifecycle surface.
@@ -429,6 +494,12 @@ export class SecretaryDaemon extends EventEmitter {
       this.stream.close();
       this.stream = null;
     }
+    // Close the manager MCP surface before the control-plane server so no
+    // in-flight tool call can touch torn-down state.
+    if (this.mcpServer) {
+      await this.mcpServer.stop();
+      this.mcpServer = null;
+    }
     // Close the server so no new connections arrive and every registered
     // connection is unwired from the event stream.
     if (this.server) {
@@ -454,6 +525,8 @@ export class SecretaryDaemon extends EventEmitter {
     this.worktreeManager = null;
     this.taskStateMachine = null;
     this.adapterRegistry = null;
+    this.quotaLedger = null;
+    this.preferenceStore = null;
   }
 
   private setState(state: DaemonState): void {
