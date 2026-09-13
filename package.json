@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "desktop": "node scripts/desktop.mjs"
+    "desktop": "node scripts/desktop.mjs",
+    "postinstall": "node scripts/ensure-electron.mjs"
   },
   "keywords": [
     "agent",
