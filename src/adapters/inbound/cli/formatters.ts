@@ -17,6 +17,7 @@ import type {
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 import type { CompletionDigest } from '../../../core/application/use-cases/attention/completion-digest.js';
+import type { ContextHealthSnapshot } from '../../../core/application/use-cases/context/context-health-monitor.js';
 
 /* ------------------------------------------------------------------ *
  * ANSI color helpers (sparing usage per PRODUCT_DESIGN.md tone)
@@ -216,10 +217,14 @@ export function formatDigest(digest: CompletionDigest): string {
       lines.push(`    … and ${digest.filesChanged.length - 20} more`);
     }
   }
-  lines.push(`  tests: ${digest.testsPassed}/${digest.testsRun} passed` +
-    (digest.testsFailed > 0 ? `, ${RED(String(digest.testsFailed))} failed` : ''));
-  lines.push(`  approvals: ${digest.approvalsRequested} requested` +
-    ` (${digest.approvalsGranted} granted, ${digest.approvalsDenied} denied)`);
+  lines.push(
+    `  tests: ${digest.testsPassed}/${digest.testsRun} passed` +
+      (digest.testsFailed > 0 ? `, ${RED(String(digest.testsFailed))} failed` : ''),
+  );
+  lines.push(
+    `  approvals: ${digest.approvalsRequested} requested` +
+      ` (${digest.approvalsGranted} granted, ${digest.approvalsDenied} denied)`,
+  );
   if (digest.commitHash) lines.push(`  commit: ${digest.commitHash}`);
   if (digest.branchName) lines.push(`  branch: ${digest.branchName}`);
 
@@ -322,4 +327,29 @@ export function formatStatus(running: boolean, port: number, pid?: number): stri
     return `${GREEN('running')} on port ${port}${pidPart}\n`;
   }
   return `${GRAY('stopped')} — daemon is not running\n`;
+}
+
+/**
+ * Format per-agent context health (DEC-035, issue #77).
+ *
+ * Each line shows the agent, status, and estimated window fill. A
+ * degraded/critical agent is a liveness-adjacent risk — the fill is the
+ * signal that a condensation or failover may be due.
+ */
+export function formatContextHealth(snapshots: readonly ContextHealthSnapshot[]): string {
+  if (snapshots.length === 0) {
+    return `  ${GRAY('context health: no agents tracked')}\n`;
+  }
+  const statusColor = (s: ContextHealthSnapshot['status']): ((t: string) => string) =>
+    s === 'critical' ? RED : s === 'degraded' ? YELLOW : GREEN;
+  const lines = ['  context health:'];
+  for (const s of snapshots) {
+    const fill = `${Math.round(s.windowFillPct * 100)}%`;
+    const condense =
+      s.condensationCount > 0 && s.lastCondensationAt !== undefined
+        ? `, last condensed ${s.lastCondensationAt}`
+        : ', never condensed';
+    lines.push(`    ${s.agentId}: ${statusColor(s.status)(s.status)} (fill ${fill}${condense})`);
+  }
+  return `${lines.join('\n')}\n`;
 }

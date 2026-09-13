@@ -63,6 +63,7 @@ import {
 import { GrantService } from '../core/application/use-cases/capabilities/grant-service.js';
 import { EventJournalWriter } from '../core/application/use-cases/journal/event-journal-writer.js';
 import { VerificationGate } from '../core/application/use-cases/verification/verification-gate.js';
+import { ContextHealthMonitor } from '../core/application/use-cases/context/context-health-monitor.js';
 import { collectHealth } from '../core/application/use-cases/health.js';
 import type { HealthStatus } from '../core/application/use-cases/health.js';
 import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
@@ -161,6 +162,7 @@ export class SecretaryDaemon extends EventEmitter {
   private grantService: GrantService | null = null;
   private journalWriter: EventJournalWriter | null = null;
   private verificationGate: VerificationGate | null = null;
+  private contextHealth: ContextHealthMonitor | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -243,6 +245,14 @@ export class SecretaryDaemon extends EventEmitter {
    */
   get grants(): GrantService | null {
     return this.grantService;
+  }
+
+  /**
+   * The wired context-health monitor (DEC-035, issue #77) — per-agent
+   * window-fill snapshots for `secretary status` and the fleet view.
+   */
+  get contextHealthMonitor(): ContextHealthMonitor | null {
+    return this.contextHealth;
   }
 
   /**
@@ -344,6 +354,13 @@ export class SecretaryDaemon extends EventEmitter {
         },
       });
       this.journalWriter.start();
+
+      // Wire context-health tracking (DEC-035, issue #77): per-agent
+      // window-fill estimates derived from usage reports and event
+      // counts; a status transition publishes ContextHealthChanged —
+      // journaled by the writer, elevated by the aggregator.
+      this.contextHealth = new ContextHealthMonitor({ bus: this.bus });
+      this.contextHealth.start();
       this.worktreeManager = new GitWorktreeAdapter();
       this.taskStateMachine = new TaskStateMachine(repos.tasks, repos.events);
 
@@ -389,6 +406,7 @@ export class SecretaryDaemon extends EventEmitter {
         adapterRegistry: this.adapterRegistry,
         sessionManager: this.sessionManager,
         completionDigestRepository: repos.completionDigests,
+        contextHealth: this.contextHealth ?? undefined,
         onShutdown: () => {
           void this.stop();
         },
@@ -618,6 +636,8 @@ export class SecretaryDaemon extends EventEmitter {
       this.attentionAggregator = null;
       this.journalWriter?.stop();
       this.journalWriter = null;
+      this.contextHealth?.stop();
+      this.contextHealth = null;
     }
     if (this.metricsCollector) {
       this.metricsCollector.detach();

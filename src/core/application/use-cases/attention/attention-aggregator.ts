@@ -18,6 +18,7 @@ import type {
   AgentCompletedEvent,
   AgentFailedEvent,
   ApprovalRequestedEvent,
+  ContextHealthChangedEvent,
   SupervisorEvent,
 } from '../../../domain/events.js';
 import type { CapabilityRiskLevel } from '../../../domain/capabilities.js';
@@ -155,6 +156,9 @@ export class AttentionAggregator {
       case 'AgentCompleted':
         this.addDigestItem(event);
         break;
+      case 'ContextHealthChanged':
+        this.addDegradedContextItem(event);
+        break;
       default:
         // Other event types do not directly produce inbox items.
         break;
@@ -219,6 +223,51 @@ export class AttentionAggregator {
         workingDir: event.workingDir,
         riskLevel: event.riskLevel,
         scope: event.scope,
+        sessionId: event.sessionId,
+        agentId: event.agentId,
+      },
+    });
+  }
+
+  /**
+   * ContextHealthChanged → DegradedContext (DEC-035, issue #77).
+   *
+   * A degrading context is a liveness-adjacent risk — the agent is about
+   * to get dumber. `critical` maps to High priority, `degraded` to
+   * Medium; a recovery to `ok` is informational and does not create an
+   * item (the deduped DegradedContext item ages out naturally).
+   */
+  private addDegradedContextItem(event: ContextHealthChangedEvent): void {
+    if (event.status === 'ok') {
+      return;
+    }
+    // Worsening health on an already-open card escalates it rather than
+    // stacking a duplicate — the dedup window would otherwise swallow the
+    // `degraded` → `critical` upgrade.
+    if (event.status === 'critical') {
+      const open = this.inbox
+        .list()
+        .find(
+          (i) =>
+            i.taskId === event.taskId &&
+            i.kind === 'DegradedContext' &&
+            (i.status === 'Pending' || i.status === 'Acknowledged'),
+        );
+      if (open !== undefined) {
+        this.inbox.escalate(open.id);
+        return;
+      }
+    }
+    this.maybeAddItem({
+      taskId: event.taskId,
+      kind: 'DegradedContext',
+      priority: event.status === 'critical' ? 'High' : 'Medium',
+      createdAt: event.timestamp,
+      payload: {
+        status: event.status,
+        windowFillPct: event.windowFillPct,
+        lastCondensationAt: event.lastCondensationAt,
+        details: event.details,
         sessionId: event.sessionId,
         agentId: event.agentId,
       },

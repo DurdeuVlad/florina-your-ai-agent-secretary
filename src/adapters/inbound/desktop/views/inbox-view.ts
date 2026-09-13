@@ -77,6 +77,11 @@ export const KIND_METADATA: Readonly<Record<AttentionItemKind, DisplayMetadata>>
     color: 'amber',
     label: 'Unverified Completion',
   },
+  DegradedContext: {
+    icon: 'gauge',
+    color: 'orange',
+    label: 'Degraded Context',
+  },
   Custom: {
     icon: 'info',
     color: 'slate',
