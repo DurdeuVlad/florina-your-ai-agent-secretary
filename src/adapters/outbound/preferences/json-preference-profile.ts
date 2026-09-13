@@ -56,6 +56,12 @@ export function validatePreferenceProfile(value: unknown): PreferenceProfile {
     if (rule['workTypes'] !== undefined && !isStringArray(rule['workTypes'])) {
       throw new PreferenceProfileError(`rules[${i}].workTypes must be an array of strings`);
     }
+    if (rule['projectId'] !== undefined && typeof rule['projectId'] !== 'string') {
+      throw new PreferenceProfileError(`rules[${i}].projectId must be a string`);
+    }
+    if (rule['note'] !== undefined && typeof rule['note'] !== 'string') {
+      throw new PreferenceProfileError(`rules[${i}].note must be a string`);
+    }
   }
   for (const [i, deny] of (value['denied'] as unknown[]).entries()) {
     if (!isObject(deny) || typeof deny['provider'] !== 'string' || deny['provider'].length === 0) {
@@ -63,6 +69,12 @@ export function validatePreferenceProfile(value: unknown): PreferenceProfile {
     }
     if (deny['model'] !== undefined && typeof deny['model'] !== 'string') {
       throw new PreferenceProfileError(`denied[${i}].model must be a string`);
+    }
+    if (deny['projectId'] !== undefined && typeof deny['projectId'] !== 'string') {
+      throw new PreferenceProfileError(`denied[${i}].projectId must be a string`);
+    }
+    if (deny['note'] !== undefined && typeof deny['note'] !== 'string') {
+      throw new PreferenceProfileError(`denied[${i}].note must be a string`);
     }
   }
   return {

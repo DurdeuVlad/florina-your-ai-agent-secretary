@@ -55,7 +55,11 @@ import type {
   TaskRepositoryPort,
 } from '../../ports/outbound/repositories.js';
 import { DirtyWorktreeError, type WorktreePort } from '../../ports/outbound/worktree.js';
-import type { PreferenceProfilePort } from '../../ports/outbound/preference-profile.js';
+import {
+  preferencePromptText,
+  type PreferenceProfile,
+  type PreferenceProfilePort,
+} from '../../ports/outbound/preference-profile.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
 import type { ContextHealthSnapshot } from '../context/context-health-monitor.js';
@@ -342,6 +346,26 @@ export interface UpdatePreferenceCommand {
   readonly model?: string;
   /** Work-type tags a routing rule applies to (add-rule only). */
   readonly workTypes?: readonly string[];
+  /**
+   * Project scope for the rule/deny; omitted = global default
+   * (DEC-003 need-to-know — project rules are shown only to that
+   * project's manager).
+   */
+  readonly projectId?: string;
+  /**
+   * The user's own words for this rule (soft layer — managers reason
+   * over it; the daemon still enforces the structured fields).
+   */
+  readonly note?: string;
+}
+
+/**
+ * Read the durable preference profile (issue #65). `projectId` narrows
+ * the rendered prompt text to what that project's manager may see.
+ */
+export interface QueryPreferencesCommand {
+  readonly kind: 'query-preferences';
+  readonly projectId?: string;
 }
 
 /** Query the latest completion digest for a task (issue #37). */
@@ -414,6 +438,7 @@ export type Command =
   | CompileBriefCommand
   | ConfirmBriefCommand
   | UpdatePreferenceCommand
+  | QueryPreferencesCommand
   | GetDigestCommand
   | CreatePrCommand
   | DelegateTaskCommand;
@@ -441,6 +466,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'brief-compile',
   'brief-confirm',
   'update-preference',
+  'query-preferences',
   'get-digest',
   'create-pr',
   'delegate-task',
@@ -574,11 +600,16 @@ export interface BriefConfirmResponse {
   readonly error?: string;
 }
 
-/** Response to `update-preference` — the profile after mutation. */
+/** Response to `update-preference`/`query-preferences` — the profile. */
 export interface PreferenceResponse {
   readonly ok: boolean;
-  /** Rendered rules+denies after the mutation, for the caller to echo. */
+  /** Rendered rules+denies, for the caller to echo. */
   readonly summary?: string;
+  /**
+   * Need-to-know prompt text for a project manager (query-preferences
+   * with `projectId`) — global rules plus that project's own.
+   */
+  readonly promptText?: string;
   readonly error?: string;
 }
 
@@ -865,6 +896,8 @@ export class CommandApi {
         return this.handleConfirmBrief(command);
       case 'update-preference':
         return this.handleUpdatePreference(command);
+      case 'query-preferences':
+        return this.handleQueryPreferences(command);
       case 'get-digest':
         return this.handleGetDigest(command);
       case 'create-pr':
@@ -1518,12 +1551,16 @@ export class CommandApi {
             provider: cmd.provider,
             ...(cmd.model !== undefined ? { model: cmd.model } : {}),
             ...(cmd.workTypes !== undefined ? { workTypes: [...cmd.workTypes] } : {}),
+            ...(cmd.projectId !== undefined ? { projectId: cmd.projectId } : {}),
+            ...(cmd.note !== undefined ? { note: cmd.note } : {}),
           });
           break;
         case 'deny':
           store.addDeny({
             provider: cmd.provider,
             ...(cmd.model !== undefined ? { model: cmd.model } : {}),
+            ...(cmd.projectId !== undefined ? { projectId: cmd.projectId } : {}),
+            ...(cmd.note !== undefined ? { note: cmd.note } : {}),
           });
           break;
         case 'remove-rule':
@@ -1539,18 +1576,29 @@ export class CommandApi {
       }
       await store.save();
       const profile = store.toProfile();
-      const summary = [
-        ...profile.rules.map(
-          (r) => `rule: ${r.provider}${r.model !== undefined ? `/${r.model}` : ''}`,
-        ),
-        ...profile.denied.map(
-          (d) => `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}`,
-        ),
-      ].join('\n');
-      return { ok: true, summary: summary === '' ? 'no preferences recorded' : summary };
+      const summary = renderPreferenceSummary(profile);
+      return { ok: true, summary };
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
     }
+  }
+
+  /**
+   * query-preferences: read the durable profile (issue #65). With
+   * `projectId`, also returns the need-to-know prompt text a manager for
+   * that project would see — global rules plus that project's own.
+   */
+  private async handleQueryPreferences(cmd: QueryPreferencesCommand): Promise<PreferenceResponse> {
+    if (this.preferences === undefined) {
+      return { ok: false, error: 'preference profile is not wired into this daemon' };
+    }
+    const profile = this.preferences.toProfile();
+    const promptText = preferencePromptText(profile, cmd.projectId);
+    return {
+      ok: true,
+      summary: renderPreferenceSummary(profile, cmd.projectId),
+      ...(promptText !== null ? { promptText } : {}),
+    };
   }
 
   /** get-digest: return the latest completion digest for a task (issue #37). */
@@ -1637,9 +1685,7 @@ export class CommandApi {
       ...(cmd.workType !== undefined ? { workType: cmd.workType } : {}),
       ...(cmd.preferProvider !== undefined ? { preferProvider: cmd.preferProvider } : {}),
       ...(cmd.preferModel !== undefined ? { preferModel: cmd.preferModel } : {}),
-      ...(cmd.excludeProviders !== undefined
-        ? { excludeProviders: cmd.excludeProviders }
-        : {}),
+      ...(cmd.excludeProviders !== undefined ? { excludeProviders: cmd.excludeProviders } : {}),
     });
     if (result.status === 'spawned') {
       return {
@@ -1686,6 +1732,35 @@ function generateId(prefix: string): string {
 }
 
 /** Extract a human-readable message from an unknown error. */
+/**
+ * Render the preference profile for CLI/voice echo (issue #65). With
+ * `projectId`, only rules visible to that project are listed (global +
+ * project-scoped — DEC-003 need-to-know).
+ */
+function renderPreferenceSummary(profile: PreferenceProfile, projectId?: string): string {
+  const visible = (r: { readonly projectId?: string }): boolean =>
+    r.projectId === undefined || r.projectId === projectId;
+  const lines = [
+    ...profile.rules
+      .filter(visible)
+      .map(
+        (r) =>
+          `rule: ${r.provider}${r.model !== undefined ? `/${r.model}` : ''}` +
+          `${r.projectId !== undefined ? ` [project ${r.projectId}]` : ''}` +
+          `${r.note !== undefined ? ` — ${r.note}` : ''}`,
+      ),
+    ...profile.denied
+      .filter(visible)
+      .map(
+        (d) =>
+          `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}` +
+          `${d.projectId !== undefined ? ` [project ${d.projectId}]` : ''}` +
+          `${d.note !== undefined ? ` — ${d.note}` : ''}`,
+      ),
+  ];
+  return lines.length === 0 ? 'no preferences recorded' : lines.join('\n');
+}
+
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
@@ -1766,7 +1841,7 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                   ? BriefResponse
                                   : C extends ConfirmBriefCommand
                                     ? BriefConfirmResponse
-                                    : C extends UpdatePreferenceCommand
+                                    : C extends UpdatePreferenceCommand | QueryPreferencesCommand
                                       ? PreferenceResponse
                                       : C extends GetDigestCommand
                                         ? DigestResponse

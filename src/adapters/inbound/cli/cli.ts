@@ -44,6 +44,7 @@ import type {
   ShutdownResponse,
   DigestResponse,
   ContextHealthResponse,
+  PreferenceResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { TaskState } from '../../../core/domain/enums.js';
 import type {
@@ -162,6 +163,7 @@ Commands:
   task <taskId>               Show task details
   digest <taskId>             Show completion digest for a task
   metrics [--since <ms>]      Show metrics snapshot
+  preferences [--project <id>]  Show routing preference rules + deny list
   prune <taskId>              Prune the worktree for a task
   voice [--api-key <key>]     Start a voice session (push-to-talk)
       [--litellm-url <url>]   LiteLLM proxy for Florina-loop tools
@@ -234,6 +236,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdDigest(ctx);
     case 'metrics':
       return cmdMetrics(ctx);
+    case 'preferences':
+      return cmdPreferences(ctx);
     case 'prune':
       return cmdPrune(ctx);
     case 'voice':
@@ -447,6 +451,20 @@ async function cmdMetrics(ctx: CommandContext): Promise<CommandResult> {
   return { exitCode: 0, message: formatMetrics(r.snapshot) };
 }
 
+/* --- preferences --- */
+async function cmdPreferences(ctx: CommandContext): Promise<CommandResult> {
+  const projectFlag = ctx.args.flags['project'];
+  const response = await sendCommand(ctx.deps.client, {
+    kind: 'query-preferences',
+    ...(typeof projectFlag === 'string' ? { projectId: projectFlag } : {}),
+  });
+  if (!response.ok) {
+    return { exitCode: 1, message: `Failed to query preferences: ${errorOf(response)}\n` };
+  }
+  const r = response as PreferenceResponse;
+  return { exitCode: 0, message: `${r.summary ?? 'no preferences recorded'}\n` };
+}
+
 /* --- prune --- */
 async function cmdPrune(ctx: CommandContext): Promise<CommandResult> {
   const [taskId] = ctx.args.positionals;
@@ -485,8 +503,7 @@ async function cmdVoice(ctx: CommandContext): Promise<CommandResult> {
   if (!status.running) {
     return {
       exitCode: 1,
-      message:
-        'Daemon is not running. Start it first with `florina start` in another terminal.\n',
+      message: 'Daemon is not running. Start it first with `florina start` in another terminal.\n',
     };
   }
 

@@ -221,8 +221,7 @@ export class FlorinaDaemon extends EventEmitter {
       dbPath: options.dbPath ?? path.join(os.homedir(), '.florina', 'florina.db'),
       mcpPort: options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort,
       preferenceProfilePath:
-        options.preferenceProfilePath ??
-        path.join(os.homedir(), '.florina', 'preferences.json'),
+        options.preferenceProfilePath ?? path.join(os.homedir(), '.florina', 'preferences.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
       ...(options.ideasDir !== undefined ? { ideasDir: options.ideasDir } : {}),
       ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
@@ -514,6 +513,7 @@ export class FlorinaDaemon extends EventEmitter {
             worktreeManager,
             repoPath: project.repo.path,
             projectId,
+            preferences: preferenceStore,
           }).spawnTask(input);
         },
       };
@@ -623,9 +623,7 @@ export class FlorinaDaemon extends EventEmitter {
         commandApi: this.commandApi,
         controlPlaneApi: this.api,
         eventStream: this.stream,
-        ...(this.options.authToken !== undefined
-          ? { authToken: this.options.authToken }
-          : {}),
+        ...(this.options.authToken !== undefined ? { authToken: this.options.authToken } : {}),
         ...(this.options.allowedCommands !== undefined
           ? { allowedCommands: this.options.allowedCommands }
           : {}),

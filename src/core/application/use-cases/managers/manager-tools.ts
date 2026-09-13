@@ -18,14 +18,14 @@ import type { Task } from '../../../domain/types.js';
 import type { EntityId } from '../../../domain/types.js';
 import { TaskState } from '../../../domain/enums.js';
 import type { TaskState as TaskStateType } from '../../../domain/enums.js';
-import type {
-  AttentionItemSnapshot,
-  CommandExecutor,
-  TaskSnapshot,
-} from '../tasks/command-api.js';
+import type { AttentionItemSnapshot, CommandExecutor, TaskSnapshot } from '../tasks/command-api.js';
 import type { CapacityRouter } from '../routing/capacity-router.js';
 import type { AttentionItemPriority } from '../attention/attention-item.js';
 import type { McpServerSpec } from '../../ports/outbound/agent-runtime.js';
+import {
+  preferencePromptText,
+  type PreferenceProfilePort,
+} from '../../ports/outbound/preference-profile.js';
 
 /**
  * The MCP registration name every provider's launch config uses for the
@@ -93,6 +93,12 @@ export interface ManagerToolDeps {
    * config registers this server so the agent can call its tools.
    */
   readonly mcpUrl?: string;
+  /**
+   * Durable preference profile (issue #65). When wired, manager spawns
+   * get the need-to-know routing-preference block in their session
+   * prompt — global rules plus this project's own (DEC-003).
+   */
+  readonly preferences?: PreferenceProfilePort;
   readonly now?: () => Date;
   readonly generateId?: (prefix: string) => EntityId;
 }
@@ -163,7 +169,20 @@ export class ManagerToolService {
     return this.spawnTaskWithConfig(input, {
       workType: input.workType ?? 'manage',
       mcpServers: [florinaMcpSpec(this.deps.mcpUrl, this.deps.projectId)],
+      prompt: this.managerPrompt(input.objective),
     });
+  }
+
+  /**
+   * The manager's session prompt: the objective plus the need-to-know
+   * routing-preference block (issue #65 soft layer). The stored task
+   * objective stays clean — the block rides the `prompt` override
+   * channel.
+   */
+  private managerPrompt(objective: string): string {
+    if (this.deps.preferences === undefined) return objective;
+    const prefs = preferencePromptText(this.deps.preferences.toProfile(), this.deps.projectId);
+    return prefs === null ? objective : `${objective}\n\n${prefs}`;
   }
 
   /**
@@ -172,7 +191,11 @@ export class ManagerToolService {
    */
   private async spawnTaskWithConfig(
     input: SpawnTaskInput,
-    launch: { workType?: string; mcpServers?: readonly McpServerSpec[] },
+    launch: {
+      workType?: string;
+      mcpServers?: readonly McpServerSpec[];
+      prompt?: string;
+    },
   ): Promise<SpawnTaskResult> {
     if (!input.objective || input.objective.trim().length === 0) {
       return { status: 'error', error: 'objective is required' };
@@ -217,9 +240,7 @@ export class ManagerToolService {
       // permission denied) leaves a retrievable record, not a crash.
       return {
         status: 'error',
-        error: `worktree creation failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        error: `worktree creation failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
     this.deps.taskStore.update({ ...task, worktreePath });
@@ -232,6 +253,7 @@ export class ManagerToolService {
         workingDir: worktreePath,
         model: decision.model,
         ...(launch.mcpServers !== undefined ? { mcpServers: launch.mcpServers } : {}),
+        ...(launch.prompt !== undefined ? { prompt: launch.prompt } : {}),
       },
     });
     if (!res.ok || !('sessionId' in res) || typeof res.sessionId !== 'string') {
