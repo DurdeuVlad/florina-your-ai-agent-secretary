@@ -10,38 +10,32 @@
  *
  * `fetch` is injectable so tests exercise the connector without network I/O.
  */
-import type { ChatMessage, ToolCall } from './messages.js';
-import type { ToolSpec } from './tool-registry.js';
+import type {
+  ChatMessage,
+  CompletionRequest,
+  CompletionResponse,
+  ModelPort,
+  ToolCall,
+} from '../core/application/ports/outbound/model.js';
+import { ModelPortError } from '../core/application/ports/outbound/model.js';
 
-/** One completion request to the model. */
-export interface CompletionRequest {
-  readonly messages: readonly ChatMessage[];
-  readonly tools?: readonly ToolSpec[];
-  /** Sampling temperature; omitted = provider default. */
-  readonly temperature?: number;
-}
+/**
+ * Re-export the core-owned model contract so connector consumers can keep
+ * importing it from this module. The source of truth is
+ * `src/core/application/ports/outbound/model.ts` (DEC-037).
+ */
+export type {
+  CompletionRequest,
+  CompletionResponse,
+  ModelConnector,
+} from '../core/application/ports/outbound/model.js';
 
-/** The model's response to a completion request. */
-export interface CompletionResponse {
-  /** Assistant content; may be null when the response is only tool calls. */
-  readonly content: string | null;
-  /** Tool calls the model wants executed. */
-  readonly toolCalls: readonly ToolCall[];
-  /** Token accounting when the provider reports it (feeds QuotaLedger). */
-  readonly usage?: {
-    readonly promptTokens?: number;
-    readonly completionTokens?: number;
-    readonly totalTokens?: number;
-  };
-}
-
-/** The model seam: given conversation + available tools, produce the next step. */
-export interface ModelConnector {
-  complete(request: CompletionRequest): Promise<CompletionResponse>;
-}
-
-/** Raised when the connector's HTTP call fails or returns an unusable payload. */
-export class ConnectorError extends Error {
+/**
+ * Raised when the connector's HTTP call fails or returns an unusable
+ * payload. Carries the provider-specific details (`status`, `body`) that
+ * the core port deliberately does not model.
+ */
+export class ConnectorError extends ModelPortError {
   readonly status: number | null;
   readonly body: string | null;
 
@@ -135,7 +129,7 @@ function parseToolCall(call: WireToolCall): ToolCall {
  * Stateless: each {@link complete} call sends the full message list the loop
  * gives it — the journal is the memory (DEC-012), not connector state.
  */
-export class LiteLLMConnector implements ModelConnector {
+export class LiteLLMConnector implements ModelPort {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly apiKey: string | undefined;
@@ -166,7 +160,16 @@ export class LiteLLMConnector implements ModelConnector {
       body.temperature = request.temperature;
     }
     if (request.tools !== undefined && request.tools.length > 0) {
-      body.tools = request.tools;
+      // Provider-neutral ToolSpecs are translated to the OpenAI `tools[]`
+      // wire shape here — the only place that mapping exists.
+      body.tools = request.tools.map((tool) => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
       body.tool_choice = 'auto';
     }
 

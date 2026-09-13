@@ -215,12 +215,16 @@ function barrelViolation(relPath: string): string | null {
 }
 
 /**
- * Assert a legacy `src/domain` file is a pure compatibility facade: every
- * statement is an `export ... from` declaration resolving into
- * `src/core/domain`. Returns readable violation messages.
+ * Assert a legacy file is a pure compatibility facade: every statement is an
+ * `export ... from` declaration resolving into `requiredPrefix` (a
+ * repo-relative posix path prefix such as `src/core/domain/`). Returns
+ * readable violation messages.
  */
-function facadeViolations(fileAbs: string): string[] {
+function facadeViolations(fileAbs: string, requiredPrefix: string): string[] {
   const rel = toRelPosix(fileAbs);
+  if (!fs.existsSync(fileAbs)) {
+    return [`${rel}: expected a compatibility facade but the file is missing`];
+  }
   const text = fs.readFileSync(fileAbs, 'utf8');
   const sourceFile = ts.createSourceFile(fileAbs, text, ts.ScriptTarget.Latest, true);
   const violations: string[] = [];
@@ -240,8 +244,8 @@ function facadeViolations(fileAbs: string): string[] {
       continue;
     }
     const targetRel = toRelPosix(resolved);
-    if (!targetRel.startsWith('src/core/domain/')) {
-      violations.push(`${rel} -> ${targetRel} (facade must resolve inward to src/core/domain)`);
+    if (!targetRel.startsWith(requiredPrefix)) {
+      violations.push(`${rel} -> ${targetRel} (facade must resolve inward to ${requiredPrefix})`);
     }
   }
   return violations;
@@ -407,6 +411,7 @@ describe('src/core boundary conformance', () => {
       'event-stream',
       'agent-runtime',
       'worktree',
+      'model',
       'index',
     ]) {
       expect(
@@ -414,6 +419,39 @@ describe('src/core boundary conformance', () => {
           path.join(CORE_DIR, 'application', 'ports', 'outbound', `${name}.ts`),
         ),
         `missing src/core/application/ports/outbound/${name}.ts`,
+      ).toBe(true);
+    }
+    for (const rel of [
+      'index.ts',
+      'metrics.ts',
+      'routing/quota-ledger.ts',
+      'routing/capacity-router.ts',
+      'routing/index.ts',
+      'context/context-isolation.ts',
+      'context/context-store.ts',
+      'context/index.ts',
+      'attention/attention-item.ts',
+      'attention/attention-inbox.ts',
+      'attention/engine.ts',
+      'attention/adaptive-policy.ts',
+      'attention/attention-metrics.ts',
+      'attention/attention-tuning.ts',
+      'attention/completion-digest.ts',
+      'attention/diff-digest.ts',
+      'attention/digest-builder.ts',
+      'attention/failure-tracker.ts',
+      'attention/liveness-monitor.ts',
+      'attention/index.ts',
+      'secretary/messages.ts',
+      'secretary/tool-registry.ts',
+      'secretary/todo-tool.ts',
+      'secretary/condenser.ts',
+      'secretary/loop.ts',
+      'secretary/index.ts',
+    ]) {
+      expect(
+        fs.existsSync(path.join(CORE_DIR, 'application', 'use-cases', rel)),
+        `missing src/core/application/use-cases/${rel}`,
       ).toBe(true);
     }
   });
@@ -435,7 +473,48 @@ describe('src/domain compatibility facades', () => {
   it('every legacy domain module is a facade resolving into src/core/domain', () => {
     const legacyFiles = listTsFiles(LEGACY_DOMAIN_DIR);
     expect(legacyFiles.length).toBeGreaterThan(0);
-    const violations = legacyFiles.flatMap(facadeViolations);
+    const violations = legacyFiles.flatMap((f) => facadeViolations(f, 'src/core/domain/'));
     expect(violations).toEqual([]);
+  });
+});
+
+describe('migrated use-case compatibility facades', () => {
+  const MIGRATED_FACADES = [
+    'src/daemon/quota-ledger.ts',
+    'src/daemon/capacity-router.ts',
+    'src/daemon/context-isolation.ts',
+    'src/daemon/context-store.ts',
+    'src/daemon/metrics.ts',
+    'src/attention/attention-item.ts',
+    'src/attention/attention-inbox.ts',
+    'src/attention/engine.ts',
+    'src/attention/adaptive-policy.ts',
+    'src/attention/attention-metrics.ts',
+    'src/attention/attention-tuning.ts',
+    'src/attention/completion-digest.ts',
+    'src/attention/diff-digest.ts',
+    'src/attention/digest-builder.ts',
+    'src/attention/failure-tracker.ts',
+    'src/attention/liveness-monitor.ts',
+    'src/secretary/messages.ts',
+    'src/secretary/tool-registry.ts',
+    'src/secretary/todo-tool.ts',
+    'src/secretary/condenser.ts',
+    'src/secretary/loop.ts',
+  ];
+
+  it('each migrated legacy file is a facade into src/core/application/use-cases', () => {
+    const violations = MIGRATED_FACADES.flatMap((rel) =>
+      facadeViolations(path.join(REPO_ROOT, rel), 'src/core/application/use-cases/'),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('model-connector stays an outbound adapter importing the core model port directly', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'secretary', 'model-connector.ts'));
+    expect(
+      edges.some((e) => e.target === 'src/core/application/ports/outbound/model.ts'),
+      'src/secretary/model-connector.ts must import src/core/application/ports/outbound/model.ts',
+    ).toBe(true);
   });
 });

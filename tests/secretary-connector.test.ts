@@ -51,12 +51,37 @@ describe('LiteLLMConnector', () => {
     const headers = init.headers as Record<string, string>;
     expect(headers.authorization).toBe('Bearer sk-proxy');
 
+    // The registry emits provider-neutral specs; translation to the
+    // OpenAI `tools[]` wire shape happens only inside the connector.
+    const spec = registry.specs()[0] as unknown as Record<string, unknown>;
+    expect(spec).toEqual({
+      name: 'lookup',
+      description: 'look a thing up',
+      parameters: {
+        type: 'object',
+        properties: { q: { type: 'string' } },
+        required: ['q'],
+      },
+    });
+    expect(spec.type).toBeUndefined();
+    expect(spec.function).toBeUndefined();
+
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.model).toBe('claude-sonnet');
     expect(body.temperature).toBe(0.2);
     expect(body.tool_choice).toBe('auto');
-    const tools = body.tools as { function: { name: string } }[];
+    const tools = body.tools as {
+      type: string;
+      function: { name: string; description: string; parameters: unknown };
+    }[];
+    expect(tools[0].type).toBe('function');
     expect(tools[0].function.name).toBe('lookup');
+    expect(tools[0].function.description).toBe('look a thing up');
+    expect(tools[0].function.parameters).toEqual({
+      type: 'object',
+      properties: { q: { type: 'string' } },
+      required: ['q'],
+    });
     const messages = body.messages as { role: string }[];
     expect(messages.map((m) => m.role)).toEqual(['system', 'user']);
   });
