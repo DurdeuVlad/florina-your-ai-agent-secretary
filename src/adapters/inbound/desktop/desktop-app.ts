@@ -159,7 +159,7 @@ export class DesktopApp {
    * to renderer-state updates. Rejects with {@link DesktopConnectionError}
    * on failure.
    */
-  connectToDaemon(socketUrl: string): Promise<void> {
+  connectToDaemon(socketUrl: string, authToken?: string): Promise<void> {
     this.updateDaemonStatus('connecting', { connected: false, error: undefined });
     return new Promise<void>((resolve, reject) => {
       let socket: WebSocket;
@@ -182,7 +182,47 @@ export class DesktopApp {
         reject(e);
       }, this.connectTimeoutMs);
 
+      let authenticated = authToken === undefined;
+
       socket.once('open', () => {
+        // Local control-plane auth (#118): when the daemon requires a token,
+        // authenticate before anything else — including the event stream.
+        if (authToken !== undefined) {
+          socket.send(JSON.stringify({ type: 'auth', token: authToken }));
+        } else {
+          clearTimeout(timer);
+          this.socket = socket;
+          this.updateDaemonStatus('connected', { connected: true, error: undefined });
+          this.wireDaemonSocket(socket);
+          resolve();
+        }
+      });
+
+      socket.on('message', (data: unknown) => {
+        if (authenticated) return; // wireDaemonSocket handles post-auth traffic
+        const text = typeof data === 'string' ? data : (data as Buffer).toString('utf8');
+        let ack: unknown;
+        try {
+          ack = JSON.parse(text);
+        } catch {
+          return;
+        }
+        const ok =
+          ack !== null &&
+          typeof ack === 'object' &&
+          (ack as { type?: unknown }).type === 'auth' &&
+          (ack as { ok?: unknown }).ok === true;
+        if (!ok) {
+          clearTimeout(timer);
+          const e = new DesktopConnectionError(
+            'Daemon rejected authentication — token mismatch (~/.florina/auth-token)',
+          );
+          this.updateDaemonStatus('error', { connected: false, error: e.message });
+          socket.close();
+          reject(e);
+          return;
+        }
+        authenticated = true;
         clearTimeout(timer);
         this.socket = socket;
         this.updateDaemonStatus('connected', { connected: true, error: undefined });

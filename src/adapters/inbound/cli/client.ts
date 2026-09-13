@@ -29,6 +29,14 @@ export interface DaemonClientOptions {
   readonly port?: number;
   /** Connection / response timeout in milliseconds (default 10s). */
   readonly timeoutMs?: number;
+  /**
+   * Local control-plane auth token (issue #118). When set, the client sends
+   * `{ type: 'auth', token }` immediately after connect and waits for the
+   * daemon's ack before sending the command. Daemons started via the CLI
+   * provision this token at `~/.florina/auth-token`; older daemons without
+   * a token accept the handshake gracefully.
+   */
+  readonly authToken?: string;
 }
 
 /**
@@ -58,11 +66,13 @@ export class DaemonClient {
   private readonly host: string;
   private readonly port: number;
   private readonly timeoutMs: number;
+  private readonly authToken: string | undefined;
 
   constructor(options: DaemonClientOptions = {}) {
     this.host = options.host ?? DEFAULT_DAEMON_HOST;
     this.port = options.port ?? DEFAULT_DAEMON_PORT;
     this.timeoutMs = options.timeoutMs ?? 10_000;
+    this.authToken = options.authToken;
   }
 
   /** The `ws://` URL the client connects to. */
@@ -142,10 +152,49 @@ export class DaemonClient {
       }, timeoutMs);
 
       socket.once('open', () => {
-        socket.send(JSON.stringify(command));
+        // Auth handshake (#118): when a token is configured, authenticate
+        // before sending the command. The daemon replies
+        // `{ type: 'auth', ok: true|false }`.
+        if (this.authToken !== undefined) {
+          socket.send(JSON.stringify({ type: 'auth', token: this.authToken }));
+        } else {
+          socket.send(JSON.stringify(command));
+        }
       });
 
-      socket.once('message', (data: unknown) => {
+      let authenticated = this.authToken === undefined;
+
+      socket.on('message', (data: unknown) => {
+        const rawText =
+          typeof data === 'string' ? data : (data as Buffer).toString('utf8');
+        if (!authenticated) {
+          // First message after our handshake must be the auth ack.
+          let ack: unknown;
+          try {
+            ack = JSON.parse(rawText);
+          } catch {
+            // fall through — treated as a failed handshake below
+          }
+          const ok =
+            ack !== null &&
+            typeof ack === 'object' &&
+            (ack as { type?: unknown }).type === 'auth' &&
+            (ack as { ok?: unknown }).ok === true;
+          if (ok) {
+            authenticated = true;
+            socket.send(JSON.stringify(command));
+            return;
+          }
+          clearTimeout(timer);
+          socket.close();
+          reject(
+            new DaemonConnectionError(
+              `Daemon rejected authentication at ${this.url} — token mismatch ` +
+                `(check ~/.florina/auth-token)`,
+            ),
+          );
+          return;
+        }
         clearTimeout(timer);
         const text = typeof data === 'string' ? data : (data as Buffer).toString('utf8');
         let parsed: unknown;
