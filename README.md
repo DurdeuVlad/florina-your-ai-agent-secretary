@@ -22,12 +22,14 @@ tasks, deliverables, decisions, and attention requests.
 
 | Component | Description |
 |-----------|-------------|
-| **Daemon** | Local control plane — a WebSocket server on `ws://127.0.0.1:17419` that fans out to concurrent agent sessions (DEC-005). |
-| **Adapters** | Bridges from Codex (JSON-RPC, Tier A) and Claude Code (structured lifecycle hooks, Tier B) into a canonical `SupervisorEvent` stream (DEC-019). A PTY heuristic adapter (Tier E) and a stub adapter are included for compatibility and local testing. |
+| **Secretary loop** | The only self-owned agent loop — reasoning, plan/todo tool, typed tool registry, context management — connected to any model via a LiteLLM proxy (DEC-034). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
+| **Daemon** | Local control plane — a WebSocket server on `ws://127.0.0.1:17419` that fans out to concurrent agent sessions (DEC-005). Hosts the MCP tool server managers dispatch through (DEC-018). |
+| **Capacity router** | Quota-aware provider routing: `QuotaLedger` tracks per-provider windows (`used_pct`, `resets_at`), `CapacityRouter` enforces the hard floor — quota, deny rules — while managers express NL preferences (DEC-029). |
+| **Adapters** | Bridges into a canonical `SupervisorEvent` stream (DEC-019): Codex (JSON-RPC, Tier A), Claude Code (hooks, Tier B), ACP-native CLIs — `devin acp`, `gemini --acp` (Tier C, DEC-030), `agy` headless stream-json (Tier D). A stub adapter is included for local testing. |
 | **Attention engine** | Deterministic policy that ranks events into a priority inbox, suppresses routine noise, and supports adaptive tuning (DEC-014). |
 | **Voice pipeline** | OpenAI Realtime API with a `whisper.cpp` fallback; supports voice approvals and spoken notifications (DEC-021). |
 | **Desktop skeleton** | Electron/Tauri-ready client with an IPC bridge and view components (DEC-028). |
-| **Storage** | Immutable SQLite event journal, context capsules, and completion digests — summaries never replace source events (DEC-012/020). |
+| **Storage** | Immutable SQLite event journal, context capsules, completion digests, and per-idea markdown ledgers (DEC-012/020/033). |
 | **Security** | Audit framework and hardening utilities enforcing DEC-011 (the Secretary narrows permissions, never silently widens them). |
 
 ## Quick Start
@@ -112,9 +114,10 @@ secretary help                               # print full help
 
 ```
 src/
-  daemon/      # local control plane (IPC/WebSocket server)
-  adapters/    # Codex / Claude Code bridges -> SupervisorEvent
+  daemon/      # local control plane (IPC/WebSocket server), quota ledger, capacity router
+  adapters/    # Codex / Claude Code / ACP bridges -> SupervisorEvent
   attention/   # deterministic attention engine (DEC-014)
+  secretary/   # the self-owned agent loop (DEC-034)
   cli/         # `secretary` / `asec` binary (DEC-026)
   voice/       # Realtime + whisper.cpp pipeline (DEC-021)
   desktop/     # Electron/Tauri client (DEC-028)
@@ -155,12 +158,18 @@ architecture, contracts, models, and code are derived from them.
 - Security/audit framework (DEC-011 compliance)
 - Git worktree lifecycle per task (DEC-024)
 
-**Planned:**
+**Planned (milestone [M6-Multi-Provider-Orchestration](https://github.com/DurdeuVlad/agent-secretary/milestone/7)):**
 
-- Production desktop client packaging
-- Additional adapter integrations
+- Secretary agentic loop + LiteLLM model connector (DEC-034, #70)
+- Quota-aware capacity routing across subscriptions (DEC-029, #60, #71)
+- ACP generic adapter → Devin + Gemini; `agy` headless (DEC-030, #61, #62)
+- Per-project manager agents dispatching via daemon MCP tools (DEC-018, #63)
+- Cross-provider failover via worktree + Task Capsule (#64)
+- Auto-learned preference memories, scoped auto-approval (DEC-029, #65, #67)
+- Idea ledgers → compiled Briefs → gated delegation (DEC-033, #69)
+- Verification-gated completion — done means proven (DEC-032, #68)
+- Production desktop client packaging (#43)
 - Refined adaptive attention tuning
-- Multi-run task lifecycle beyond 1:1 worktree mapping
 
 ## License
 
