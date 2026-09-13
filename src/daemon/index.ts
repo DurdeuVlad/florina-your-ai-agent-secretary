@@ -176,3 +176,6 @@ export type {
   VoiceToolCallCallback,
   VoiceStateCallback,
 } from './voice-session-manager.js';
+
+/* Durable preference profile store (DEC-020/029, issue #65) */
+export { PreferenceProfileStore, PreferenceProfileError, validatePreferenceProfile } from './preference-profile.js';
