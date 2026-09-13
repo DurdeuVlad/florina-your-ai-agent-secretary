@@ -17,8 +17,12 @@
  * 2. Deny rules — a `denied` entry removes the matching provider/model
  *    combination (`{provider, model: undefined}` denies the provider
  *    entirely).
- * 3. Exclusions — providers already tried for this task (failover).
- * 4. Capacity — the provider must be available in the QuotaLedger.
+ * 3. Project scope — rules and denies carrying `projectId` apply only to
+ *    requests for that project; unscoped entries are global (DEC-003
+ *    need-to-know, issue #65). A request without `projectId` sees only
+ *    global entries.
+ * 4. Exclusions — providers already tried for this task (failover).
+ * 5. Capacity — the provider must be available in the QuotaLedger.
  *
  * The router never asks the human; when nothing fits it parks with a reason
  * and a resume time (DEC-031 — parking is silently resumable, not a
@@ -50,6 +54,12 @@ export interface RouteRequest {
   readonly preferProvider?: string;
   /** Model pin to use with {@link preferProvider}. */
   readonly preferModel?: string;
+  /**
+   * Project the request belongs to (issue #65). Rules and denies scoped
+   * to a `projectId` apply only when it matches; unscoped profile entries
+   * are global. Omit to route against global entries only.
+   */
+  readonly projectId?: string;
 }
 
 /** The router's verdict. */
@@ -127,7 +137,10 @@ export class CapacityRouter {
   private candidates(request: RouteRequest): readonly RoutingRule[] {
     const excluded = new Set(request.excludeProviders ?? []);
     const eligible = this.profile.rules.filter(
-      (rule) => !this.isDenied(rule) && !excluded.has(rule.provider),
+      (rule) =>
+        inScope(rule, request.projectId) &&
+        !this.isDenied(rule, request.projectId) &&
+        !excluded.has(rule.provider),
     );
     const typed = eligible.filter(
       (rule) =>
@@ -141,17 +154,19 @@ export class CapacityRouter {
     const preferred: RoutingRule[] =
       request.preferProvider !== undefined && !excluded.has(request.preferProvider)
         ? [{ provider: request.preferProvider, model: request.preferModel }].filter(
-            (rule) => !this.isDenied(rule),
+            (rule) => !this.isDenied(rule, request.projectId),
           )
         : [];
     // Typed matches take precedence over catch-alls (profile order within each).
     return [...preferred, ...typed, ...catchAll];
   }
 
-  private isDenied(rule: RoutingRule): boolean {
+  private isDenied(rule: RoutingRule, projectId?: string): boolean {
     return this.profile.denied.some(
       (deny) =>
-        deny.provider === rule.provider && (deny.model === undefined || deny.model === rule.model),
+        inScope(deny, projectId) &&
+        deny.provider === rule.provider &&
+        (deny.model === undefined || deny.model === rule.model),
     );
   }
 
@@ -171,6 +186,14 @@ export class CapacityRouter {
         : 'all candidate providers are quota-exhausted';
     return { kind: 'parked', resumeAt, reason };
   }
+}
+
+/**
+ * DEC-003 need-to-know scope check: unscoped profile entries are global;
+ * entries carrying `projectId` apply only to requests for that project.
+ */
+function inScope(entry: { readonly projectId?: string }, projectId?: string): boolean {
+  return entry.projectId === undefined || entry.projectId === projectId;
 }
 
 function describeRule(rule: RoutingRule): string {

@@ -21,9 +21,16 @@ function render(store: PreferenceProfilePort): string {
     ...rules.map(
       (r, i) =>
         `rule[${i}]: ${r.provider}${r.model !== undefined ? `/${r.model}` : ''}` +
-        (r.workTypes !== undefined ? ` for work=[${r.workTypes.join(',')}]` : ' (catch-all)'),
+        (r.workTypes !== undefined ? ` for work=[${r.workTypes.join(',')}]` : ' (catch-all)') +
+        (r.projectId !== undefined ? ` [project ${r.projectId}]` : '') +
+        (r.note !== undefined ? ` — ${r.note}` : ''),
     ),
-    ...denied.map((d) => `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}`),
+    ...denied.map(
+      (d) =>
+        `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}` +
+        (d.projectId !== undefined ? ` [project ${d.projectId}]` : '') +
+        (d.note !== undefined ? ` — ${d.note}` : ''),
+    ),
   ];
   return lines.length === 0 ? 'no preferences recorded' : lines.join('\n');
 }
@@ -31,9 +38,10 @@ function render(store: PreferenceProfilePort): string {
 /**
  * Build the `preference` tool bound to `store`.
  *
- * Actions: `list`, `add-rule {provider, model?, workTypes?}`,
- * `deny {provider, model?}`, `remove-rule {provider, model?}`,
- * `remove-deny {provider, model?}`.
+ * Actions: `list`, `add-rule {provider, model?, workTypes?, projectId?, note?}`,
+ * `deny {provider, model?, projectId?, note?}`,
+ * `remove-rule {provider, model?, projectId?}`,
+ * `remove-deny {provider, model?, projectId?}`.
  */
 export function createPreferenceTool(store: PreferenceProfilePort): ToolDefinition {
   return {
@@ -56,6 +64,16 @@ export function createPreferenceTool(store: PreferenceProfilePort): ToolDefiniti
           items: { type: 'string' },
           description: 'Work-type tags the rule applies to (optional).',
         },
+        projectId: {
+          type: 'string',
+          description:
+            'Scope the rule/deny to one project (optional; omit for the global ' +
+            'default, including when removing an entry).',
+        },
+        note: {
+          type: 'string',
+          description: "The user's own words for this rule (soft layer, optional).",
+        },
       },
       required: ['action'],
     },
@@ -64,6 +82,8 @@ export function createPreferenceTool(store: PreferenceProfilePort): ToolDefiniti
       const provider = args['provider'];
       const model = args['model'];
       const workTypes = args['workTypes'];
+      const projectId = args['projectId'];
+      const note = args['note'];
       const needProvider = (): string => {
         if (typeof provider !== 'string' || provider.length === 0) {
           throw new PreferenceProfileError('"provider" is required');
@@ -72,6 +92,12 @@ export function createPreferenceTool(store: PreferenceProfilePort): ToolDefiniti
       };
       if (typeof model !== 'undefined' && typeof model !== 'string') {
         throw new PreferenceProfileError('"model" must be a string');
+      }
+      if (projectId !== undefined && typeof projectId !== 'string') {
+        throw new PreferenceProfileError('"projectId" must be a string');
+      }
+      if (note !== undefined && typeof note !== 'string') {
+        throw new PreferenceProfileError('"note" must be a string');
       }
       if (
         workTypes !== undefined &&
@@ -88,15 +114,26 @@ export function createPreferenceTool(store: PreferenceProfilePort): ToolDefiniti
             provider: needProvider(),
             model: model as string | undefined,
             workTypes: workTypes as string[] | undefined,
+            projectId: projectId as string | undefined,
+            note: note as string | undefined,
           });
           await store.save();
           return { content: `rule added\n${render(store)}` };
         case 'deny':
-          store.addDeny({ provider: needProvider(), model: model as string | undefined });
+          store.addDeny({
+            provider: needProvider(),
+            model: model as string | undefined,
+            projectId: projectId as string | undefined,
+            note: note as string | undefined,
+          });
           await store.save();
           return { content: `deny added\n${render(store)}` };
         case 'remove-rule': {
-          const removed = store.removeRule(needProvider(), model as string | undefined);
+          const removed = store.removeRule(
+            needProvider(),
+            model as string | undefined,
+            projectId as string | undefined,
+          );
           if (!removed) {
             return { content: 'no matching rule', isError: true };
           }
@@ -104,7 +141,11 @@ export function createPreferenceTool(store: PreferenceProfilePort): ToolDefiniti
           return { content: `rule removed\n${render(store)}` };
         }
         case 'remove-deny': {
-          const removed = store.removeDeny(needProvider(), model as string | undefined);
+          const removed = store.removeDeny(
+            needProvider(),
+            model as string | undefined,
+            projectId as string | undefined,
+          );
           if (!removed) {
             return { content: 'no matching deny', isError: true };
           }

@@ -90,6 +90,11 @@ export function preferencePromptText(
   ].join('\n');
 }
 
+/** True when the profile carries no rules and no denies (fresh install). */
+export function isProfileEmpty(profile: PreferenceProfile): boolean {
+  return profile.rules.length === 0 && profile.denied.length === 0;
+}
+
 /** Raised when a preference profile or mutation is malformed. */
 export class PreferenceProfileError extends Error {
   constructor(message: string) {
@@ -110,10 +115,18 @@ export interface PreferenceProfilePort {
   addRule(rule: RoutingRule): void;
   /** Add a model-level deny rule. */
   addDeny(deny: DenyRule): void;
-  /** Remove the first routing rule matching provider (+model when given). */
-  removeRule(provider: string, model?: string): boolean;
-  /** Remove a deny rule matching provider (+model when given). */
-  removeDeny(provider: string, model?: string): boolean;
+  /**
+   * Remove the first routing rule matching provider (+model when given) in
+   * the selected scope. `projectId` selects a project-scoped entry; omitted
+   * targets the global entry.
+   */
+  removeRule(provider: string, model?: string, projectId?: string): boolean;
+  /**
+   * Remove a deny rule matching provider (+model when given) in the
+   * selected scope. `projectId` selects a project-scoped entry; omitted
+   * targets the global entry.
+   */
+  removeDeny(provider: string, model?: string, projectId?: string): boolean;
   /** Persist the profile. */
   save(): Promise<void>;
 }

@@ -205,6 +205,7 @@ export class ManagerToolService {
       excludeProviders: input.excludeProviders,
       preferProvider: input.preferProvider,
       preferModel: input.preferModel,
+      projectId: this.deps.projectId,
     });
     if (decision.kind === 'parked') {
       return { status: 'parked', resumeAt: decision.resumeAt, reason: decision.reason };

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 
 import {
+  isProfileEmpty,
   preferencePromptText,
   type PreferenceProfile,
 } from '../src/core/application/ports/outbound/preference-profile.js';
@@ -206,6 +207,64 @@ describe('preference commands', () => {
     const res = await api.execute({ kind: 'query-preferences' });
     expect(res.ok).toBe(false);
   });
+
+  it('query-preferences returns the structured profile, not just a summary', async () => {
+    const store = await PreferenceProfileStore.load(await tempPath());
+    store.addRule({ provider: 'codex' });
+    store.addRule({ provider: 'devin', projectId: 'p2' });
+    store.addDeny({ provider: 'gemini', projectId: 'p1' });
+    store.addDeny({ provider: 'agy', projectId: 'p2' });
+    const api = apiFixture(store);
+
+    const res = await api.execute({ kind: 'query-preferences', projectId: 'p1' });
+    expect(res.ok).toBe(true);
+    if (res.ok && 'profile' in res) {
+      expect(res.profile).toEqual({
+        rules: [{ provider: 'codex' }],
+        denied: [{ provider: 'gemini', projectId: 'p1' }],
+      });
+    } else {
+      expect.unreachable('query-preferences must return the profile');
+    }
+
+    const all = await api.execute({ kind: 'query-preferences' });
+    if (all.ok && 'profile' in all) {
+      expect(all.profile).toEqual(store.toProfile());
+    } else {
+      expect.unreachable('unscoped query-preferences must return the full profile');
+    }
+    expect(isProfileEmpty(store.toProfile())).toBe(false);
+    expect(isProfileEmpty({ rules: [], denied: [] })).toBe(true);
+  });
+
+  it('update-preference remove-deny honours projectId scope', async () => {
+    const store = await PreferenceProfileStore.load(await tempPath());
+    const api = apiFixture(store);
+
+    await api.execute({
+      kind: 'update-preference',
+      action: 'deny',
+      provider: 'gemini',
+      projectId: 'p1',
+    });
+    // A global deny must coexist with the scoped one (scope-aware dedup).
+    const globalAdd = await api.execute({
+      kind: 'update-preference',
+      action: 'deny',
+      provider: 'gemini',
+    });
+    expect(globalAdd.ok).toBe(true);
+    expect(store.toProfile().denied).toHaveLength(2);
+
+    const removed = await api.execute({
+      kind: 'update-preference',
+      action: 'remove-deny',
+      provider: 'gemini',
+      projectId: 'p1',
+    });
+    expect(removed.ok).toBe(true);
+    expect(store.toProfile().denied).toEqual([{ provider: 'gemini' }]);
+  });
 });
 
 /* ================================================================== *
@@ -244,6 +303,118 @@ describe('voice preference tools', () => {
       model: 'opus',
       note: 'never Opus, too slow for me',
     });
+  });
+
+  it('remember_preference passes a named project scope through', () => {
+    const cmd = mapToolCallToCommand('remember_preference', {
+      action: 'add-rule',
+      provider: 'devin',
+      projectId: 'p7',
+    });
+    expect(cmd).toMatchObject({
+      kind: 'update-preference',
+      action: 'add-rule',
+      provider: 'devin',
+      projectId: 'p7',
+    });
+  });
+});
+
+/* ================================================================== *
+ * CapacityRouter — projectId scope enforcement (hard layer)
+ * ================================================================== */
+
+describe('CapacityRouter project scoping', () => {
+  function scopedRouter(profile: PreferenceProfile): CapacityRouter {
+    return new CapacityRouter({ ledger: new QuotaLedger(), profile });
+  }
+
+  it('scoped rules are candidates only for their own project', () => {
+    const router = scopedRouter({
+      rules: [{ provider: 'devin', projectId: 'proj-b' }, { provider: 'codex' }],
+      denied: [],
+    });
+    expect(router.route({ projectId: 'proj-b' })).toMatchObject({
+      kind: 'routed',
+      provider: 'devin',
+    });
+    // proj-a must not see proj-b's rule — falls through to the global rule.
+    expect(router.route({ projectId: 'proj-a' })).toMatchObject({
+      kind: 'routed',
+      provider: 'codex',
+    });
+  });
+
+  it('a request without projectId sees only global rules', () => {
+    const router = scopedRouter({
+      rules: [{ provider: 'devin', projectId: 'proj-b' }],
+      denied: [],
+    });
+    expect(router.route({}).kind).toBe('parked');
+  });
+
+  it('scoped denies apply only to their own project — not globally', () => {
+    const router = scopedRouter({
+      rules: [{ provider: 'gemini' }],
+      denied: [{ provider: 'gemini', projectId: 'proj-b' }],
+    });
+    expect(router.route({ projectId: 'proj-b' }).kind).toBe('parked');
+    expect(router.route({ projectId: 'proj-a' })).toMatchObject({
+      kind: 'routed',
+      provider: 'gemini',
+    });
+  });
+
+  it('global denies still apply to every project', () => {
+    const router = scopedRouter({
+      rules: [{ provider: 'gemini' }],
+      denied: [{ provider: 'gemini' }],
+    });
+    expect(router.route({ projectId: 'proj-a' }).kind).toBe('parked');
+    expect(router.route({ projectId: 'proj-b' }).kind).toBe('parked');
+  });
+});
+
+/* ================================================================== *
+ * Store: scope-aware dedup and removal
+ * ================================================================== */
+
+describe('PreferenceProfileStore — scope-aware dedup/removal', () => {
+  it('a global deny is not deduped away by an existing scoped deny', async () => {
+    const store = await PreferenceProfileStore.load(await tempPath());
+    store.addDeny({ provider: 'gemini', projectId: 'proj-b' });
+    store.addDeny({ provider: 'gemini' });
+    const denied = store.toProfile().denied;
+    expect(denied).toHaveLength(2);
+    expect(denied.map((d) => d.projectId)).toEqual(['proj-b', undefined]);
+  });
+
+  it('removeDeny/removeRule with projectId target the scoped entry', async () => {
+    const store = await PreferenceProfileStore.load(await tempPath());
+    store.addRule({ provider: 'codex' });
+    store.addRule({ provider: 'codex', projectId: 'p1' });
+    store.addDeny({ provider: 'gemini', projectId: 'p1' });
+    store.addDeny({ provider: 'gemini' });
+
+    expect(store.removeRule('codex', undefined, 'p1')).toBe(true);
+    expect(store.toProfile().rules).toEqual([{ provider: 'codex' }]);
+
+    expect(store.removeDeny('gemini', undefined, 'p1')).toBe(true);
+    expect(store.toProfile().denied).toEqual([{ provider: 'gemini' }]);
+  });
+
+  it('remove without projectId targets the global entry only', async () => {
+    const store = await PreferenceProfileStore.load(await tempPath());
+    store.addRule({ provider: 'codex', projectId: 'p1' });
+    store.addRule({ provider: 'codex' });
+    store.addDeny({ provider: 'gemini', projectId: 'p1' });
+    store.addDeny({ provider: 'gemini' });
+
+    expect(store.removeRule('codex')).toBe(true);
+    expect(store.toProfile().rules).toEqual([{ provider: 'codex', projectId: 'p1' }]);
+
+    expect(store.removeDeny('gemini')).toBe(true);
+    expect(store.toProfile().denied).toEqual([{ provider: 'gemini', projectId: 'p1' }]);
   });
 });
 

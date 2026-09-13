@@ -241,6 +241,13 @@ export function buildDefaultVoiceTools(): readonly VoiceToolDefinition[] {
             description:
               "The user's own words for this rule (e.g. 'Sonnet for repeatable reading work').",
           },
+          projectId: {
+            type: 'string',
+            description:
+              'Scope the rule/deny to one project id — only when the user ' +
+              'explicitly names a project; omit for the global default, ' +
+              'including when removing an entry.',
+          },
         },
         required: ['action', 'provider'],
       },
@@ -394,6 +401,7 @@ export function mapToolCallToCommand(
           ? (workTypes.filter((w) => typeof w === 'string') as string[])
           : undefined,
         note: typeof args['note'] === 'string' ? args['note'] : undefined,
+        projectId: typeof args['projectId'] === 'string' ? args['projectId'] : undefined,
       } as Command;
     }
     case 'list_preferences': {
