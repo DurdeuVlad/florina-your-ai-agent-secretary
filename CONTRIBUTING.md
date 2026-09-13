@@ -41,5 +41,5 @@ mechanically — keep new code inside the right layer.
 
 ## Commit & PR style
 
-Small, focused PRs — one issue each. Commit messages describe *why*.
+Small, focused PRs — one issue each. Commit messages describe _why_.
 See `AGENTS.md` for the full repo guide.

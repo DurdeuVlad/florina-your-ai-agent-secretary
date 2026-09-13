@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { EventBus } from '../src/daemon/event-stream.js';
-import {
-  MetricsCollector,
-  type MetricsSnapshot,
-} from '../src/daemon/metrics.js';
+import { MetricsCollector, type MetricsSnapshot } from '../src/daemon/metrics.js';
 import { StorageDatabase, MetricsRepository } from '../src/storage/index.js';
 import type {
   AgentStartedEvent,
@@ -69,7 +66,9 @@ function agentStopped(overrides: Partial<AgentStoppedEvent> = {}): AgentStoppedE
   };
 }
 
-function approvalRequested(overrides: Partial<ApprovalRequestedEvent> = {}): ApprovalRequestedEvent {
+function approvalRequested(
+  overrides: Partial<ApprovalRequestedEvent> = {},
+): ApprovalRequestedEvent {
   return {
     ...base,
     type: 'ApprovalRequested',
@@ -85,7 +84,10 @@ function approvalRequested(overrides: Partial<ApprovalRequestedEvent> = {}): App
   };
 }
 
-function toolStarted(toolName: string, overrides: Partial<ToolStartedEvent> = {}): ToolStartedEvent {
+function toolStarted(
+  toolName: string,
+  overrides: Partial<ToolStartedEvent> = {},
+): ToolStartedEvent {
   return {
     ...base,
     type: 'ToolStarted',
@@ -94,7 +96,10 @@ function toolStarted(toolName: string, overrides: Partial<ToolStartedEvent> = {}
   };
 }
 
-function toolFinished(toolName: string, overrides: Partial<ToolFinishedEvent> = {}): ToolFinishedEvent {
+function toolFinished(
+  toolName: string,
+  overrides: Partial<ToolFinishedEvent> = {},
+): ToolFinishedEvent {
   return {
     ...base,
     type: 'ToolFinished',

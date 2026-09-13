@@ -148,9 +148,7 @@ export class ContextRouter {
    */
   getGlobalAwareness(): GlobalAwareness {
     const all = this.source.listByScope('project');
-    const projects = all.filter(
-      (c): c is ProjectCapsule => c.scope === 'project',
-    );
+    const projects = all.filter((c): c is ProjectCapsule => c.scope === 'project');
     return { projects };
   }
 

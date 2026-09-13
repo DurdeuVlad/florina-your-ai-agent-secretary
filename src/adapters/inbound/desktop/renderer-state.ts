@@ -13,7 +13,10 @@
  * cannot mutate the internal state.
  */
 
-import type { AttentionItemSnapshot, TaskSnapshot } from '../../../core/application/use-cases/tasks/command-api.js';
+import type {
+  AttentionItemSnapshot,
+  TaskSnapshot,
+} from '../../../core/application/use-cases/tasks/command-api.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 
 /** Voice pipeline state mirrored from the daemon. */

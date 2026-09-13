@@ -188,11 +188,7 @@ export class LiteLLMConnector implements ModelPort {
 
     const text = await response.text();
     if (!response.ok) {
-      throw new ConnectorError(
-        `LiteLLM responded ${response.status}`,
-        response.status,
-        text,
-      );
+      throw new ConnectorError(`LiteLLM responded ${response.status}`, response.status, text);
     }
 
     let wire: WireCompletion;

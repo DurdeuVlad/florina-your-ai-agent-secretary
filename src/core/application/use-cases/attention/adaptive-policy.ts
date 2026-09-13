@@ -243,8 +243,7 @@ export class AdaptivePolicy {
     // --- Approval response time ---------------------------------------
     if (this.approvalResponseTimes.length >= 3) {
       const avg =
-        this.approvalResponseTimes.reduce((a, b) => a + b, 0) /
-        this.approvalResponseTimes.length;
+        this.approvalResponseTimes.reduce((a, b) => a + b, 0) / this.approvalResponseTimes.length;
       if (avg > this.approvalTimeThresholdMs) {
         adjustment.escalationDelayMs = clamp(
           this.baseline.escalationDelayMs + 60_000,
@@ -255,7 +254,9 @@ export class AdaptivePolicy {
     }
 
     // --- Inbox pressure ------------------------------------------------
-    if (this.inboxSamples.length >= Math.max(1, this.inboxPressureFraction * this.inboxSampleSize)) {
+    if (
+      this.inboxSamples.length >= Math.max(1, this.inboxPressureFraction * this.inboxSampleSize)
+    ) {
       const atMax = this.inboxSamples.filter((s) => s >= this.baseline.maxInboxSize).length;
       const fraction = atMax / this.inboxSamples.length;
       if (fraction >= this.inboxPressureFraction) {

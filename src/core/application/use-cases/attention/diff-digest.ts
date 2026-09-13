@@ -55,13 +55,7 @@ export interface ChangedFile {
  * - `source`           — ordinary source → batched
  */
 export type PathCategory =
-  | 'secrets-auth'
-  | 'migrations'
-  | 'ci-deploy'
-  | 'lockfile'
-  | 'test'
-  | 'config-security'
-  | 'source';
+  'secrets-auth' | 'migrations' | 'ci-deploy' | 'lockfile' | 'test' | 'config-security' | 'source';
 
 /**
  * Result of classifying a single changed path.

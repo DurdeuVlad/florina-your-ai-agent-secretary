@@ -11,9 +11,7 @@ import { parseApiRequest } from '../src/daemon/api.js';
 
 describe('parseApiRequest', () => {
   it('accepts a JSON request string', () => {
-    const req = parseApiRequest(
-      JSON.stringify({ id: 'r1', method: 'get_status', params: {} }),
-    );
+    const req = parseApiRequest(JSON.stringify({ id: 'r1', method: 'get_status', params: {} }));
     expect(req).not.toBeNull();
     expect(req?.id).toBe('r1');
     expect(req?.method).toBe('get_status');
@@ -29,9 +27,7 @@ describe('parseApiRequest', () => {
   it('rejects a Buffer-like byte array — decoding belongs to the transport', () => {
     const payload = new TextEncoder().encode('{"id":"r3","method":"get_status"}');
     expect(parseApiRequest(payload)).toBeNull();
-    expect(
-      parseApiRequest(Buffer.from('{"id":"r3","method":"get_status"}')),
-    ).toBeNull();
+    expect(parseApiRequest(Buffer.from('{"id":"r3","method":"get_status"}'))).toBeNull();
   });
 
   it('rejects malformed JSON strings and non-envelope values', () => {

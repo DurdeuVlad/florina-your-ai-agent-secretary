@@ -24,7 +24,10 @@ import type {
   CapabilityRiskLevel,
   CapabilityScope,
 } from '../../../core/domain/capabilities.js';
-import { CapabilityType as CapType, CapabilityRiskLevel as RiskLevel } from '../../../core/domain/capabilities.js';
+import {
+  CapabilityType as CapType,
+  CapabilityRiskLevel as RiskLevel,
+} from '../../../core/domain/capabilities.js';
 
 /* ------------------------------------------------------------------ *
  * Codex JSON-RPC wire shapes (server -> client notifications)
@@ -262,7 +265,9 @@ function mapScope(
   fallbackDestination: string,
 ): CapabilityScope[] {
   if (codexScope.length === 0) {
-    return [{ type: fallbackCapability, targets: fallbackDestination ? [fallbackDestination] : [] }];
+    return [
+      { type: fallbackCapability, targets: fallbackDestination ? [fallbackDestination] : [] },
+    ];
   }
   return codexScope.map((entry) => ({
     type: mapCapabilityType(entry.type as 'filesystem' | 'network'),
@@ -370,10 +375,7 @@ export function mapThreadStopped(
 }
 
 /** Map `tool.started` → `ToolStarted`. */
-export function mapToolStarted(
-  event: CodexToolStartedEvent,
-  ctx: MapperContext,
-): SupervisorEvent {
+export function mapToolStarted(event: CodexToolStartedEvent, ctx: MapperContext): SupervisorEvent {
   return {
     type: 'ToolStarted',
     timestamp: now(),
@@ -408,10 +410,7 @@ export function mapToolFinished(
 }
 
 /** Map `file.changed` → `FileChanged`. */
-export function mapFileChanged(
-  event: CodexFileChangedEvent,
-  ctx: MapperContext,
-): SupervisorEvent {
+export function mapFileChanged(event: CodexFileChangedEvent, ctx: MapperContext): SupervisorEvent {
   return {
     type: 'FileChanged',
     timestamp: now(),
@@ -428,10 +427,7 @@ export function mapFileChanged(
 }
 
 /** Map `test.started` → `TestStarted`. */
-export function mapTestStarted(
-  event: CodexTestStartedEvent,
-  ctx: MapperContext,
-): SupervisorEvent {
+export function mapTestStarted(event: CodexTestStartedEvent, ctx: MapperContext): SupervisorEvent {
   return {
     type: 'TestStarted',
     timestamp: now(),

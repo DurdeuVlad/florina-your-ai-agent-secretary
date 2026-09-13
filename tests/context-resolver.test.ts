@@ -129,7 +129,11 @@ function insertEvent(
 }
 
 /** Build a minimal completion digest for testing. */
-function makeDigest(taskId: string, sessionId: string, overrides: Partial<CompletionDigest> = {}): CompletionDigest {
+function makeDigest(
+  taskId: string,
+  sessionId: string,
+  overrides: Partial<CompletionDigest> = {},
+): CompletionDigest {
   return {
     taskId,
     sessionId,

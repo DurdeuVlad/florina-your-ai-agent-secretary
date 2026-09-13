@@ -46,11 +46,7 @@ import { AdapterFidelityTier } from '../../../core/domain/enums.js';
 import type { SupervisorEvent } from '../../../core/domain/events.js';
 import type { EventPublisherPort } from '../../../core/application/ports/outbound/event-stream.js';
 import { BaseAdapter, type SessionConfig, type StartRunResult } from './base.js';
-import {
-  parsePtyLine,
-  mapPtyChunk,
-  type ClaudeMapperContext,
-} from './claude-mapper.js';
+import { parsePtyLine, mapPtyChunk, type ClaudeMapperContext } from './claude-mapper.js';
 
 /**
  * Stable id for the Claude Code PTY (Tier E) adapter. Distinct from the

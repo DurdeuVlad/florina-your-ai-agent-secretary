@@ -90,9 +90,7 @@ export const DEFAULT_TUNING_CONFIG: AttentionTuningConfig = {
  * never produce a degenerate configuration (e.g. a zero / negative timeout or
  * a failure threshold below 1).
  */
-export const MIN_TUNING_BOUNDS: Readonly<
-  Omit<AttentionTuningConfig, 'priorityBoostOnRepeat'>
-> = {
+export const MIN_TUNING_BOUNDS: Readonly<Omit<AttentionTuningConfig, 'priorityBoostOnRepeat'>> = {
   livenessTimeoutMs: 1_000,
   failureThreshold: 1,
   escalationDelayMs: 1_000,
@@ -105,9 +103,7 @@ export const MIN_TUNING_BOUNDS: Readonly<
  * Maximum sensible values for numeric thresholds. Used to bound upward
  * adaptive adjustments so a runaway loop cannot grow a timeout without limit.
  */
-export const MAX_TUNING_BOUNDS: Readonly<
-  Omit<AttentionTuningConfig, 'priorityBoostOnRepeat'>
-> = {
+export const MAX_TUNING_BOUNDS: Readonly<Omit<AttentionTuningConfig, 'priorityBoostOnRepeat'>> = {
   livenessTimeoutMs: 3_600_000,
   failureThreshold: 10,
   escalationDelayMs: 3_600_000,
@@ -259,8 +255,7 @@ export class AttentionTuner {
     const current = this.config;
 
     // --- Failure rate --------------------------------------------------
-    const terminated =
-      metrics.counters.tasksCompleted + metrics.counters.tasksFailed;
+    const terminated = metrics.counters.tasksCompleted + metrics.counters.tasksFailed;
     if (terminated >= 4) {
       const failureRate = metrics.counters.tasksFailed / terminated;
       if (failureRate > 0.5) {

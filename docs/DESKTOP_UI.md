@@ -5,18 +5,18 @@ Design for the Electron/Tauri client (DEC-028, issue #43). Locked 2026-09-13.
 **Principle: we are the inbox, not the fleet cockpit.** Every competitor
 (Runner, KanbAgent, CodexOpsStudio, Dorchestrator, vibe-editor) builds a
 mission-control dashboard. Our home screen stays NEEDS YOU / WORKING / DONE
-(DEC-006/008). What we steal from them is the *drill-down* — how a human
+(DEC-006/008). What we steal from them is the _drill-down_ — how a human
 inspects one manager, one worker, one session, once attention is earned.
 
 ## Prior art worth stealing
 
-| Project | Pattern | What we take |
-|---|---|---|
-| Runner (ADE) | crews + missions over an append-only event log; `ask_human` in feed | event-log drill-down; human questions inline in the stream |
-| vibe-editor | Leader recruits workers via tools | already our manager→MCP-spawn shape; their canvas = our graph drill-down |
-| CodexOpsStudio | three columns: sessions / orchestrator timeline / review gate | manager view layout: task list / run timeline / approval+digest rail |
-| KanbAgent | task tree via parent_task_id; cost analytics | Brief → task tree for delegated work; quota/cost panel |
-| OpenHands | condenser + two-tier MEMORY.md | continuous-agent context model (below) |
+| Project        | Pattern                                                             | What we take                                                             |
+| -------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Runner (ADE)   | crews + missions over an append-only event log; `ask_human` in feed | event-log drill-down; human questions inline in the stream               |
+| vibe-editor    | Leader recruits workers via tools                                   | already our manager→MCP-spawn shape; their canvas = our graph drill-down |
+| CodexOpsStudio | three columns: sessions / orchestrator timeline / review gate       | manager view layout: task list / run timeline / approval+digest rail     |
+| KanbAgent      | task tree via parent_task_id; cost analytics                        | Brief → task tree for delegated work; quota/cost panel                   |
+| OpenHands      | condenser + two-tier MEMORY.md                                      | continuous-agent context model (below)                                   |
 
 ## Views
 
@@ -64,13 +64,14 @@ inspects one manager, one worker, one session, once attention is earned.
 
 Secretary and managers run for days — context is a three-layer system:
 
-| Layer | Holds | Mechanism |
-|---|---|---|
-| **Hot** | current working context | in-window events/messages |
+| Layer    | Holds                               | Mechanism                                                                                                                                      |
+| -------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hot**  | current working context             | in-window events/messages                                                                                                                      |
 | **Warm** | condensed history + loaded capsules | condenser (threshold-triggered LLM summarization, keep first N + last M, summarize middle — OpenHands pattern) + capsule load/unload (DEC-020) |
-| **Cold** | everything, forever | event journal (DEC-012), preference memories, idea ledgers, MEMORY.md-style durable notes |
+| **Cold** | everything, forever                 | event journal (DEC-012), preference memories, idea ledgers, MEMORY.md-style durable notes                                                      |
 
 Invariants:
+
 - Condensation emits a journaled event carrying `forgotten_event_ids` —
   compression never destroys the record (DEC-012). The inspector can expand
   through any summary into the raw events.

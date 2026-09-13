@@ -339,11 +339,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
     const mapped = mapHookEvent(event, this.mapperCtx);
     for (const ev of mapped) {
       this.enqueueEvent(ev);
-      if (
-        ev.type === 'AgentCompleted' ||
-        ev.type === 'AgentFailed' ||
-        ev.type === 'AgentStopped'
-      ) {
+      if (ev.type === 'AgentCompleted' || ev.type === 'AgentFailed' || ev.type === 'AgentStopped') {
         this.completeStream();
         this.activeSession = null;
       }
@@ -493,7 +489,10 @@ async function createJsonlFileSink(): Promise<HookEventSink> {
   const { promises: fs } = await import('node:fs');
   const { join } = await import('node:path');
   const { tmpdir } = await import('node:os');
-  const eventFile = join(tmpdir(), `claude-hooks-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
+  const eventFile = join(
+    tmpdir(),
+    `claude-hooks-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
+  );
   // Create the file so the reader can open it immediately.
   await fs.writeFile(eventFile, '', 'utf8');
   return new JsonlFileHookEventSink(eventFile);

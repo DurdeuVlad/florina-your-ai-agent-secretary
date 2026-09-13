@@ -61,9 +61,10 @@ class MockCodexServer {
 
   /** Start listening and return the actual port. */
   async start(): Promise<number> {
-    const actualPort = this.wss.address() instanceof Object
-      ? (this.wss.address() as { port: number }).port
-      : this.port;
+    const actualPort =
+      this.wss.address() instanceof Object
+        ? (this.wss.address() as { port: number }).port
+        : this.port;
     return Promise.resolve(actualPort);
   }
 
@@ -143,7 +144,9 @@ class MockCodexServer {
 
     if (method === 'codex.startTurn') {
       // Respond with success.
-      this.sendResponse(ws, id, { threadId: (msg['params'] as Record<string, unknown>)?.['threadId'] });
+      this.sendResponse(ws, id, {
+        threadId: (msg['params'] as Record<string, unknown>)?.['threadId'],
+      });
       // Stream the scripted events.
       for (const event of this.events) {
         this.sendCodexEvent(event);
@@ -652,7 +655,9 @@ describe('CodexAdapter (mock transport)', () => {
 
     // Simulate the server responding to the startTurn request.
     const startMsg = JSON.parse(transport.sent[0]);
-    transport.receive(JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }));
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }),
+    );
 
     const startResult = await startPromise;
     expect(startResult.started).toBe(true);
@@ -693,7 +698,9 @@ describe('CodexAdapter (mock transport)', () => {
     const sessionConfig = sampleSessionConfig();
     const startPromise = adapter.startRun('task-codex-1', sessionConfig);
     const startMsg = JSON.parse(transport.sent[0]);
-    transport.receive(JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }));
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }),
+    );
     await startPromise;
 
     const streaming = collectEvents(adapter.streamEvents());
@@ -788,7 +795,9 @@ describe('CodexAdapter (mock transport)', () => {
     const sessionConfig = sampleSessionConfig();
     const startPromise = adapter.startRun('task-codex-1', sessionConfig);
     const startMsg = JSON.parse(transport.sent[0]);
-    transport.receive(JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }));
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }),
+    );
     await startPromise;
 
     const streaming = collectEvents(adapter.streamEvents());
@@ -835,7 +844,9 @@ describe('CodexAdapter (mock transport)', () => {
     const sessionConfig = sampleSessionConfig();
     const startPromise = adapter.startRun('task-codex-1', sessionConfig);
     const startMsg = JSON.parse(transport.sent[0]);
-    transport.receive(JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }));
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }),
+    );
     await startPromise;
 
     const streaming = collectEvents(adapter.streamEvents());
@@ -863,7 +874,9 @@ describe('CodexAdapter (mock transport)', () => {
     const sessionConfig = sampleSessionConfig();
     const startPromise = adapter.startRun('task-codex-1', sessionConfig);
     const startMsg = JSON.parse(transport.sent[0]);
-    transport.receive(JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }));
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }),
+    );
     await startPromise;
 
     const streaming = collectEvents(adapter.streamEvents());
@@ -894,7 +907,9 @@ describe('CodexAdapter (mock transport)', () => {
     const sessionConfig = sampleSessionConfig();
     const startPromise = adapter.startRun('task-codex-1', sessionConfig);
     const startMsg = JSON.parse(transport.sent[0]);
-    transport.receive(JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }));
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: startMsg.id, result: { threadId: 'sess-codex-1' } }),
+    );
     await startPromise;
 
     await expect(adapter.startRun('task-codex-1', sessionConfig)).rejects.toThrow();

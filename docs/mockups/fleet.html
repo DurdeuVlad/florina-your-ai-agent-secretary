@@ -1,59 +1,87 @@
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Florina — Fleet & Quota (mockup)</title>
-<link rel="stylesheet" href="mockup.css"></head>
-<body>
-<div class="shell">
-  <nav>
-    <div class="logo">Flor<em>ina</em></div>
-    <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
-    <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-    <div class="navitem active">◔ Fleet</div>
-    <div class="navitem">◇ Ideas</div>
-    <div class="navitem">◍ Preferences</div>
-    <div class="navitem">☰ Secretary</div>
-    <div class="sidefoot"><div class="statusline"><span class="dot on"></span>daemon connected</div></div>
-  </nav>
-  <main>
-    <header>
-      <h1>Fleet & Quota</h1><span class="sub">provider capacity · routing decisions</span>
-    </header>
-    <div class="content"><div class="column">
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Florina — Fleet & Quota (mockup)</title>
+    <link rel="stylesheet" href="mockup.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="logo">Flor<em>ina</em></div>
+        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
+        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
+        <div class="navitem active">◔ Fleet</div>
+        <div class="navitem">◇ Ideas</div>
+        <div class="navitem">◍ Preferences</div>
+        <div class="navitem">☰ Secretary</div>
+        <div class="sidefoot">
+          <div class="statusline"><span class="dot on"></span>daemon connected</div>
+        </div>
+      </nav>
+      <main>
+        <header>
+          <h1>Fleet & Quota</h1>
+          <span class="sub">provider capacity · routing decisions</span>
+        </header>
+        <div class="content">
+          <div class="column">
+            <div class="sect">Providers <span class="n">4</span></div>
 
-      <div class="sect">Providers <span class="n">4</span></div>
+            <div class="card">
+              <div class="top">
+                <span class="kind">codex</span><span class="chip green">available</span
+                ><span class="chip">tier A</span>
+              </div>
+              <div class="summary">62% of window used · resets 18:00 (3h 58m)</div>
+              <div class="bar" style="margin-top: 10px"><i style="width: 62%"></i></div>
+              <div class="meta">active: invoice-pagination · florina-branding</div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind">codex</span><span class="chip green">available</span><span class="chip">tier A</span></div>
-        <div class="summary">62% of window used · resets 18:00 (3h 58m)</div>
-        <div class="bar" style="margin-top:10px"><i style="width:62%"></i></div>
-        <div class="meta">active: invoice-pagination · florina-branding</div>
-      </div>
+            <div class="card">
+              <div class="top">
+                <span class="kind">claude-code</span><span class="chip green">available</span
+                ><span class="chip">tier B</span>
+              </div>
+              <div class="summary">31% of window used · resets 17:00</div>
+              <div class="bar" style="margin-top: 10px"><i style="width: 31%"></i></div>
+              <div class="meta">active: oauth-migration</div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind">claude-code</span><span class="chip green">available</span><span class="chip">tier B</span></div>
-        <div class="summary">31% of window used · resets 17:00</div>
-        <div class="bar" style="margin-top:10px"><i style="width:31%"></i></div>
-        <div class="meta">active: oauth-migration</div>
-      </div>
+            <div class="card">
+              <div class="top">
+                <span class="kind">gemini</span><span class="chip red">exhausted</span
+                ><span class="chip">tier C</span>
+              </div>
+              <div class="summary">quota dry — resets <b>14:32</b> (28m)</div>
+              <div class="bar" style="margin-top: 10px"><i class="dry" style="width: 97%"></i></div>
+              <div class="meta">
+                parked: image-pipeline · auto-resume at reset · routed to codex meanwhile
+              </div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind">gemini</span><span class="chip red">exhausted</span><span class="chip">tier C</span></div>
-        <div class="summary">quota dry — resets <b>14:32</b> (28m)</div>
-        <div class="bar" style="margin-top:10px"><i class="dry" style="width:97%"></i></div>
-        <div class="meta">parked: image-pipeline · auto-resume at reset · routed to codex meanwhile</div>
-      </div>
+            <div class="card">
+              <div class="top">
+                <span class="kind">devin</span><span class="chip green">available</span
+                ><span class="chip">tier C · acp</span>
+              </div>
+              <div class="summary">subscription pooled · no window pressure</div>
+              <div class="bar" style="margin-top: 10px"><i style="width: 12%"></i></div>
+              <div class="meta">active: schema-cleanup (manager dispatch)</div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind">devin</span><span class="chip green">available</span><span class="chip">tier C · acp</span></div>
-        <div class="summary">subscription pooled · no window pressure</div>
-        <div class="bar" style="margin-top:10px"><i style="width:12%"></i></div>
-        <div class="meta">active: schema-cleanup (manager dispatch)</div>
-      </div>
-
-      <div class="sect">Recent routing decisions</div>
-      <div class="taskrow"><span class="obj">image-pipeline → codex</span><span class="stat">gemini exhausted · failover, same worktree</span></div>
-      <div class="taskrow"><span class="obj">schema-cleanup → devin</span><span class="stat">preference rule: devin for migrations</span></div>
-
-    </div></div>
-  </main>
-</div>
-</body></html>
+            <div class="sect">Recent routing decisions</div>
+            <div class="taskrow">
+              <span class="obj">image-pipeline → codex</span
+              ><span class="stat">gemini exhausted · failover, same worktree</span>
+            </div>
+            <div class="taskrow">
+              <span class="obj">schema-cleanup → devin</span
+              ><span class="stat">preference rule: devin for migrations</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

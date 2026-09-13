@@ -53,10 +53,7 @@ export {
  * keep importing them here. The source of truth is
  * `src/core/application/ports/outbound/worktree.ts` (DEC-037).
  */
-export type {
-  WorktreeInfo,
-  WorktreeStatus,
-} from '../core/application/ports/outbound/worktree.js';
+export type { WorktreeInfo, WorktreeStatus } from '../core/application/ports/outbound/worktree.js';
 
 /**
  * `DirtyWorktreeError` is owned by the core worktree port (DEC-037) so use

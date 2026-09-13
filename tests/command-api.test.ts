@@ -67,9 +67,7 @@ class SqliteBackedTaskStore implements TaskStore {
     const rows = this.db.connection
       .prepare('SELECT id FROM tasks ORDER BY created_at ASC')
       .all() as { id: string }[];
-    return rows
-      .map((r) => this.taskRepo.getById(r.id))
-      .filter((t): t is Task => t !== null);
+    return rows.map((r) => this.taskRepo.getById(r.id)).filter((t): t is Task => t !== null);
   }
 
   update(task: Task): void {
@@ -999,7 +997,11 @@ describe('CommandApi', () => {
     });
 
     it('filters tasks by status', async () => {
-      const { task: task1, sessionId, agentId } = createTaskWithSession(fixture, {
+      const {
+        task: task1,
+        sessionId,
+        agentId,
+      } = createTaskWithSession(fixture, {
         objective: 'Task A',
       });
       createTaskWithSession(fixture, { objective: 'Task B' });

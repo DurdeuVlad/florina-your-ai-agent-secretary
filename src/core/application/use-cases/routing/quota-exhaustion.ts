@@ -15,10 +15,7 @@ import type { ISODateString } from '../../../domain/types.js';
  * satisfies it structurally via `markExhausted`.
  */
 export interface QuotaExhaustionRecorder {
-  markExhausted(
-    provider: string,
-    options?: { window?: string; resetsAt?: ISODateString },
-  ): void;
+  markExhausted(provider: string, options?: { window?: string; resetsAt?: ISODateString }): void;
 }
 
 /** Patterns that indicate quota/rate exhaustion in provider errors. */

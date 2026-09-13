@@ -231,9 +231,7 @@ export class WebSocketControlPlaneServer {
           !this.options.allowedCommands.includes(kind)
         ) {
           if (socket.readyState === socket.OPEN) {
-            socket.send(
-              JSON.stringify({ ok: false, error: `command not permitted: ${kind}` }),
-            );
+            socket.send(JSON.stringify({ ok: false, error: `command not permitted: ${kind}` }));
           }
           return;
         }

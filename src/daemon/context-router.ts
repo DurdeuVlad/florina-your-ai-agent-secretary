@@ -13,8 +13,6 @@ export * from '../core/application/use-cases/context/context-router.js';
  * Convenience factory: build a `ContextRouter` backed by a concrete
  * `ContextCapsuleRepository` and a fresh `ContextStore`.
  */
-export function createContextRouter(
-  repository: ContextCapsuleRepository,
-): ContextRouter {
+export function createContextRouter(repository: ContextCapsuleRepository): ContextRouter {
   return new ContextRouter(repository);
 }

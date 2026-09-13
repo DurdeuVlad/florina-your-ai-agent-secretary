@@ -32,14 +32,14 @@ export {
   mapPermissionRequest,
   CODEX_EVENT_TYPES,
 } from './codex-mapper.js';
-export type {
-  CodexEvent,
-  CodexPermissionRequestEvent,
-  MapperContext,
-} from './codex-mapper.js';
+export type { CodexEvent, CodexPermissionRequestEvent, MapperContext } from './codex-mapper.js';
 export { StubAdapter, STUB_ADAPTER_ID, buildDefaultStubEvents } from './stub-adapter.js';
 export type { StubAdapterOptions } from './stub-adapter.js';
-export { ClaudeHooksAdapter, CLAUDE_HOOKS_ADAPTER_ID, InMemoryHookEventSink } from './claude-hooks-adapter.js';
+export {
+  ClaudeHooksAdapter,
+  CLAUDE_HOOKS_ADAPTER_ID,
+  InMemoryHookEventSink,
+} from './claude-hooks-adapter.js';
 export type {
   ClaudeHooksAdapterOptions,
   ClaudeCliProcess,
@@ -96,19 +96,10 @@ export {
   mapPermissionPrompt,
   parseAndMapPtyLine,
 } from './claude-mapper.js';
-export type {
-  ClaudeMapperContext,
-  ParsedPtyChunk,
-  ParsedPtyKind,
-} from './claude-mapper.js';
+export type { ClaudeMapperContext, ParsedPtyChunk, ParsedPtyKind } from './claude-mapper.js';
 
 /* Generic ACP adapter (DEC-030, issue #61) */
-export {
-  AcpAdapter,
-  nodeAcpSpawner,
-  devinAcpAdapter,
-  geminiAcpAdapter,
-} from './acp-adapter.js';
+export { AcpAdapter, nodeAcpSpawner, devinAcpAdapter, geminiAcpAdapter } from './acp-adapter.js';
 export type {
   AcpAdapterOptions,
   AcpProcess,

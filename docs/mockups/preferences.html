@@ -1,64 +1,85 @@
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Florina — Preferences (mockup)</title>
-<link rel="stylesheet" href="mockup.css"></head>
-<body>
-<div class="shell">
-  <nav>
-    <div class="logo">Flor<em>ina</em></div>
-    <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
-    <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-    <div class="navitem">◔ Fleet</div>
-    <div class="navitem">◇ Ideas</div>
-    <div class="navitem active">◍ Preferences</div>
-    <div class="navitem">☰ Secretary</div>
-    <div class="sidefoot"><div class="statusline"><span class="dot on"></span>daemon connected</div></div>
-  </nav>
-  <main>
-    <header>
-      <h1>Preferences</h1><span class="sub">learned routing profile — edit or revoke</span>
-      <span class="spacer"></span><button class="ghost">+ Add rule</button>
-    </header>
-    <div class="content"><div class="column">
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Florina — Preferences (mockup)</title>
+    <link rel="stylesheet" href="mockup.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="logo">Flor<em>ina</em></div>
+        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
+        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
+        <div class="navitem">◔ Fleet</div>
+        <div class="navitem">◇ Ideas</div>
+        <div class="navitem active">◍ Preferences</div>
+        <div class="navitem">☰ Secretary</div>
+        <div class="sidefoot">
+          <div class="statusline"><span class="dot on"></span>daemon connected</div>
+        </div>
+      </nav>
+      <main>
+        <header>
+          <h1>Preferences</h1>
+          <span class="sub">learned routing profile — edit or revoke</span>
+          <span class="spacer"></span><button class="ghost">+ Add rule</button>
+        </header>
+        <div class="content">
+          <div class="column">
+            <div class="sect">Routing rules <span class="n">3</span></div>
 
-      <div class="sect">Routing rules <span class="n">3</span></div>
+            <div class="card">
+              <div class="top"><span class="kind mono">codex · catch-all</span></div>
+              <div class="summary">"prefer Codex for heavy lifting"</div>
+              <div class="meta">learned from voice · Sep 13 · global scope</div>
+              <div class="actions">
+                <button class="ghost">Edit</button><button class="danger">Revoke</button>
+              </div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind mono">codex · catch-all</span></div>
-        <div class="summary">"prefer Codex for heavy lifting"</div>
-        <div class="meta">learned from voice · Sep 13 · global scope</div>
-        <div class="actions"><button class="ghost">Edit</button><button class="danger">Revoke</button></div>
-      </div>
+            <div class="card">
+              <div class="top">
+                <span class="kind mono">devin · work-type: migration</span
+                ><span class="chip amber">project:agent-secretary</span>
+              </div>
+              <div class="summary">"use Devin for migrations in this repo"</div>
+              <div class="meta">learned from voice · Sep 15 · project scope</div>
+              <div class="actions">
+                <button class="ghost">Edit</button><button class="danger">Revoke</button>
+              </div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind mono">devin · work-type: migration</span><span class="chip amber">project:agent-secretary</span></div>
-        <div class="summary">"use Devin for migrations in this repo"</div>
-        <div class="meta">learned from voice · Sep 15 · project scope</div>
-        <div class="actions"><button class="ghost">Edit</button><button class="danger">Revoke</button></div>
-      </div>
+            <div class="card">
+              <div class="top"><span class="kind mono">claude-code · work-type: ui</span></div>
+              <div class="summary">"Claude for frontend polish"</div>
+              <div class="meta">learned from chat · Sep 12 · global scope</div>
+              <div class="actions">
+                <button class="ghost">Edit</button><button class="danger">Revoke</button>
+              </div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind mono">claude-code · work-type: ui</span></div>
-        <div class="summary">"Claude for frontend polish"</div>
-        <div class="meta">learned from chat · Sep 12 · global scope</div>
-        <div class="actions"><button class="ghost">Edit</button><button class="danger">Revoke</button></div>
-      </div>
+            <div class="sect">Denied <span class="n">1</span></div>
 
-      <div class="sect">Denied <span class="n">1</span></div>
+            <div class="card">
+              <div class="top">
+                <span class="kind mono">gemini / gemini-2.5-pro</span
+                ><span class="chip amber">project:payments-api</span
+                ><span class="chip red">denied</span>
+              </div>
+              <div class="summary">"never pro models on payments-api — cost"</div>
+              <div class="meta">learned from voice · Sep 14 · project scope</div>
+              <div class="actions"><button class="danger">Revoke deny</button></div>
+            </div>
 
-      <div class="card">
-        <div class="top"><span class="kind mono">gemini / gemini-2.5-pro</span><span class="chip amber">project:payments-api</span><span class="chip red">denied</span></div>
-        <div class="summary">"never pro models on payments-api — cost"</div>
-        <div class="meta">learned from voice · Sep 14 · project scope</div>
-        <div class="actions"><button class="danger">Revoke deny</button></div>
-      </div>
-
-      <div class="sect">Notes <span class="n">1</span></div>
-      <div class="card">
-        <div class="summary">"Ask before spending on anything above sonnet-class"</div>
-        <div class="meta">authored by you · Sep 13</div>
-      </div>
-
-    </div></div>
-  </main>
-</div>
-</body></html>
+            <div class="sect">Notes <span class="n">1</span></div>
+            <div class="card">
+              <div class="summary">"Ask before spending on anything above sonnet-class"</div>
+              <div class="meta">authored by you · Sep 13</div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

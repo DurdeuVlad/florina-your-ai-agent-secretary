@@ -15,11 +15,7 @@ import type {
   TranscriptionPort,
   TranscriptResult as CoreTranscriptResult,
 } from '../../../core/application/ports/outbound/voice.js';
-import type {
-  WhisperBackend,
-  WhisperCliOptions,
-  WhisperSegment,
-} from './whisper-backend.js';
+import type { WhisperBackend, WhisperCliOptions, WhisperSegment } from './whisper-backend.js';
 import { DEFAULT_WHISPER_CLI_OPTIONS } from './whisper-backend.js';
 
 /* ================================================================== *
@@ -108,9 +104,7 @@ export function segmentConfidence(seg: WhisperSegment): number {
   // Penalise repetition: a compression ratio far from 1.0 indicates the
   // model is looping. Ratios above the threshold are suspicious in whisper.cpp.
   const compressionPenalty =
-    seg.compression_ratio > COMPRESSION_RATIO_THRESHOLD
-      ? 1 / seg.compression_ratio
-      : 1;
+    seg.compression_ratio > COMPRESSION_RATIO_THRESHOLD ? 1 / seg.compression_ratio : 1;
   const score = prob * silenceDiscount * compressionPenalty;
   return Math.max(0, Math.min(1, score));
 }
@@ -191,10 +185,7 @@ export class WhisperAdapter implements TranscriptionPort<TranscriptResult> {
    * @param modelPath Filesystem path to the `.ggml` model file.
    * @param options   Adapter options (language, beam size, speed-up).
    */
-  async initialize(
-    modelPath: string,
-    options?: WhisperAdapterOptions,
-  ): Promise<void> {
+  async initialize(modelPath: string, options?: WhisperAdapterOptions): Promise<void> {
     const cliOptions: WhisperCliOptions = {
       ...DEFAULT_WHISPER_CLI_OPTIONS,
       model: modelPath,

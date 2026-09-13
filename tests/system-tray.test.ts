@@ -1,9 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-import {
-  SystemTrayManager,
-  MockTrayBackend,
-} from '../src/desktop/system-tray.js';
+import { SystemTrayManager, MockTrayBackend } from '../src/desktop/system-tray.js';
 import type { TrayMenuItem, TrayAction } from '../src/desktop/system-tray.js';
 
 /* ------------------------------------------------------------------ *
@@ -12,9 +9,7 @@ import type { TrayMenuItem, TrayAction } from '../src/desktop/system-tray.js';
 describe('MockTrayBackend', () => {
   it('records create and exposes tooltip/menu', () => {
     const tray = new MockTrayBackend();
-    const menu: TrayMenuItem[] = [
-      { id: 'quit', label: 'Quit', enabled: true },
-    ];
+    const menu: TrayMenuItem[] = [{ id: 'quit', label: 'Quit', enabled: true }];
     tray.create('Florina — Daemon: Disconnected', menu);
     expect(tray.isActive).toBe(true);
     expect(tray.tooltip).toBe('Florina — Daemon: Disconnected');

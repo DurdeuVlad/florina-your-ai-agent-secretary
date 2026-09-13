@@ -139,11 +139,12 @@ export class CodexQuotaReader implements QuotaReaderPort {
 
   async read(now: Date = new Date()): Promise<readonly QuotaWindow[]> {
     const response: unknown = await this.request('account/rateLimits/read');
-    const limits = isObject(response) && isObject(response['rateLimits'])
-      ? (response['rateLimits'] as Record<string, unknown>)
-      : isObject(response)
-        ? response
-        : {};
+    const limits =
+      isObject(response) && isObject(response['rateLimits'])
+        ? (response['rateLimits'] as Record<string, unknown>)
+        : isObject(response)
+          ? response
+          : {};
     const windows: QuotaWindow[] = [];
     const add = (window: string, raw: unknown): void => {
       if (!isObject(raw)) {

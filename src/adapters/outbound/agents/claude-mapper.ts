@@ -272,10 +272,7 @@ export function parsePtyLine(rawLine: string): ParsedPtyChunk {
  * a best-effort `ToolFinished` only when a follow-up chunk is observed (see
  * {@link mapPtyChunks}). This mapper produces only the `ToolStarted` event.
  */
-export function mapToolStarted(
-  chunk: ParsedPtyChunk,
-  ctx: ClaudeMapperContext,
-): SupervisorEvent {
+export function mapToolStarted(chunk: ParsedPtyChunk, ctx: ClaudeMapperContext): SupervisorEvent {
   return {
     type: 'ToolStarted',
     timestamp: now(),
@@ -292,10 +289,7 @@ export function mapToolStarted(
  * Map a `file-change` chunk → `FileChanged`. Also implies a `ToolStarted` for
  * the editing tool; callers handle the dual emission.
  */
-export function mapFileChanged(
-  chunk: ParsedPtyChunk,
-  ctx: ClaudeMapperContext,
-): SupervisorEvent {
+export function mapFileChanged(chunk: ParsedPtyChunk, ctx: ClaudeMapperContext): SupervisorEvent {
   return {
     type: 'FileChanged',
     timestamp: now(),
@@ -309,10 +303,7 @@ export function mapFileChanged(
 }
 
 /** Map a `progress` chunk → `AgentProgress`. */
-export function mapProgress(
-  chunk: ParsedPtyChunk,
-  ctx: ClaudeMapperContext,
-): SupervisorEvent {
+export function mapProgress(chunk: ParsedPtyChunk, ctx: ClaudeMapperContext): SupervisorEvent {
   return {
     type: 'AgentProgress',
     timestamp: now(),
@@ -410,10 +401,7 @@ export function mapPermissionPrompt(
  *   chunks produce no events here (tool-finish is synthesized by the adapter
  *   from process state, not from a parsed chunk).
  */
-export function mapPtyChunk(
-  chunk: ParsedPtyChunk,
-  ctx: ClaudeMapperContext,
-): SupervisorEvent[] {
+export function mapPtyChunk(chunk: ParsedPtyChunk, ctx: ClaudeMapperContext): SupervisorEvent[] {
   switch (chunk.kind) {
     case 'tool-start':
       return [mapToolStarted(chunk, ctx)];
@@ -440,9 +428,6 @@ export function mapPtyChunk(
  * @param ctx - Envelope context.
  * @returns Zero or more {@link SupervisorEvent}s.
  */
-export function parseAndMapPtyLine(
-  rawLine: string,
-  ctx: ClaudeMapperContext,
-): SupervisorEvent[] {
+export function parseAndMapPtyLine(rawLine: string, ctx: ClaudeMapperContext): SupervisorEvent[] {
   return mapPtyChunk(parsePtyLine(rawLine), ctx);
 }

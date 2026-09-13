@@ -42,8 +42,7 @@ export interface RealtimeTool {
  * commits the input buffer explicitly on `stopListening`).
  */
 export type TurnDetection =
-  | { readonly type: 'none' }
-  | { readonly type: 'server_vad'; readonly threshold?: number };
+  { readonly type: 'none' } | { readonly type: 'server_vad'; readonly threshold?: number };
 
 /**
  * Realtime session configuration sent in `session.update` and echoed back in
@@ -116,9 +115,7 @@ export type RealtimeConversationItem =
  * Type guard narrowing a {@link RealtimeConversationItem} to a
  * {@link RealtimeFunctionCall}.
  */
-export function isFunctionCallItem(
-  item: RealtimeConversationItem,
-): item is RealtimeFunctionCall {
+export function isFunctionCallItem(item: RealtimeConversationItem): item is RealtimeFunctionCall {
   return item.type === 'function_call';
 }
 

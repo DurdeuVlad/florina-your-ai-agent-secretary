@@ -66,34 +66,22 @@ export interface RealtimeSocket {
   /** Close the connection. */
   close(code?: number, reason?: string): void;
   /** Register an event listener. Returns `this` for chaining. */
-  on(
-    event: 'open' | 'message' | 'close' | 'error',
-    listener: (...args: unknown[]) => void,
-  ): this;
+  on(event: 'open' | 'message' | 'close' | 'error', listener: (...args: unknown[]) => void): this;
   /** Remove a previously-registered listener. Returns `this` for chaining. */
-  off(
-    event: 'open' | 'message' | 'close' | 'error',
-    listener: (...args: unknown[]) => void,
-  ): this;
+  off(event: 'open' | 'message' | 'close' | 'error', listener: (...args: unknown[]) => void): this;
 }
 
 /**
  * Factory that opens a WebSocket connection to a URL with the given headers.
  * Injected so tests can supply a mock socket instead of a real network call.
  */
-export type SocketFactory = (
-  url: string,
-  headers: Record<string, string>,
-) => RealtimeSocket;
+export type SocketFactory = (url: string, headers: Record<string, string>) => RealtimeSocket;
 
 /**
  * Default {@link SocketFactory} backed by the `ws` package. Used in
  * production; tests inject their own factory.
  */
-export function defaultSocketFactory(
-  url: string,
-  headers: Record<string, string>,
-): RealtimeSocket {
+export function defaultSocketFactory(url: string, headers: Record<string, string>): RealtimeSocket {
   return new WebSocket(url, { headers }) as unknown as RealtimeSocket;
 }
 
@@ -173,7 +161,9 @@ export class RealtimeBridge implements RealtimeSessionPort {
 
   /** Stored connect args so reconnection can re-establish the session. */
   private apiKey = '';
-  private options: Required<Omit<RealtimeBridgeOptions, 'baseUrl' | 'tools' | 'instructions' | 'voice'>> & {
+  private options: Required<
+    Omit<RealtimeBridgeOptions, 'baseUrl' | 'tools' | 'instructions' | 'voice'>
+  > & {
     baseUrl: string;
     tools: readonly RealtimeTool[];
     instructions: string;
@@ -670,9 +660,7 @@ export class RealtimeBridge implements RealtimeSessionPort {
     };
   }
 
-  private normalizeOptions(
-    opts: RealtimeBridgeOptions,
-  ): RealtimeBridge['options'] {
+  private normalizeOptions(opts: RealtimeBridgeOptions): RealtimeBridge['options'] {
     return {
       model: opts.model ?? DEFAULT_REALTIME_MODEL,
       voice: opts.voice ?? 'alloy',

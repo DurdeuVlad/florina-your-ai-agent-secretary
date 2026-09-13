@@ -16,8 +16,7 @@ import type { BrowserWindow, WebContents } from 'electron';
 // API object; a named ESM import can resolve to the npm shim (which only
 // exports the binary path) depending on loader wiring — see issue #114.
 const require = createRequire(import.meta.url);
-const { BrowserWindow: BrowserWindowCtor } =
-  require('electron') as typeof import('electron');
+const { BrowserWindow: BrowserWindowCtor } = require('electron') as typeof import('electron');
 
 import type {
   WindowBackend,
@@ -129,14 +128,16 @@ export class ElectronWindowBackend implements WindowBackend {
     if (win.listenerCount(event) > 0) return;
     // BrowserWindow's typings overload `on` per event literal; our union of
     // port events goes through the underlying EventEmitter signature.
-    (win as unknown as { addListener(e: string, cb: (...a: unknown[]) => void): void })
-      .addListener(event, (...args: unknown[]) => {
-      const set = this.handlers.get(event);
-      if (!set) return;
-      for (const handler of set) {
-        handler(...args);
-      }
-    });
+    (win as unknown as { addListener(e: string, cb: (...a: unknown[]) => void): void }).addListener(
+      event,
+      (...args: unknown[]) => {
+        const set = this.handlers.get(event);
+        if (!set) return;
+        for (const handler of set) {
+          handler(...args);
+        }
+      },
+    );
   }
 
   private assertWindow(action: string): BrowserWindow {

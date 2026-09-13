@@ -17,12 +17,20 @@
 import { WebSocket } from 'ws';
 
 import type { Command, Response } from '../../../core/application/use-cases/tasks/command-api.js';
-import type { AttentionItemSnapshot, TaskSnapshot } from '../../../core/application/use-cases/tasks/command-api.js';
+import type {
+  AttentionItemSnapshot,
+  TaskSnapshot,
+} from '../../../core/application/use-cases/tasks/command-api.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
-import type { RendererStateData, StateChangeCallback, VoiceState, DaemonStatus } from './renderer-state.js';
+import type {
+  RendererStateData,
+  StateChangeCallback,
+  VoiceState,
+  DaemonStatus,
+} from './renderer-state.js';
 import type { WindowBackend, WindowOptions } from './window-backend.js';
 import { SystemTrayManager } from './system-tray.js';
 import type { TrayActionCallback, TrayBackend } from './system-tray.js';
@@ -55,7 +63,10 @@ export interface DesktopAppOptions {
  * Error thrown when the desktop app cannot connect to the daemon.
  */
 export class DesktopConnectionError extends Error {
-  constructor(message: string, readonly cause?: Error) {
+  constructor(
+    message: string,
+    readonly cause?: Error,
+  ) {
     super(message);
     this.name = 'DesktopConnectionError';
   }
@@ -166,9 +177,7 @@ export class DesktopApp {
 
       const timer = setTimeout(() => {
         socket.terminate();
-        const e = new DesktopConnectionError(
-          `Timed out connecting to daemon at ${socketUrl}`,
-        );
+        const e = new DesktopConnectionError(`Timed out connecting to daemon at ${socketUrl}`);
         this.updateDaemonStatus('error', { connected: false, error: e.message });
         reject(e);
       }, this.connectTimeoutMs);
@@ -285,10 +294,7 @@ export class DesktopApp {
    * connection transition (connecting / connected / disconnected / error)
    * keeps both surfaces consistent.
    */
-  private updateDaemonStatus(
-    status: DaemonStatus,
-    extra?: Partial<RendererStateData>,
-  ): void {
+  private updateDaemonStatus(status: DaemonStatus, extra?: Partial<RendererStateData>): void {
     this.state.update({ daemonStatus: status, ...extra });
     if (this.tray !== null) {
       this.tray.setStatus(status);

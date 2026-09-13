@@ -41,12 +41,7 @@ const ATTENTION_ITEM_KINDS: readonly AttentionItemKind[] = [
   'Custom',
 ];
 
-const PRIORITIES: readonly AttentionItemPriority[] = [
-  'Critical',
-  'High',
-  'Medium',
-  'Low',
-];
+const PRIORITIES: readonly AttentionItemPriority[] = ['Critical', 'High', 'Medium', 'Low'];
 
 /** Build an item with explicit fields and a stable id. */
 function item(
@@ -92,12 +87,7 @@ describe('InboxViewModel.buildView', () => {
       item('d', { priority: 'High', createdAt: '2026-08-19T12:00:00.000Z' }),
     ]);
     const view = vm.buildView(inbox);
-    expect(view.groups.map((g) => g.priority)).toEqual([
-      'Critical',
-      'High',
-      'Medium',
-      'Low',
-    ]);
+    expect(view.groups.map((g) => g.priority)).toEqual(['Critical', 'High', 'Medium', 'Low']);
   });
 
   it('sorts items within each group FIFO by createdAt', () => {
@@ -112,10 +102,7 @@ describe('InboxViewModel.buildView', () => {
   });
 
   it('omits empty priority groups', () => {
-    const inbox = inboxOf([
-      item('a', { priority: 'Critical' }),
-      item('b', { priority: 'Low' }),
-    ]);
+    const inbox = inboxOf([item('a', { priority: 'Critical' }), item('b', { priority: 'Low' })]);
     const view = vm.buildView(inbox);
     expect(view.groups.map((g) => g.priority)).toEqual(['Critical', 'Low']);
   });
@@ -146,9 +133,7 @@ describe('InboxViewModel.buildView', () => {
   });
 
   it('falls back to the kind label when payload has no message/reason', () => {
-    const inbox = inboxOf([
-      item('a', { kind: 'Digest', payload: { foo: 'bar' } }),
-    ]);
+    const inbox = inboxOf([item('a', { kind: 'Digest', payload: { foo: 'bar' } })]);
     const view = vm.buildView(inbox);
     const itemView = view.groups[0]!.items[0]!;
     expect(itemView.summary).toBe(KIND_METADATA.Digest.label);
@@ -246,9 +231,7 @@ describe('display metadata', () => {
 
   it('enriches item views with the correct metadata per kind and priority', () => {
     const vm = new InboxViewModel();
-    const inbox = inboxOf([
-      item('a', { kind: 'FailedRun', priority: 'Critical' }),
-    ]);
+    const inbox = inboxOf([item('a', { kind: 'FailedRun', priority: 'Critical' })]);
     const view = vm.buildView(inbox);
     const itemView = view.groups[0]!.items[0]!;
     expect(itemView.kindMeta).toEqual(KIND_METADATA.FailedRun);
@@ -332,10 +315,7 @@ describe('renderInboxGroup', () => {
   it('renders each item in the group', () => {
     const vm = new InboxViewModel();
     const view = vm.buildView(
-      inboxOf([
-        item('a', { priority: 'Low' }),
-        item('b', { priority: 'Low' }),
-      ]),
+      inboxOf([item('a', { priority: 'Low' }), item('b', { priority: 'Low' })]),
     );
     const group = view.groups[0]!;
     const tree = renderInboxGroup(group.priority, group.items);
@@ -348,10 +328,7 @@ describe('renderInboxList', () => {
   it('renders all groups in priority order', () => {
     const vm = new InboxViewModel();
     const view = vm.buildView(
-      inboxOf([
-        item('a', { priority: 'Low' }),
-        item('b', { priority: 'Critical' }),
-      ]),
+      inboxOf([item('a', { priority: 'Low' }), item('b', { priority: 'Critical' })]),
     );
     const tree = renderInboxList(view);
     expect(tree.tag).toBe('InboxList');

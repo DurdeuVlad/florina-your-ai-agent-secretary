@@ -18,9 +18,7 @@ import { createStdinVoiceSession } from './voice-session.js';
  * process exit code. Called by the `florina` / `flor` binary shim at
  * `src/cli/index.ts`.
  */
-export async function main(
-  argv: readonly string[] = process.argv.slice(2),
-): Promise<number> {
+export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   // `.env` convenience: populate OPENAI_API_KEY / FLORINA_* from the project
   // file before the CLI reads process.env. Real env vars always win.
   loadEnvFile();

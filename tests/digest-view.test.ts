@@ -59,11 +59,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
     duration: 154000,
     summary: 'Implementation complete. 9 files, +284/-71, 23/23 tests passing.',
     filesChangedCount: 9,
-    filesChanged: [
-      'src/pagination.ts',
-      'src/pagination-view.ts',
-      'tests/pagination.test.ts',
-    ],
+    filesChanged: ['src/pagination.ts', 'src/pagination-view.ts', 'tests/pagination.test.ts'],
     testsRun: 23,
     testsPassed: 23,
     testsFailed: 0,
@@ -332,9 +328,7 @@ describe('DiffViewModel.buildView — file grouping', () => {
   it('omits empty groups', () => {
     const view = diffViewModel.buildView(
       makeDiff({
-        changedFiles: [
-          { path: 'src/a.ts', additions: 10, deletions: 0, status: 'added' },
-        ],
+        changedFiles: [{ path: 'src/a.ts', additions: 10, deletions: 0, status: 'added' }],
       }),
     );
     expect(view.fileGroups).toHaveLength(1);
@@ -373,9 +367,7 @@ describe('diff stats calculation', () => {
   it('calculates net change as negative when deletions exceed additions', () => {
     const view = diffViewModel.buildView(
       makeDiff({
-        changedFiles: [
-          { path: 'a.ts', additions: 5, deletions: 50, status: 'modified' },
-        ],
+        changedFiles: [{ path: 'a.ts', additions: 5, deletions: 50, status: 'modified' }],
       }),
     );
     expect(view.stats.netChange).toBe(-45);

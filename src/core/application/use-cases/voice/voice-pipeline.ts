@@ -154,12 +154,10 @@ export class VoicePipeline<TResult extends TranscriptResult = TranscriptResult> 
   ) {
     this.bridge = bridge;
     this.whisper = whisper;
-    this.recoveryIntervalMs =
-      options?.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS;
+    this.recoveryIntervalMs = options?.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS;
     this.autoFailover = options?.autoFailover ?? true;
     this.autoRecover = options?.autoRecover ?? true;
-    this.modeSwitchDebounceMs =
-      options?.modeSwitchDebounceMs ?? DEFAULT_MODE_SWITCH_DEBOUNCE_MS;
+    this.modeSwitchDebounceMs = options?.modeSwitchDebounceMs ?? DEFAULT_MODE_SWITCH_DEBOUNCE_MS;
   }
 
   /* ---------------------------------------------------------------- *
@@ -312,9 +310,7 @@ export class VoicePipeline<TResult extends TranscriptResult = TranscriptResult> 
   private handleBridgeStateChange(next: VoiceSessionState): void {
     // Disconnected states: Error (fatal) or Connecting (mid-reconnect).
     // Rely on `next` rather than `bridge.isConnected`, which may be stale.
-    const disconnected =
-      next === VoiceSessionState.Error ||
-      next === VoiceSessionState.Connecting;
+    const disconnected = next === VoiceSessionState.Error || next === VoiceSessionState.Connecting;
     if (disconnected) {
       // Realtime connection lost — fail over to whisper.
       if (this.autoFailover && this.mode === 'realtime') {
@@ -346,10 +342,7 @@ export class VoicePipeline<TResult extends TranscriptResult = TranscriptResult> 
    * transition valid by the time the timer fires (e.g. the user manually
    * switched modes), the switch is dropped.
    */
-  private scheduleModeSwitch(
-    mode: VoicePipelineMode,
-    onSwitch: () => void,
-  ): void {
+  private scheduleModeSwitch(mode: VoicePipelineMode, onSwitch: () => void): void {
     this.pendingMode = mode;
     if (this.modeSwitchTimer !== null) {
       clearTimeout(this.modeSwitchTimer);

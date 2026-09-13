@@ -41,9 +41,7 @@ describe('loadEnvFile', () => {
   });
 
   it('supports export prefix and quoted values', async () => {
-    const file = await envFile(
-      'export A=one\nB="two words"\nC=\'three\'\n',
-    );
+    const file = await envFile('export A=one\nB="two words"\nC=\'three\'\n');
     const env: Record<string, string | undefined> = {};
     loadEnvFile(file, env);
     expect(env['A']).toBe('one');

@@ -19,10 +19,7 @@
  *   error paths call {@link QuotaLedger.markExhausted}.
  */
 import type { ISODateString } from '../../../domain/types.js';
-import type {
-  ProviderQuotaState,
-  QuotaWindow,
-} from '../../ports/outbound/quota-reader.js';
+import type { ProviderQuotaState, QuotaWindow } from '../../ports/outbound/quota-reader.js';
 
 /**
  * Re-export the observation contract so ledger consumers keep importing it

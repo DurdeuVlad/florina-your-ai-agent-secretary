@@ -380,7 +380,12 @@ function extractFilePath(toolInput?: Record<string, unknown>): string | null {
 
 /** Whether a tool name is a file-editing tool that implies a file change. */
 function isFileEditTool(toolName: string): boolean {
-  return toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit' || toolName === 'NotebookEdit';
+  return (
+    toolName === 'Write' ||
+    toolName === 'Edit' ||
+    toolName === 'MultiEdit' ||
+    toolName === 'NotebookEdit'
+  );
 }
 
 /* ------------------------------------------------------------------ *

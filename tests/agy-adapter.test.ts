@@ -76,12 +76,7 @@ describe('AgyAdapter', () => {
     const events = collect(adapter);
     await adapter.startRun('task-1', config);
     expect(calls[0].command).toBe('agy');
-    expect(calls[0].args).toEqual([
-      '-p',
-      'fix the bug',
-      '--output-format',
-      'stream-json',
-    ]);
+    expect(calls[0].args).toEqual(['-p', 'fix the bug', '--output-format', 'stream-json']);
     expect(calls[0].cwd).toBe('/repo/wt');
     proc.exit(0);
     await events;
@@ -111,13 +106,9 @@ describe('AgyAdapter', () => {
         message: { content: [{ type: 'text', text: 'reading files' }] },
       }),
     );
-    proc.feed(
-      JSON.stringify({ type: 'tool_use', name: 'shell', input: { cmd: 'npm test' } }),
-    );
+    proc.feed(JSON.stringify({ type: 'tool_use', name: 'shell', input: { cmd: 'npm test' } }));
     proc.feed(JSON.stringify({ type: 'tool_result', name: 'shell', is_error: false }));
-    proc.feed(
-      JSON.stringify({ type: 'result', result: 'fixed it', duration_ms: 5000 }),
-    );
+    proc.feed(JSON.stringify({ type: 'result', result: 'fixed it', duration_ms: 5000 }));
 
     const collected = await events;
     const types = collected.map((e) => e.type);

@@ -32,10 +32,7 @@ import {
   DEFAULT_FAILURE_THRESHOLD,
   type FailureTrackerConfig,
 } from './failure-tracker.js';
-import {
-  LivenessMonitor,
-  type LivenessMonitorConfig,
-} from './liveness-monitor.js';
+import { LivenessMonitor, type LivenessMonitorConfig } from './liveness-monitor.js';
 
 /* ------------------------------------------------------------------ *
  * Public types
@@ -275,8 +272,7 @@ export class AttentionEngine {
     };
     this._failureTracker = new FailureTracker(failureConfig);
     this._livenessMonitor = new LivenessMonitor(livenessConfig);
-    this._failureThreshold =
-      config.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD;
+    this._failureThreshold = config.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD;
   }
 
   /** The internal failure tracker. Callers may use it to record/reset
@@ -681,7 +677,10 @@ function isFilesystemScopeExpansion(event: {
   readonly capability: CapabilityType;
   readonly workingDir: string;
   readonly destination: string;
-  readonly scope: ReadonlyArray<{ readonly type: CapabilityType; readonly targets: readonly string[] }>;
+  readonly scope: ReadonlyArray<{
+    readonly type: CapabilityType;
+    readonly targets: readonly string[];
+  }>;
 }): boolean {
   if (event.capability !== Cap.Filesystem) {
     return false;

@@ -81,9 +81,7 @@ export class MetricsRepository extends BaseRepository {
     this.listAllStmt = this.prepare(
       'SELECT * FROM metrics_snapshots ORDER BY timestamp ASC LIMIT ?',
     );
-    this.getLatestStmt = this.prepare(
-      'SELECT * FROM metrics_snapshots ORDER BY id DESC LIMIT 1',
-    );
+    this.getLatestStmt = this.prepare('SELECT * FROM metrics_snapshots ORDER BY id DESC LIMIT 1');
   }
 
   /**

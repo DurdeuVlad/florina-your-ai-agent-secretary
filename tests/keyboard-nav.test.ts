@@ -4,12 +4,15 @@ import { KeyboardNavigator } from '../src/desktop/keyboard-nav.js';
 import type { NavAction } from '../src/desktop/keyboard-nav.js';
 
 /** Build a KeyEventLike for a single key (no modifiers). */
-function key(key: string, mods: Partial<{
-  ctrlKey: boolean;
-  metaKey: boolean;
-  altKey: boolean;
-  shiftKey: boolean;
-}> = {}): {
+function key(
+  key: string,
+  mods: Partial<{
+    ctrlKey: boolean;
+    metaKey: boolean;
+    altKey: boolean;
+    shiftKey: boolean;
+  }> = {},
+): {
   key: string;
   ctrlKey?: boolean;
   metaKey?: boolean;

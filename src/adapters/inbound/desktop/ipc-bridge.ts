@@ -55,7 +55,11 @@ export interface IpcTransport {
  * sending on an unknown channel or a transport error).
  */
 export class IpcError extends Error {
-  constructor(message: string, readonly channel?: IpcChannel, readonly cause?: Error) {
+  constructor(
+    message: string,
+    readonly channel?: IpcChannel,
+    readonly cause?: Error,
+  ) {
     super(message);
     this.name = 'IpcError';
   }
