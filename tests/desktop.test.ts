@@ -261,7 +261,7 @@ describe('MockWindowBackend', () => {
  * IpcBridge
  * ------------------------------------------------------------------ */
 describe('IpcBridge', () => {
-  it('IPC_CHANNELS contains the six required channels', () => {
+  it('IPC_CHANNELS contains the required channels', () => {
     expect(IPC_CHANNELS).toEqual([
       'inbox:update',
       'task:update',
@@ -269,6 +269,9 @@ describe('IpcBridge', () => {
       'digest:update',
       'metrics:update',
       'voice:state',
+      'daemon:status',
+      'command',
+      'command:result',
     ]);
   });
 

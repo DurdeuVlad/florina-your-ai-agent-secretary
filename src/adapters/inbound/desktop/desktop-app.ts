@@ -22,6 +22,9 @@ import type {
   TaskSnapshot,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
+import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
+import { InboxViewModel } from './views/inbox-view.js';
+import { renderInboxList } from './views/inbox-templates.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
@@ -94,6 +97,7 @@ export class DesktopApp {
   private readonly windowOptions: WindowOptions;
   private readonly tray: SystemTrayManager | null;
   private socket: WebSocket | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
 
   constructor(options: DesktopAppOptions) {
@@ -336,6 +340,7 @@ export class DesktopApp {
    */
   private updateDaemonStatus(status: DaemonStatus, extra?: Partial<RendererStateData>): void {
     this.state.update({ daemonStatus: status, ...extra });
+    this.bridge.sendToRenderer('daemon:status', { status, error: extra?.error });
     if (this.tray !== null) {
       this.tray.setStatus(status);
     }
@@ -417,9 +422,111 @@ export class DesktopApp {
         this.bridge.sendToRenderer('voice:state', record);
         break;
       }
+      case 'event': {
+        // Raw SupervisorEvent from the daemon's subscribe stream. Events are
+        // the change signal: rebuild the inbox view (debounced) so the
+        // renderer always shows the latest state without polling.
+        this.scheduleRefresh();
+        break;
+      }
       default:
         // Unknown push type — ignore for forward compatibility.
         break;
+    }
+  }
+
+  /**
+   * Send `{type:'subscribe'}` on the live daemon socket so SupervisorEvents
+   * stream in and drive {@link scheduleRefresh}. No-op when disconnected.
+   */
+  subscribeToEvents(): void {
+    if (this.socket !== null && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ type: 'subscribe' }));
+    }
+  }
+
+  /**
+   * Handle a command sent by the renderer over the `command` IPC channel.
+   * Forwards to the daemon and replies on `command:result` with the same
+   * correlation id.
+   */
+  async handleRendererCommand(message: unknown): Promise<void> {
+    const m = message as { id?: unknown; cmd?: unknown };
+    const cmd = this.resolveRendererCommand(m.cmd);
+    if (cmd === null) {
+      // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
+      // by the renderer itself — acknowledge without hitting the daemon.
+      this.bridge.sendToRenderer('command:result', { id: m.id, res: { ok: true } });
+      return;
+    }
+    if (typeof cmd === 'object' && 'error' in cmd) {
+      this.bridge.sendToRenderer('command:result', {
+        id: m.id,
+        res: { ok: false, error: (cmd as { error: string }).error },
+      });
+      return;
+    }
+    const res = await this.sendCommand(cmd).catch((e: unknown) => ({
+      ok: false as const,
+      error: e instanceof Error ? e.message : String(e),
+    }));
+    this.bridge.sendToRenderer('command:result', { id: m.id, res });
+  }
+
+  /**
+   * Translate the view layer's string command identifiers (`approve:<id>`,
+   * `deny:<id>`) into typed daemon {@link Command}s by looking the item up
+   * in the current renderer state. Returns `null` for UI-only verbs.
+   */
+  private resolveRendererCommand(cmd: unknown): Command | { error: string } | null {
+    if (typeof cmd !== 'string') return cmd as Command;
+    const [verb, itemId] = cmd.split(':', 2);
+    if (verb === 'approve' || verb === 'deny') {
+      const item = this.state
+        .snapshot()
+        .inboxItems.find((i) => i.id === itemId);
+      const approvalId = item?.payload['approvalId'];
+      if (item === undefined || typeof approvalId !== 'string') {
+        return { error: `Cannot ${verb}: no pending approval for ${itemId ?? '?'}` };
+      }
+      return {
+        kind: 'approve',
+        taskId: item.taskId,
+        approvalId,
+        decision: verb === 'approve' ? 'grant' : 'deny',
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Re-query the daemon and push fresh RenderTrees to the renderer.
+   * Debounced because daemon events can arrive in bursts.
+   */
+  private scheduleRefresh(): void {
+    if (this.refreshTimer !== null) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.refreshViews();
+    }, 250);
+  }
+
+  /**
+   * Trigger an immediate view refresh — used right after connect so the
+   * renderer shows current state without waiting for a daemon event.
+   */
+  async refreshNow(): Promise<void> {
+    return this.refreshViews();
+  }
+
+  /** Pull current inbox state and push the rendered tree to the renderer. */
+  private async refreshViews(): Promise<void> {
+    const res = await this.sendCommand({ kind: 'query-inbox' });
+    if (res.ok && 'items' in res) {
+      const items = (res as { items: AttentionItemSnapshot[] }).items;
+      this.state.update({ inboxItems: items });
+      const view = new InboxViewModel().buildViewFromItems(items as AttentionItem[]);
+      this.bridge.sendToRenderer('inbox:update', renderInboxList(view));
     }
   }
 }
