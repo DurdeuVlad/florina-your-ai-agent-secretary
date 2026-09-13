@@ -1,6 +1,6 @@
 import * as net from 'node:net';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 
 import {
   DesktopApp,
