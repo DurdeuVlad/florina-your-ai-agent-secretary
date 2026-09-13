@@ -18,6 +18,7 @@ import {
   formatDigest,
   formatMetrics,
   formatStatus,
+  formatContextHealth,
   setColorEnabled,
 } from './formatters.js';
 import type { CliDependencies } from './deps.js';
@@ -42,6 +43,7 @@ import type {
   PruneResponse,
   ShutdownResponse,
   DigestResponse,
+  ContextHealthResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { TaskState } from '../../../core/domain/enums.js';
 import type {
@@ -268,7 +270,17 @@ async function cmdStop(ctx: CommandContext): Promise<CommandResult> {
 /* --- status --- */
 async function cmdStatus(ctx: CommandContext): Promise<CommandResult> {
   const status = await ctx.deps.runner.status();
-  return { exitCode: 0, message: formatStatus(status.running, status.port, status.pid) };
+  let message = formatStatus(status.running, status.port, status.pid);
+  // Surface per-agent context health when the daemon is reachable
+  // (DEC-035, issue #77) — a degrading context is a liveness-adjacent
+  // signal the human should see at a glance.
+  if (status.running) {
+    const response = await sendCommand(ctx.deps.client, { kind: 'context-health' });
+    if (response.ok) {
+      message += formatContextHealth((response as ContextHealthResponse).snapshots);
+    }
+  }
+  return { exitCode: 0, message };
 }
 
 /* --- inbox --- */
@@ -461,8 +473,7 @@ async function cmdVoice(ctx: CommandContext): Promise<CommandResult> {
   if (!apiKey || typeof apiKey !== 'string') {
     return {
       exitCode: 1,
-      message:
-        'Voice requires an OpenAI API key. Set OPENAI_API_KEY or pass --api-key <key>.\n',
+      message: 'Voice requires an OpenAI API key. Set OPENAI_API_KEY or pass --api-key <key>.\n',
     };
   }
 
@@ -553,7 +564,12 @@ function buildInboxFilter(
     typeof flags['status'] === 'string' ? (flags['status'] as AttentionItemStatus) : undefined;
   const kind = typeof flags['kind'] === 'string' ? (flags['kind'] as AttentionItemKind) : undefined;
   const taskId = typeof flags['task'] === 'string' ? flags['task'] : undefined;
-  if (priority === undefined && status === undefined && kind === undefined && taskId === undefined) {
+  if (
+    priority === undefined &&
+    status === undefined &&
+    kind === undefined &&
+    taskId === undefined
+  ) {
     return undefined;
   }
   return { priority, status, kind, taskId };
@@ -582,6 +598,7 @@ async function sendCommand(
   | PruneResponse
   | ShutdownResponse
   | DigestResponse
+  | ContextHealthResponse
   | { ok: false; error: string }
 > {
   try {
@@ -615,10 +632,7 @@ function messageOf(e: unknown): string {
  * with the concrete client, daemon runner, and voice session factory;
  * tests may inject fakes.
  */
-export async function runCli(
-  argv: readonly string[],
-  deps: CliDependencies,
-): Promise<number> {
+export async function runCli(argv: readonly string[], deps: CliDependencies): Promise<number> {
   // Handle --no-color and --help before anything else.
   if (argv.includes('--no-color')) {
     setColorEnabled(false);

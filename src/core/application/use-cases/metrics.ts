@@ -37,7 +37,15 @@ import type { EventSubscriberPort } from '../ports/outbound/event-stream.js';
  * value. The final `Infinity` bucket captures overflow.
  */
 export const DEFAULT_HISTOGRAM_BUCKETS: readonly number[] = [
-  100, 500, 1000, 5000, 10_000, 30_000, 60_000, 300_000, Infinity,
+  100,
+  500,
+  1000,
+  5000,
+  10_000,
+  30_000,
+  60_000,
+  300_000,
+  Infinity,
 ] as const;
 
 /**
@@ -154,6 +162,12 @@ export interface MetricsSnapshot {
     readonly approvalsDenied: number;
     /** Tool invocations observed, keyed by tool name. */
     readonly toolsInvoked: Readonly<Record<string, number>>;
+    /**
+     * `ContextHealthChanged` observations, keyed by status
+     * (DEC-035, issue #77) — a rising degraded/critical count tracks
+     * how often agents are running on exhausted context windows.
+     */
+    readonly contextHealthByStatus: Readonly<Record<string, number>>;
   };
   /** Current point-in-time gauges. */
   readonly gauges: {
@@ -231,6 +245,7 @@ export class MetricsCollector {
   private approvalsGranted = 0;
   private approvalsDenied = 0;
   private readonly toolsInvoked = new Map<string, number>();
+  private readonly contextHealthByStatus = new Map<string, number>();
 
   // --- Gauges ---------------------------------------------------------
   private activeSessions = 0;
@@ -323,6 +338,7 @@ export class MetricsCollector {
         approvalsGranted: this.approvalsGranted,
         approvalsDenied: this.approvalsDenied,
         toolsInvoked: { ...this.mapToRecord(this.toolsInvoked) },
+        contextHealthByStatus: { ...this.mapToRecord(this.contextHealthByStatus) },
       },
       gauges: {
         activeSessions: this.activeSessions,
@@ -342,6 +358,7 @@ export class MetricsCollector {
   reset(): void {
     this.eventsEmitted.clear();
     this.toolsInvoked.clear();
+    this.contextHealthByStatus.clear();
     this.tasksStarted = 0;
     this.tasksCompleted = 0;
     this.tasksFailed = 0;
@@ -414,6 +431,10 @@ export class MetricsCollector {
 
       case 'ToolFinished':
         this.recordToolDuration(event.sessionId, event.toolName, ts);
+        break;
+
+      case 'ContextHealthChanged':
+        this.incrementMap(this.contextHealthByStatus, event.status);
         break;
 
       default:

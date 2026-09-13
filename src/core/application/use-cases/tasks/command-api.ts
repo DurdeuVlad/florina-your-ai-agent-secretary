@@ -55,6 +55,7 @@ import type {
 import { DirtyWorktreeError, type WorktreePort } from '../../ports/outbound/worktree.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
+import type { ContextHealthSnapshot } from '../context/context-health-monitor.js';
 import type {
   AttentionMetricsReport,
   MetricsQueryOptions,
@@ -238,6 +239,18 @@ export interface ShutdownCommand {
   readonly kind: 'shutdown';
 }
 
+/**
+ * Query per-agent context health (DEC-035, issue #77).
+ *
+ * When `agentId` is present the response contains at most that agent's
+ * snapshot; otherwise every tracked agent is returned. Powers
+ * `secretary status` and the desktop fleet view.
+ */
+export interface QueryContextHealthCommand {
+  readonly kind: 'context-health';
+  readonly agentId?: string;
+}
+
 /** Query the latest completion digest for a task (issue #37). */
 export interface GetDigestCommand {
   readonly kind: 'get-digest';
@@ -281,6 +294,7 @@ export type Command =
   | ListTasksCommand
   | PruneWorktreeCommand
   | ShutdownCommand
+  | QueryContextHealthCommand
   | GetDigestCommand
   | CreatePrCommand;
 
@@ -299,6 +313,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'list-tasks',
   'prune-worktree',
   'shutdown',
+  'context-health',
   'get-digest',
   'create-pr',
 ] as const;
@@ -393,6 +408,12 @@ export interface CreatePrResponse {
   readonly error?: string;
 }
 
+/** Response to `context-health` — per-agent health snapshots (issue #77). */
+export interface ContextHealthResponse {
+  readonly ok: boolean;
+  readonly snapshots: readonly ContextHealthSnapshot[];
+}
+
 /** Generic error response for unknown / malformed commands. */
 export interface UnknownCommandResponse {
   readonly ok: false;
@@ -418,11 +439,22 @@ export type Response =
   | ShutdownResponse
   | DigestResponse
   | CreatePrResponse
+  | ContextHealthResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
  * Dependency interfaces (structural â€” easy to mock in tests)
  * ================================================================== */
+
+/**
+ * Read-side projection of the context-health monitor (DEC-035, issue
+ * #77). The command API only reads snapshots — tracking and emission
+ * stay inside the monitor.
+ */
+export interface ContextHealthReadPort {
+  snapshot(agentId: string): ContextHealthSnapshot | undefined;
+  listSnapshots(): ContextHealthSnapshot[];
+}
 
 /**
  * Minimal task data-access interface needed by {@link CommandApi}.
@@ -493,6 +525,12 @@ export interface CommandApiDeps {
    * `attentionMetrics` on the {@link MetricsResponse}.
    */
   readonly metricsQueryService?: MetricsQueryService;
+  /**
+   * Read-side of the context-health monitor (DEC-035, issue #77). When
+   * wired, `context-health` commands return per-agent window-fill
+   * snapshots; when absent the command returns an empty list.
+   */
+  readonly contextHealth?: ContextHealthReadPort;
 }
 
 /* ================================================================== *
@@ -533,6 +571,7 @@ export class CommandApi {
   private readonly sessionManager?: SessionManager;
   private readonly completionDigestRepository?: CompletionDigestRepositoryPort<CompletionDigest>;
   private readonly metricsQueryService?: MetricsQueryService;
+  private readonly contextHealth?: ContextHealthReadPort;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -552,6 +591,7 @@ export class CommandApi {
     this.sessionManager = deps.sessionManager;
     this.completionDigestRepository = deps.completionDigestRepository;
     this.metricsQueryService = deps.metricsQueryService;
+    this.contextHealth = deps.contextHealth;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -594,6 +634,8 @@ export class CommandApi {
         return this.handlePruneWorktree(command);
       case 'shutdown':
         return this.handleShutdown(command);
+      case 'context-health':
+        return this.handleContextHealth(command);
       case 'get-digest':
         return this.handleGetDigest(command);
       case 'create-pr':
@@ -1132,6 +1174,25 @@ export class CommandApi {
     return { ok: true };
   }
 
+  /**
+   * context-health: per-agent window-fill snapshots (DEC-035, issue #77).
+   *
+   * When no monitor is wired the response is an empty list — the command
+   * itself is still well-formed so `secretary status` degrades cleanly.
+   */
+  private async handleContextHealth(
+    cmd: QueryContextHealthCommand,
+  ): Promise<ContextHealthResponse> {
+    if (this.contextHealth === undefined) {
+      return { ok: true, snapshots: [] };
+    }
+    if (cmd.agentId !== undefined) {
+      const snapshot = this.contextHealth.snapshot(cmd.agentId);
+      return { ok: true, snapshots: snapshot === undefined ? [] : [snapshot] };
+    }
+    return { ok: true, snapshots: this.contextHealth.listSnapshots() };
+  }
+
   /** get-digest: return the latest completion digest for a task (issue #37). */
   private async handleGetDigest(cmd: GetDigestCommand): Promise<DigestResponse> {
     if (!cmd.taskId) {
@@ -1290,11 +1351,13 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                         ? PruneResponse
                         : C extends ShutdownCommand
                           ? ShutdownResponse
-                          : C extends GetDigestCommand
-                            ? DigestResponse
-                            : C extends CreatePrCommand
-                              ? CreatePrResponse
-                              : Response;
+                          : C extends QueryContextHealthCommand
+                            ? ContextHealthResponse
+                            : C extends GetDigestCommand
+                              ? DigestResponse
+                              : C extends CreatePrCommand
+                                ? CreatePrResponse
+                                : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the
