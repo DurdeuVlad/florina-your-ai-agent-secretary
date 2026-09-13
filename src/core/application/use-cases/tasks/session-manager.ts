@@ -23,10 +23,7 @@
  *   and surfaced as error results rather than thrown, so a failing adapter
  *   never crashes the daemon.
  */
-import type {
-  AgentRuntimePort,
-  SessionConfig,
-} from '../../ports/outbound/agent-runtime.js';
+import type { AgentRuntimePort, SessionConfig } from '../../ports/outbound/agent-runtime.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
 
 /**
@@ -58,17 +55,32 @@ export interface StopSessionResult {
   readonly error?: string;
 }
 
+/** Options for {@link SessionManager}. */
+export interface SessionManagerOptions {
+  /**
+   * Called once when a session ends — via `stopSession` (freeze/stop) or
+   * when the adapter's event stream finishes/errors (natural end). The
+   * daemon uses this to roll the session's journal events into the Task
+   * Capsule (issue #76) before any failover briefing reads it (#64).
+   * Awaited on the `stopSession` path so callers see a settled capsule;
+   * fire-and-forget on the stream-end path.
+   */
+  readonly onSessionEnd?: (taskId: string, sessionId: string) => void | Promise<void>;
+}
+
 /**
  * Manages active agent sessions: connects adapters, starts runs, pipes
  * adapter events to the {@link EventPublisherPort}, and tears sessions down on stop.
  */
 export class SessionManager {
   private readonly bus: EventPublisherPort;
+  private readonly onSessionEnd?: (taskId: string, sessionId: string) => void | Promise<void>;
   /** Map of taskId → active session info (one session per task in MVP). */
   private readonly sessions = new Map<string, SessionInfo>();
 
-  constructor(bus: EventPublisherPort) {
+  constructor(bus: EventPublisherPort, options: SessionManagerOptions = {}) {
     this.bus = bus;
+    this.onSessionEnd = options.onSessionEnd;
   }
 
   /**
@@ -147,6 +159,13 @@ export class SessionManager {
       /* best-effort cancel; proceed to disconnect regardless */
     }
     await safeDisconnect(info.adapter);
+    if (this.onSessionEnd !== undefined) {
+      try {
+        await this.onSessionEnd(taskId, info.sessionId);
+      } catch {
+        /* rollup failures must not fail the stop — the journal is intact */
+      }
+    }
     return { ok: true };
   }
 
@@ -222,6 +241,13 @@ export class SessionManager {
       if (this.sessions.has(info.taskId)) {
         this.sessions.delete(info.taskId);
         await safeDisconnect(info.adapter);
+        if (this.onSessionEnd !== undefined) {
+          try {
+            await this.onSessionEnd(info.taskId, info.sessionId);
+          } catch {
+            /* best-effort rollup — the journal remains the source of truth */
+          }
+        }
       }
     })();
   }

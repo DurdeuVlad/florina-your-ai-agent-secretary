@@ -61,6 +61,7 @@ import type { HealthStatus } from '../core/application/use-cases/health.js';
 import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
 import { CapacityRouter } from '../core/application/use-cases/routing/capacity-router.js';
 import { FailoverService } from '../core/application/use-cases/tasks/failover.js';
+import { CapsuleRollupService } from '../core/application/use-cases/context/capsule-rollup.js';
 import { PreferenceProfileStore } from '../adapters/outbound/preferences/json-preference-profile.js';
 import { SecretaryMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
 import { managerServiceFactory } from './mcp-server.js';
@@ -149,6 +150,7 @@ export class SecretaryDaemon extends EventEmitter {
   private quotaLedger: QuotaLedger | null = null;
   private preferenceStore: PreferenceProfileStore | null = null;
   private failoverService: FailoverService | null = null;
+  private capsuleRollup: CapsuleRollupService | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -218,6 +220,14 @@ export class SecretaryDaemon extends EventEmitter {
   }
 
   /**
+   * The wired capsule rollup service (issue #76). Also usable directly for
+   * periodic mid-session rollups of long-running tasks.
+   */
+  get rollup(): CapsuleRollupService | null {
+    return this.capsuleRollup;
+  }
+
+  /**
    * The `http://` URL managers register with their provider CLIs to reach
    * the Secretary MCP tool surface, or `null` when the MCP server is
    * disabled or not yet started (DEC-018, issue #63).
@@ -275,7 +285,24 @@ export class SecretaryDaemon extends EventEmitter {
       // The stub factory creates adapters WITHOUT a direct bus reference so
       // the SessionManager is the sole event publisher (no duplicates).
       this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter());
-      this.sessionManager = new SessionManager(this.bus);
+
+      // Wire the capsule rollup pipeline (issue #76): when a session ends —
+      // by stop/freeze or natural stream completion — its journal events are
+      // folded into the Task Capsule's rolledUpEventSummaries. The hook is
+      // awaited on the stop path so a failover briefing reads a settled
+      // capsule (#64 synergy).
+      this.capsuleRollup = new CapsuleRollupService({
+        journal: repos.events,
+        capsuleStore: repos.capsules,
+        sessionStore: repos.sessions,
+        eventBus: this.bus,
+      });
+      const rollup = this.capsuleRollup;
+      this.sessionManager = new SessionManager(this.bus, {
+        onSessionEnd: async (taskId, sessionId) => {
+          await rollup.rollUpSession(taskId, sessionId);
+        },
+      });
 
       this.commandApi = new CommandApi({
         eventBus: this.bus,
@@ -559,6 +586,7 @@ export class SecretaryDaemon extends EventEmitter {
     this.quotaLedger = null;
     this.preferenceStore = null;
     this.failoverService = null;
+    this.capsuleRollup = null;
   }
 
   private setState(state: DaemonState): void {
