@@ -276,6 +276,7 @@ describe('IpcBridge', () => {
       'metrics:update',
       'voice:state',
       'daemon:status',
+      'hud:state',
       'command',
       'command:result',
     ]);

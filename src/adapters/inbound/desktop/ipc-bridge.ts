@@ -26,6 +26,7 @@ export const IPC_CHANNELS = [
   'metrics:update',
   'voice:state',
   'daemon:status',
+  'hud:state',
   'command',
   'command:result',
 ] as const;

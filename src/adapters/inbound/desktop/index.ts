@@ -10,6 +10,8 @@
  */
 export { DesktopApp, DesktopConnectionError } from './desktop-app.js';
 export type { DesktopAppOptions } from './desktop-app.js';
+export { HudController } from './hud-controller.js';
+export type { HudControllerOptions } from './hud-controller.js';
 
 export { IpcBridge, IpcError, IPC_CHANNELS, MockIpcTransport } from './ipc-bridge.js';
 export type { IpcChannel, IpcMessageHandler, IpcTransport } from './ipc-bridge.js';

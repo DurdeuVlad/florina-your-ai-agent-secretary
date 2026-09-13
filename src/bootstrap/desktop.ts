@@ -20,6 +20,7 @@ const require = createRequire(import.meta.url);
 const { app } = require('electron') as typeof import('electron');
 
 import { DesktopApp } from '../adapters/inbound/desktop/desktop-app.js';
+import { HudController } from '../adapters/inbound/desktop/hud-controller.js';
 import { ElectronWindowBackend } from '../adapters/inbound/desktop/electron/window-backend.js';
 import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-transport.js';
 import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-backend.js';
@@ -41,6 +42,11 @@ const RENDERER_HTML = fileURLToPath(
 /** CJS preload exposing the whitelisted `window.florina` bridge API. */
 const PRELOAD = fileURLToPath(
   new URL('../../src/adapters/inbound/desktop/renderer/preload.cjs', import.meta.url),
+);
+
+/** Absolute path to the PTT HUD overlay page (issue #123). */
+const HUD_HTML = fileURLToPath(
+  new URL('../../src/adapters/inbound/desktop/renderer/hud.html', import.meta.url),
 );
 
 /** Repo root — used to resolve the CLI entry for tray daemon actions. */
@@ -88,11 +94,29 @@ async function main(): Promise<void> {
     },
   });
 
+  // PTT HUD overlay (issue #123): a second, frameless always-on-top window
+  // driven by app state changes — daemon status maps to the offline state,
+  // the mirrored voice session to listening/processing/responding.
+  const hudWindow = new ElectronWindowBackend(PRELOAD);
+  const hudIpc = new ElectronIpcTransport();
+  const hud = new HudController({
+    window: hudWindow,
+    ipc: hudIpc,
+    hudHtmlPath: HUD_HTML,
+    hotkeyHint: 'Hold Space to talk',
+  });
+  desktopApp.onStateChange((s) => hud.applyRendererState(s));
+
   desktopApp.start();
   if (window.contents !== null) {
     ipc.attachContents(window.contents);
   }
   window.loadFile(RENDERER_HTML);
+
+  hud.start();
+  if (hudWindow.contents !== null) {
+    hudIpc.attachContents(hudWindow.contents);
+  }
 
   // Renderer → daemon commands (approve, preferences, …) route through the
   // main process socket so the sandboxed page never holds a connection.
@@ -107,6 +131,7 @@ async function main(): Promise<void> {
   }
 
   app.on('window-all-closed', () => {
+    hud.stop();
     void desktopApp.stop().finally(() => app.quit());
   });
   app.on('activate', () => {
