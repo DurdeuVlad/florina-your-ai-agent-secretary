@@ -18,11 +18,7 @@
  */
 import type { RiskHighlight } from '../../../../core/application/use-cases/attention/completion-digest.js';
 import type { ChangedFileStatus } from '../../../../core/application/use-cases/attention/diff-digest.js';
-import type {
-  DiffViewData,
-  DigestViewData,
-  FileChangeView,
-} from './digest-types.js';
+import type { DiffViewData, DigestViewData, FileChangeView } from './digest-types.js';
 
 /* ------------------------------------------------------------------ *
  * Field provenance

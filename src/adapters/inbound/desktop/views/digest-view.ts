@@ -17,7 +17,10 @@
  * effects. This keeps the digest view logic fully testable with vitest and
  * identical across rendering surfaces (desktop webview, TUI, CLI).
  */
-import type { CompletionDigest, RiskHighlight } from '../../../../core/application/use-cases/attention/completion-digest.js';
+import type {
+  CompletionDigest,
+  RiskHighlight,
+} from '../../../../core/application/use-cases/attention/completion-digest.js';
 import type {
   ApprovalStatsView,
   DigestViewData,

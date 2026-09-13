@@ -83,14 +83,10 @@ export function renderDigestDiffViewer(
 ): RenderTree {
   const children: (RenderTree | string)[] = [
     renderViewerToolbar(data),
-    el(
-      'SplitPane',
-      { layout: 'row', gap: 'md', split: '50/50', resizable: true },
-      [
-        renderDigestPane(data),
-        renderDiffPane(data, page ?? null),
-      ],
-    ),
+    el('SplitPane', { layout: 'row', gap: 'md', split: '50/50', resizable: true }, [
+      renderDigestPane(data),
+      renderDiffPane(data, page ?? null),
+    ]),
   ];
   return el('DigestDiffViewer', { taskId: data.taskId, spacing: 'md' }, children);
 }
@@ -155,12 +151,7 @@ function renderDigestPane(data: DigestDiffViewerData): RenderTree {
   const fields: RenderTree[] = [
     renderDigestField('header', 'Task', 'observed', renderDigestHeader(view)),
     renderDigestField('summary', 'Summary', 'inferred', renderDigestSummary(view)),
-    renderDigestField(
-      'testResults',
-      'Tests',
-      'observed',
-      renderTestResults(view.testResults),
-    ),
+    renderDigestField('testResults', 'Tests', 'observed', renderTestResults(view.testResults)),
     renderDigestField(
       'approvalStats',
       'Approvals',
@@ -173,24 +164,14 @@ function renderDigestPane(data: DigestDiffViewerData): RenderTree {
       'inferred',
       renderRiskHotspots(data.riskHotspots),
     ),
-    renderDigestField(
-      'decisions',
-      'Decisions',
-      'observed',
-      renderDecisions(view.decisions),
-    ),
+    renderDigestField('decisions', 'Decisions', 'observed', renderDecisions(view.decisions)),
     renderDigestField(
       'filesChanged',
       'Files changed',
       'observed',
       renderChangedFilesList(view.filesChanged),
     ),
-    renderDigestField(
-      'commitInfo',
-      'Commit',
-      'observed',
-      renderCommitInfo(view),
-    ),
+    renderDigestField('commitInfo', 'Commit', 'observed', renderCommitInfo(view)),
   ];
   return el('DigestPane', { side: 'left', scrollable: true, spacing: 'md' }, fields);
 }
@@ -222,9 +203,7 @@ function renderDigestField(
     el('FieldLabel', { weight: 'semibold', color: 'muted' }, [text(label)]),
   ];
   if (provenance === 'inferred') {
-    children.push(
-      el('InferredTag', { color: 'amber', icon: 'sparkles' }, [text('inferred')]),
-    );
+    children.push(el('InferredTag', { color: 'amber', icon: 'sparkles' }, [text('inferred')]));
   }
   children.push(content);
   return el('DigestField', props, children);
@@ -280,9 +259,7 @@ function renderRiskHotspots(hotspots: readonly RiskHotspotView[]): RenderTree {
 /**
  * Render Decision Ledger references as a labeled list.
  */
-function renderDecisions(
-  decisions: readonly { id: string; note: string }[],
-): RenderTree {
+function renderDecisions(decisions: readonly { id: string; note: string }[]): RenderTree {
   if (decisions.length === 0) {
     return el('Decisions', { layout: 'column', gap: 'xs', empty: true }, [
       el('EmptyHint', { color: 'slate' }, [text('No decision references.')]),
@@ -313,9 +290,7 @@ function renderChangedFilesList(paths: readonly string[]): RenderTree {
     'ChangedFiles',
     { layout: 'column', gap: 'xs', count: paths.length },
     paths.map((p) =>
-      el('FilePath', { selectable: true, icon: 'file', command: `drill-file:${p}` }, [
-        text(p),
-      ]),
+      el('FilePath', { selectable: true, icon: 'file', command: `drill-file:${p}` }, [text(p)]),
     ),
   );
 }
@@ -347,22 +322,14 @@ function renderCommitInfo(view: DigestViewData): RenderTree {
  * page (grouped by status), and pagination controls. Only the current
  * page's file rows are included so the DOM stays small for large diffs.
  */
-function renderDiffPane(
-  data: DigestDiffViewerData,
-  page: DiffPageView | null,
-): RenderTree {
+function renderDiffPane(data: DigestDiffViewerData, page: DiffPageView | null): RenderTree {
   if (!data.hasDiff || data.diff === null) {
     return el('DiffPane', { side: 'right', scrollable: true, empty: true }, [
-      el('EmptyDiff', { color: 'slate', icon: 'diff' }, [
-        text('No diff available for this task.'),
-      ]),
+      el('EmptyDiff', { color: 'slate', icon: 'diff' }, [text('No diff available for this task.')]),
     ]);
   }
   const diff = data.diff;
-  const children: (RenderTree | string)[] = [
-    renderDiffHeader(diff),
-    renderDiffStats(diff.stats),
-  ];
+  const children: (RenderTree | string)[] = [renderDiffHeader(diff), renderDiffStats(diff.stats)];
   if (page !== null) {
     for (const group of page.fileGroups) {
       children.push(renderFileGroup(group.status, group.files));
@@ -411,24 +378,17 @@ function renderDiffHeader(diff: DigestDiffViewerData['diff']): RenderTree {
 /**
  * Render a file group (a status section) with its file rows.
  */
-function renderFileGroup(
-  status: string,
-  files: readonly FileChangeView[],
-): RenderTree {
-  return el(
-    'FileGroup',
-    { status, layout: 'column', gap: 'xs', count: files.length },
-    [
-      el('FileGroupLabel', { weight: 'semibold', color: statusColorFor(status) }, [
-        text(`${status} (${files.length})`),
-      ]),
-      el(
-        'FileList',
-        { layout: 'column', gap: 'xs', count: files.length },
-        files.map((f) => renderFileRow(f)),
-      ),
-    ],
-  );
+function renderFileGroup(status: string, files: readonly FileChangeView[]): RenderTree {
+  return el('FileGroup', { status, layout: 'column', gap: 'xs', count: files.length }, [
+    el('FileGroupLabel', { weight: 'semibold', color: statusColorFor(status) }, [
+      text(`${status} (${files.length})`),
+    ]),
+    el(
+      'FileList',
+      { layout: 'column', gap: 'xs', count: files.length },
+      files.map((f) => renderFileRow(f)),
+    ),
+  ]);
 }
 
 /**
@@ -444,9 +404,7 @@ function renderFileRow(file: FileChangeView): RenderTree {
     ]),
   ];
   if (file.renamedFrom) {
-    children.push(
-      el('RenamedFrom', { color: 'muted' }, [text(`(from ${file.renamedFrom})`)]),
-    );
+    children.push(el('RenamedFrom', { color: 'muted' }, [text(`(from ${file.renamedFrom})`)]));
   }
   if (file.isBinary) {
     children.push(el('BinaryTag', { color: 'slate' }, [text('binary')]));
@@ -458,9 +416,7 @@ function renderFileRow(file: FileChangeView): RenderTree {
   }
   if (file.isLargeChange) {
     children.push(
-      el('LargeChangeFlag', { color: 'orange', icon: 'alert' }, [
-        text('large change'),
-      ]),
+      el('LargeChangeFlag', { color: 'orange', icon: 'alert' }, [text('large change')]),
     );
   }
   return el(
@@ -481,27 +437,21 @@ function renderFileRow(file: FileChangeView): RenderTree {
 /**
  * Render a callout highlighting large changes (>100 lines).
  */
-function renderLargeChangesCallout(
-  largeChanges: readonly FileChangeView[],
-): RenderTree {
-  return el(
-    'LargeChangesCallout',
-    { color: 'orange', icon: 'alert', count: largeChanges.length },
-    [
-      el('CalloutTitle', { weight: 'semibold' }, [
-        text(`${largeChanges.length} large change(s) (>100 lines)`),
-      ]),
-      el(
-        'CalloutFiles',
-        { layout: 'column', gap: 'xs' },
-        largeChanges.map((f) =>
-          el('CalloutFile', { path: f.path, command: `drill-file:${f.path}` }, [
-            text(`${f.path} (+${f.additions}/-${f.deletions})`),
-          ]),
-        ),
+function renderLargeChangesCallout(largeChanges: readonly FileChangeView[]): RenderTree {
+  return el('LargeChangesCallout', { color: 'orange', icon: 'alert', count: largeChanges.length }, [
+    el('CalloutTitle', { weight: 'semibold' }, [
+      text(`${largeChanges.length} large change(s) (>100 lines)`),
+    ]),
+    el(
+      'CalloutFiles',
+      { layout: 'column', gap: 'xs' },
+      largeChanges.map((f) =>
+        el('CalloutFile', { path: f.path, command: `drill-file:${f.path}` }, [
+          text(`${f.path} (+${f.additions}/-${f.deletions})`),
+        ]),
       ),
-    ],
-  );
+    ),
+  ]);
 }
 
 /**
@@ -595,8 +545,7 @@ function groupFilesByStatus(
   files: readonly FileChangeView[],
 ): { status: string; files: readonly FileChangeView[]; count: number }[] {
   const order = ['added', 'modified', 'deleted', 'renamed'];
-  const groups: { status: string; files: readonly FileChangeView[]; count: number }[] =
-    [];
+  const groups: { status: string; files: readonly FileChangeView[]; count: number }[] = [];
   for (const status of order) {
     const bucket = files.filter((f) => f.status === status);
     if (bucket.length > 0) {

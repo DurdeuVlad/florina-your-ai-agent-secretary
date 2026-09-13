@@ -84,11 +84,9 @@ export function renderApprovalCard(card: ApprovalCardData): RenderTree {
  */
 export function renderRiskBadge(riskLevel: CapabilityRiskLevel): RenderTree {
   const color = riskColorFor(riskLevel);
-  return el(
-    'RiskBadge',
-    { riskLevel, color, icon: riskIconFor(riskLevel), weight: 'bold' },
-    [text(RISK_LABELS[riskLevel])],
-  );
+  return el('RiskBadge', { riskLevel, color, icon: riskIconFor(riskLevel), weight: 'bold' }, [
+    text(RISK_LABELS[riskLevel]),
+  ]);
 }
 
 /**
@@ -111,10 +109,7 @@ export function renderCapabilityDetails(card: ApprovalCardData): RenderTree {
   // Scope rows.
   if (card.scope.length > 0) {
     const scopeText = card.scope
-      .map(
-        (s) =>
-          `${s.type}(${s.targets.length > 0 ? s.targets.join(', ') : 'any'})`,
-      )
+      .map((s) => `${s.type}(${s.targets.length > 0 ? s.targets.join(', ') : 'any'})`)
       .join('; ');
     rows.push(detailRow('Scope', scopeText));
   } else {
@@ -151,12 +146,8 @@ export function renderApprovalActions(card: ApprovalCardData): RenderTree {
       },
       [text(card.oneClickAllowed ? 'Allow once' : 'Confirm visually')],
     ),
-    el('Button', { command: denyCommand, variant: 'danger', size: 'sm' }, [
-      text('Deny'),
-    ]),
-    el('Button', { command: inspectCommand, variant: 'ghost', size: 'sm' }, [
-      text('Inspect'),
-    ]),
+    el('Button', { command: denyCommand, variant: 'danger', size: 'sm' }, [text('Deny')]),
+    el('Button', { command: inspectCommand, variant: 'ghost', size: 'sm' }, [text('Inspect')]),
   ]);
 }
 
@@ -177,9 +168,7 @@ export function renderRiskFactors(factors: readonly string[]): RenderTree {
   return el(
     'RiskFactors',
     { layout: 'column', gap: 'xs', variant: 'deterministic' },
-    factors.map((factor) =>
-      el('RiskFactor', { icon: 'dot', color: 'muted' }, [text(factor)]),
-    ),
+    factors.map((factor) => el('RiskFactor', { icon: 'dot', color: 'muted' }, [text(factor)])),
   );
 }
 
@@ -189,11 +178,9 @@ export function renderRiskFactors(factors: readonly string[]): RenderTree {
 
 /** Render the human-readable summary line (supplemental, DEC-010). */
 function renderSummary(card: ApprovalCardData): RenderTree {
-  return el(
-    'ApprovalSummary',
-    { weight: 'semibold', variant: 'supplemental' },
-    [text(card.summary)],
-  );
+  return el('ApprovalSummary', { weight: 'semibold', variant: 'supplemental' }, [
+    text(card.summary),
+  ]);
 }
 
 /** Render the recommended action hint. */

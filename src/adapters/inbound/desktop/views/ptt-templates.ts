@@ -190,11 +190,7 @@ export function renderVoiceModeIndicator(mode: VoicePipelineMode): RenderTree {
  * @returns A serializable RenderTree for the hint line.
  */
 export function renderHotkeyHint(hint: string): RenderTree {
-  return el(
-    'HotkeyHint',
-    { color: 'muted', size: 'xs', align: 'center' },
-    [text(hint)],
-  );
+  return el('HotkeyHint', { color: 'muted', size: 'xs', align: 'center' }, [text(hint)]);
 }
 
 /* ------------------------------------------------------------------ *
@@ -207,11 +203,7 @@ export function renderHotkeyHint(hint: string): RenderTree {
  * is rendered inline by {@link renderPttHud}.
  */
 export function renderResponsePreview(text: string): RenderTree {
-  return el(
-    'ResponsePreview',
-    { color: 'blue', truncate: true, selectable: true },
-    [text],
-  );
+  return el('ResponsePreview', { color: 'blue', truncate: true, selectable: true }, [text]);
 }
 
 /** Determine the active-state label for a HUD state (for color coding). */

@@ -170,10 +170,7 @@ export class ApprovalCardViewModel {
    * Resolve contextual metadata, falling back to fields on the request when
    * the explicit context is omitted or partial.
    */
-  private resolveContext(
-    request: CapabilityRequest,
-    context?: ApprovalContext,
-  ): ApprovalContext {
+  private resolveContext(request: CapabilityRequest, context?: ApprovalContext): ApprovalContext {
     return {
       agentName: context?.agentName ?? request.agent,
       taskName: context?.taskName ?? request.task,
@@ -200,9 +197,7 @@ function deriveRiskFactors(request: CapabilityRequest): string[] {
 
   // Higher-authority capability factor.
   if (HIGHER_AUTHORITY_CAPABILITIES.has(request.capability)) {
-    factors.push(
-      `${CAPABILITY_LABELS[request.capability]} requires higher authority (DEC-011)`,
-    );
+    factors.push(`${CAPABILITY_LABELS[request.capability]} requires higher authority (DEC-011)`);
   }
 
   // Capability-specific factors.
@@ -249,10 +244,7 @@ function deriveRiskFactors(request: CapabilityRequest): string[] {
 
   // Scope factor.
   if (request.scope.length > 0) {
-    const targetCount = request.scope.reduce(
-      (sum, s) => sum + s.targets.length,
-      0,
-    );
+    const targetCount = request.scope.reduce((sum, s) => sum + s.targets.length, 0);
     if (targetCount > 0) {
       factors.push(`Scope covers ${targetCount} target${targetCount === 1 ? '' : 's'}`);
     }

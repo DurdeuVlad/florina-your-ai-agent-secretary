@@ -102,11 +102,7 @@ function renderDigestHeader(view: DigestViewData): RenderTree {
  * @returns A serializable RenderTree for the summary section.
  */
 export function renderDigestSummary(view: DigestViewData): RenderTree {
-  return el(
-    'DigestSummary',
-    { weight: 'semibold', variant: 'executive' },
-    [text(view.summary)],
-  );
+  return el('DigestSummary', { weight: 'semibold', variant: 'executive' }, [text(view.summary)]);
 }
 
 /**
@@ -131,9 +127,7 @@ export function renderTestResults(results: TestResultsView): RenderTree {
     },
     [
       el('Icon', { name: testIcon(results), color: results.passColor }, []),
-      el('TestSummary', { color: results.passColor, weight: 'medium' }, [
-        text(results.summary),
-      ]),
+      el('TestSummary', { color: results.passColor, weight: 'medium' }, [text(results.summary)]),
     ],
   );
 }
@@ -146,29 +140,21 @@ export function renderTestResults(results: TestResultsView): RenderTree {
  */
 export function renderApprovalStats(stats: ApprovalStatsView): RenderTree {
   const chips: RenderTree[] = [
-    el('ApprovalChip', { kind: 'granted', color: 'green' }, [
-      text(`${stats.granted} granted`),
-    ]),
+    el('ApprovalChip', { kind: 'granted', color: 'green' }, [text(`${stats.granted} granted`)]),
   ];
   if (stats.denied > 0) {
     chips.push(
-      el('ApprovalChip', { kind: 'denied', color: 'red' }, [
-        text(`${stats.denied} denied`),
-      ]),
+      el('ApprovalChip', { kind: 'denied', color: 'red' }, [text(`${stats.denied} denied`)]),
     );
   }
   if (stats.pending > 0) {
     chips.push(
-      el('ApprovalChip', { kind: 'pending', color: 'amber' }, [
-        text(`${stats.pending} pending`),
-      ]),
+      el('ApprovalChip', { kind: 'pending', color: 'amber' }, [text(`${stats.pending} pending`)]),
     );
   }
   if (stats.requested === 0) {
     chips.push(
-      el('ApprovalChip', { kind: 'none', color: 'slate' }, [
-        text('No approvals requested'),
-      ]),
+      el('ApprovalChip', { kind: 'none', color: 'slate' }, [text('No approvals requested')]),
     );
   }
   return el('ApprovalStats', { layout: 'row', gap: 'sm', wrap: true }, chips);
@@ -184,9 +170,7 @@ export function renderApprovalStats(stats: ApprovalStatsView): RenderTree {
  * @param highlights - The display-ready risk highlights.
  * @returns A serializable RenderTree for the risk highlights section.
  */
-export function renderRiskHighlights(
-  highlights: readonly RiskHighlightView[],
-): RenderTree {
+export function renderRiskHighlights(highlights: readonly RiskHighlightView[]): RenderTree {
   return el(
     'RiskHighlights',
     { layout: 'column', gap: 'xs' },
@@ -208,9 +192,7 @@ export function renderRiskHighlights(
 /**
  * Render Decision Ledger references as a labeled list.
  */
-function renderDecisions(
-  decisions: readonly { id: string; note: string }[],
-): RenderTree {
+function renderDecisions(decisions: readonly { id: string; note: string }[]): RenderTree {
   return el(
     'Decisions',
     { layout: 'column', gap: 'xs', variant: 'deterministic' },
@@ -230,9 +212,7 @@ function renderChangedFilesList(paths: readonly string[]): RenderTree {
   return el(
     'ChangedFiles',
     { layout: 'column', gap: 'xs', count: paths.length },
-    paths.map((p) =>
-      el('FilePath', { selectable: true, icon: 'file' }, [text(p)]),
-    ),
+    paths.map((p) => el('FilePath', { selectable: true, icon: 'file' }, [text(p)])),
   );
 }
 
@@ -241,21 +221,15 @@ function renderChangedFilesList(paths: readonly string[]): RenderTree {
  */
 function renderDigestActions(view: DigestViewData): RenderTree {
   return el('DigestActions', { layout: 'row', gap: 'sm' }, [
-    el(
-      'Button',
-      { command: `open-diff:${view.taskId}`, variant: 'ghost', size: 'sm' },
-      [text('Open diff')],
-    ),
-    el(
-      'Button',
-      { command: `create-pr:${view.taskId}`, variant: 'primary', size: 'sm' },
-      [text('Create PR')],
-    ),
-    el(
-      'Button',
-      { command: `accept:${view.taskId}`, variant: 'ghost', size: 'sm' },
-      [text('Accept')],
-    ),
+    el('Button', { command: `open-diff:${view.taskId}`, variant: 'ghost', size: 'sm' }, [
+      text('Open diff'),
+    ]),
+    el('Button', { command: `create-pr:${view.taskId}`, variant: 'primary', size: 'sm' }, [
+      text('Create PR'),
+    ]),
+    el('Button', { command: `accept:${view.taskId}`, variant: 'ghost', size: 'sm' }, [
+      text('Accept'),
+    ]),
   ]);
 }
 
@@ -274,17 +248,18 @@ function renderDigestActions(view: DigestViewData): RenderTree {
  * @returns A serializable RenderTree describing the diff view.
  */
 export function renderDiffView(view: DiffViewData): RenderTree {
-  const children: (RenderTree | string)[] = [
-    renderDiffHeader(view),
-    renderDiffStats(view.stats),
-  ];
+  const children: (RenderTree | string)[] = [renderDiffHeader(view), renderDiffStats(view.stats)];
   for (const group of view.fileGroups) {
     children.push(renderFileList(group.files));
   }
   if (view.hasLargeChanges) {
     children.push(renderLargeChangesCallout(view.largeChanges));
   }
-  return el('DiffView', { branch: view.branch, headCommit: view.headCommit, spacing: 'md' }, children);
+  return el(
+    'DiffView',
+    { branch: view.branch, headCommit: view.headCommit, spacing: 'md' },
+    children,
+  );
 }
 
 /**
@@ -328,9 +303,7 @@ function renderFileRow(file: FileChangeView): RenderTree {
     el('FilePath', { selectable: true, icon: 'file' }, [text(file.path)]),
   ];
   if (file.renamedFrom) {
-    children.push(
-      el('RenamedFrom', { color: 'muted' }, [text(`(from ${file.renamedFrom})`)]),
-    );
+    children.push(el('RenamedFrom', { color: 'muted' }, [text(`(from ${file.renamedFrom})`)]));
   }
   if (file.isBinary) {
     children.push(el('BinaryTag', { color: 'slate' }, [text('binary')]));
@@ -342,9 +315,7 @@ function renderFileRow(file: FileChangeView): RenderTree {
   }
   if (file.isLargeChange) {
     children.push(
-      el('LargeChangeFlag', { color: 'orange', icon: 'alert' }, [
-        text('large change'),
-      ]),
+      el('LargeChangeFlag', { color: 'orange', icon: 'alert' }, [text('large change')]),
     );
   }
   return el(
@@ -374,48 +345,32 @@ function renderFileRow(file: FileChangeView): RenderTree {
 export function renderDiffStats(stats: DiffStatsView): RenderTree {
   const netColor = stats.netChange >= 0 ? 'green' : 'red';
   const netSign = stats.netChange >= 0 ? '+' : '';
-  return el(
-    'DiffStats',
-    { layout: 'row', gap: 'md', wrap: true },
-    [
-      el('Stat', { label: 'files', color: 'slate' }, [text(String(stats.totalFiles))]),
-      el('Stat', { label: 'additions', color: 'green' }, [
-        text(`+${stats.totalAdditions}`),
-      ]),
-      el('Stat', { label: 'deletions', color: 'red' }, [
-        text(`-${stats.totalDeletions}`),
-      ]),
-      el('Stat', { label: 'net', color: netColor }, [
-        text(`${netSign}${stats.netChange}`),
-      ]),
-    ],
-  );
+  return el('DiffStats', { layout: 'row', gap: 'md', wrap: true }, [
+    el('Stat', { label: 'files', color: 'slate' }, [text(String(stats.totalFiles))]),
+    el('Stat', { label: 'additions', color: 'green' }, [text(`+${stats.totalAdditions}`)]),
+    el('Stat', { label: 'deletions', color: 'red' }, [text(`-${stats.totalDeletions}`)]),
+    el('Stat', { label: 'net', color: netColor }, [text(`${netSign}${stats.netChange}`)]),
+  ]);
 }
 
 /**
  * Render a callout highlighting large changes (>100 lines).
  */
-function renderLargeChangesCallout(
-  largeChanges: readonly FileChangeView[],
-): RenderTree {
-  return el(
-    'LargeChangesCallout',
-    { color: 'orange', icon: 'alert', count: largeChanges.length },
-    [
-      el('CalloutTitle', { weight: 'semibold' }, [
-        text(`${largeChanges.length} large change(s) (>100 lines)`),
-      ]),
-      el(
-        'CalloutFiles',
-        { layout: 'column', gap: 'xs' },
-        largeChanges.map((f) =>
-          el('CalloutFile', { path: f.path, command: `drill-file:${f.path}` }, [
-            text(`${f.path} (+${f.additions}/-${f.deletions})`),
-          ]),
-        ),
+function renderLargeChangesCallout(largeChanges: readonly FileChangeView[]): RenderTree {
+  return el('LargeChangesCallout', { color: 'orange', icon: 'alert', count: largeChanges.length }, [
+    el('CalloutTitle', { weight: 'semibold' }, [
+      text(`${largeChanges.length} large change(s) (>100 lines)`),
+    ]),
+    el(
+      'CalloutFiles',
+      { layout: 'column', gap: 'xs' },
+      largeChanges.map((f) =>
+        el('CalloutFile', { path: f.path, command: `drill-file:${f.path}` }, [
+          text(`${f.path} (+${f.additions}/-${f.deletions})`),
+        ]),
       ),
-    ],
-  );
+    ),
+  ]);
 }
 
 /* ------------------------------------------------------------------ *
