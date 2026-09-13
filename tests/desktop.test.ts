@@ -761,3 +761,135 @@ function waitForState(
     });
   });
 }
+
+/* ================================================================== *
+ * Renderer command round-trip (issue #121)
+ * ================================================================== */
+
+describe('handleRendererCommand', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function seededApp(transport: MockIpcTransport): DesktopApp {
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    return app;
+  }
+
+  it('resolves approve:<itemId> to a typed approve command and relays the response', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    // Seed inbox state via a push so resolveRendererCommand can find the item.
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_1',
+            taskId: 'task_9',
+            kind: 'ApprovalRequest',
+            priority: 'High',
+            status: 'Pending',
+            createdAt: '2026-09-16T10:00:00Z',
+            payload: { approvalId: 'ap_77' },
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'approve') {
+        expect(cmd).toMatchObject({
+          taskId: 'task_9',
+          approvalId: 'ap_77',
+          decision: 'grant',
+        });
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+
+    await app.handleRendererCommand({ id: 1, cmd: 'approve:attn_1' });
+    const result = transport.toRenderer.find((m) => m.channel === 'command:result');
+    expect(result?.data).toEqual({ id: 1, res: { ok: true } });
+  });
+
+  it('deny:<itemId> maps to decision deny', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_2',
+            taskId: 'task_5',
+            kind: 'ApprovalRequest',
+            priority: 'High',
+            status: 'Pending',
+            createdAt: '2026-09-16T10:00:00Z',
+            payload: { approvalId: 'ap_5' },
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'approve') {
+        expect(cmd['decision']).toBe('deny');
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    await app.handleRendererCommand({ id: 2, cmd: 'deny:attn_2' });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 2,
+      res: { ok: true },
+    });
+  });
+
+  it('returns an error result when the item has no pending approval', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    await conn;
+    await app.handleRendererCommand({ id: 3, cmd: 'approve:attn_missing' });
+    const result = transport.toRenderer.find((m) => m.channel === 'command:result');
+    expect((result?.data as { res: { ok: boolean } }).res.ok).toBe(false);
+  });
+
+  it('acknowledges UI-only verbs without hitting the daemon', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    let sawCommand = false;
+    socket.on('message', () => {
+      sawCommand = true;
+    });
+    await app.handleRendererCommand({ id: 4, cmd: 'inspect:attn_1' });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 4,
+      res: { ok: true },
+    });
+    expect(sawCommand).toBe(false);
+  });
+});

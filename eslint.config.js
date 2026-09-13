@@ -54,6 +54,15 @@ export default [
     },
   },
   {
+    // The desktop renderer is a sandboxed browser context — no Node APIs.
+    files: ['src/adapters/inbound/desktop/renderer/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+    },
+  },
+  {
     ignores: ['dist/**', 'node_modules/**', 'coverage/**'],
   },
   prettier,
