@@ -18,7 +18,11 @@ import type { Task } from '../../../domain/types.js';
 import type { EntityId } from '../../../domain/types.js';
 import { TaskState } from '../../../domain/enums.js';
 import type { TaskState as TaskStateType } from '../../../domain/enums.js';
-import type { AttentionItemSnapshot, CommandApi, TaskSnapshot } from '../tasks/command-api.js';
+import type {
+  AttentionItemSnapshot,
+  CommandExecutor,
+  TaskSnapshot,
+} from '../tasks/command-api.js';
 import type { CapacityRouter } from '../routing/capacity-router.js';
 import type { AttentionItemPriority } from '../attention/attention-item.js';
 import type { McpServerSpec } from '../../ports/outbound/agent-runtime.js';
@@ -72,7 +76,7 @@ export interface ManagerWorktreePort {
 /** Dependencies injected into {@link ManagerToolService}. */
 export interface ManagerToolDeps {
   /** The daemon's typed command API — all state transitions flow through it. */
-  readonly commandApi: CommandApi;
+  readonly commandApi: CommandExecutor;
   /** Quota- and preference-aware provider selection (DEC-029). */
   readonly router: CapacityRouter;
   /** Task persistence for newly spawned worker tasks. */
@@ -201,11 +205,23 @@ export class ManagerToolService {
     };
     this.deps.taskStore.insert(task);
 
-    const worktreePath = this.deps.worktreeManager.createWorktree(
-      this.deps.repoPath,
-      taskSlug(input.objective, taskId),
-      taskId,
-    );
+    let worktreePath: string;
+    try {
+      worktreePath = this.deps.worktreeManager.createWorktree(
+        this.deps.repoPath,
+        taskSlug(input.objective, taskId),
+        taskId,
+      );
+    } catch (err) {
+      // The task row stays Created — a failed worktree (missing repo,
+      // permission denied) leaves a retrievable record, not a crash.
+      return {
+        status: 'error',
+        error: `worktree creation failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
     this.deps.taskStore.update({ ...task, worktreePath });
 
     const res = await this.deps.commandApi.execute({
@@ -218,7 +234,7 @@ export class ManagerToolService {
         ...(launch.mcpServers !== undefined ? { mcpServers: launch.mcpServers } : {}),
       },
     });
-    if (!res.ok || !('sessionId' in res)) {
+    if (!res.ok || !('sessionId' in res) || typeof res.sessionId !== 'string') {
       return {
         status: 'error',
         error: `task ${taskId} created but failed to start: ${

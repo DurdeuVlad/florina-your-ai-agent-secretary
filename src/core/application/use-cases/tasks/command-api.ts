@@ -46,6 +46,7 @@ import type {
   SessionConfig as AdapterSessionConfig,
 } from '../../ports/outbound/agent-runtime.js';
 import type { AgentRuntimeRegistryPort } from '../../ports/outbound/runtime-registry.js';
+import type { DelegationService } from '../federation/delegation.js';
 import type {
   ApprovalRepositoryPort,
   CompletionDigestRepositoryPort,
@@ -367,6 +368,25 @@ export interface CreatePrCommand {
 }
 
 /**
+ * Accept a remote delegation from a parent Secretary (DEC-036, issue
+ * #78). The payload is the Task-Capsule objective plus routing intent;
+ * the child creates + starts the task through the same machinery as a
+ * local spawn — the repo named by `projectId` must exist on this
+ * machine.
+ */
+export interface DelegateTaskCommand {
+  readonly kind: 'delegate-task';
+  /** Child-side project the task attaches to. */
+  readonly projectId: string;
+  /** What the worker should accomplish. */
+  readonly objective: string;
+  readonly workType?: string;
+  readonly preferProvider?: string;
+  readonly preferModel?: string;
+  readonly excludeProviders?: readonly string[];
+}
+
+/**
  * The canonical discriminated union of all commands (DEC-026).
  *
  * The `kind` field is the discriminant; {@link CommandApi.execute} switches
@@ -395,7 +415,8 @@ export type Command =
   | ConfirmBriefCommand
   | UpdatePreferenceCommand
   | GetDigestCommand
-  | CreatePrCommand;
+  | CreatePrCommand
+  | DelegateTaskCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -422,6 +443,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'update-preference',
   'get-digest',
   'create-pr',
+  'delegate-task',
 ] as const;
 
 /* ================================================================== *
@@ -560,6 +582,23 @@ export interface PreferenceResponse {
   readonly error?: string;
 }
 
+/**
+ * Response to `delegate-task` (issue #78): the child-side result of
+ * accepting a remote delegation — mirrors `SpawnTaskResult` so the
+ * parent sees spawned/parked/error verbatim.
+ */
+export interface DelegateTaskResponse {
+  readonly ok: boolean;
+  readonly status?: 'spawned' | 'parked' | 'error';
+  readonly taskId?: string;
+  readonly sessionId?: string;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly reason?: string;
+  readonly resumeAt?: string | null;
+  readonly error?: string;
+}
+
 /** Generic error response for unknown / malformed commands. */
 export interface UnknownCommandResponse {
   readonly ok: false;
@@ -591,6 +630,7 @@ export type Response =
   | BriefResponse
   | BriefConfirmResponse
   | PreferenceResponse
+  | DelegateTaskResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -694,6 +734,12 @@ export interface CommandApiDeps {
    * when absent the command fails cleanly.
    */
   readonly preferences?: PreferenceProfilePort;
+  /**
+   * Federated delegation service (DEC-036, issue #78). When wired,
+   * `delegate-task` accepts remote delegations from a parent Secretary;
+   * when absent the command fails cleanly — this daemon is not a child.
+   */
+  readonly delegation?: DelegationService;
 }
 
 /* ================================================================== *
@@ -737,6 +783,7 @@ export class CommandApi {
   private readonly contextHealth?: ContextHealthReadPort;
   private readonly ideas?: IdeaService;
   private readonly preferences?: PreferenceProfilePort;
+  private readonly delegation?: DelegationService;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -759,6 +806,7 @@ export class CommandApi {
     this.contextHealth = deps.contextHealth;
     this.ideas = deps.ideas;
     this.preferences = deps.preferences;
+    this.delegation = deps.delegation;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -821,6 +869,8 @@ export class CommandApi {
         return this.handleGetDigest(command);
       case 'create-pr':
         return this.handleCreatePr(command);
+      case 'delegate-task':
+        return this.handleDelegateTask(command);
       default:
         return {
           ok: false,
@@ -1566,6 +1616,51 @@ export class CommandApi {
         error: `Failed to resolve worktree status: ${errorMessage(err)}`,
       };
     }
+  }
+
+  /**
+   * delegate-task (DEC-036, issue #78): accept a remote delegation from a
+   * parent Secretary. The DelegationService resolves the project and
+   * spawns through the same route → create → worktree → start machinery
+   * as every local spawn — a remote pool is just more capacity.
+   */
+  private async handleDelegateTask(cmd: DelegateTaskCommand): Promise<DelegateTaskResponse> {
+    if (this.delegation === undefined) {
+      return { ok: false, status: 'error', error: 'delegation is not wired on this daemon' };
+    }
+    if (!cmd.projectId) {
+      return { ok: false, status: 'error', error: 'projectId is required' };
+    }
+    const result = await this.delegation.delegate({
+      projectId: cmd.projectId,
+      objective: cmd.objective,
+      ...(cmd.workType !== undefined ? { workType: cmd.workType } : {}),
+      ...(cmd.preferProvider !== undefined ? { preferProvider: cmd.preferProvider } : {}),
+      ...(cmd.preferModel !== undefined ? { preferModel: cmd.preferModel } : {}),
+      ...(cmd.excludeProviders !== undefined
+        ? { excludeProviders: cmd.excludeProviders }
+        : {}),
+    });
+    if (result.status === 'spawned') {
+      return {
+        ok: true,
+        status: 'spawned',
+        taskId: result.taskId,
+        sessionId: result.sessionId,
+        provider: result.provider,
+        ...(result.model !== undefined ? { model: result.model } : {}),
+        reason: result.reason,
+      };
+    }
+    if (result.status === 'parked') {
+      return {
+        ok: true,
+        status: 'parked',
+        resumeAt: result.resumeAt,
+        reason: result.reason,
+      };
+    }
+    return { ok: false, status: 'error', error: result.error };
   }
 }
 

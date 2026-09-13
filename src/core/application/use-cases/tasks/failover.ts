@@ -377,7 +377,7 @@ export class FailoverService {
         error: `Failed to resume on provider "${provider}": ${detail ?? 'unknown error'}`,
       };
     }
-    if (!('sessionId' in response)) {
+    if (!('sessionId' in response) || typeof response.sessionId !== 'string') {
       return {
         kind: 'error',
         taskId,

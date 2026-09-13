@@ -47,6 +47,21 @@ export interface WebSocketControlPlaneServerOptions {
   readonly onConnection?: (socket: WebSocket) => void;
   /** Invoked for server errors after listening has started. */
   readonly onError?: (error: Error) => void;
+  /**
+   * Shared-secret auth for remote parents (DEC-036, issue #78). When
+   * set, a connection's first message must be `{type:'auth', token}`;
+   * until authenticated the socket is not registered with the event
+   * stream and commands are rejected. Unset → every connection is
+   * implicitly trusted (localhost-only mode, DEC-008).
+   */
+  readonly authToken?: string;
+  /**
+   * Capability scoping for remote connections (DEC-011, issue #78):
+   * when set, only the listed command `kind`s may be executed — a
+   * parent can narrow its own reach, never widen the child's policy.
+   * Unset → all commands allowed.
+   */
+  readonly allowedCommands?: readonly string[];
 }
 
 /**
@@ -142,13 +157,21 @@ export class WebSocketControlPlaneServer {
   private handleConnection(socket: WebSocket): void {
     this.options.onConnection?.(socket);
 
-    // Register the socket with the event stream so it can subscribe/unsubscribe.
-    const unregister = this.options.eventStream.register(socket);
-    const release = (): void => {
-      unregister();
-      this.unregisters.delete(release);
+    // Federation auth (issue #78): when authToken is configured, the
+    // connection must authenticate before anything else — including
+    // event-stream subscription. Registration is deferred until then.
+    const authRequired = this.options.authToken !== undefined;
+    let authenticated = !authRequired;
+    let release: (() => void) | null = null;
+    const registerStream = (): void => {
+      const unregister = this.options.eventStream.register(socket);
+      release = (): void => {
+        unregister();
+        this.unregisters.delete(release!);
+      };
+      this.unregisters.add(release);
     };
-    this.unregisters.add(release);
+    if (authenticated) registerStream();
 
     socket.on('message', async (data) => {
       // Parse the raw JSON once so we can discriminate between the two
@@ -166,11 +189,54 @@ export class WebSocketControlPlaneServer {
         return;
       }
 
+      // Auth handshake: the only message honored before authentication.
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        (parsed as { type?: unknown }).type === 'auth'
+      ) {
+        const token = (parsed as { token?: unknown }).token;
+        if (token === this.options.authToken) {
+          authenticated = true;
+          registerStream();
+          if (socket.readyState === socket.OPEN) {
+            socket.send(JSON.stringify({ type: 'auth', ok: true }));
+          }
+        } else {
+          if (socket.readyState === socket.OPEN) {
+            socket.send(JSON.stringify({ type: 'auth', ok: false, error: 'bad token' }));
+          }
+          socket.close();
+        }
+        return;
+      }
+
+      if (!authenticated) {
+        if (socket.readyState === socket.OPEN) {
+          socket.send(JSON.stringify({ ok: false, error: 'authentication required' }));
+        }
+        return;
+      }
+
       if (
         parsed !== null &&
         typeof parsed === 'object' &&
         typeof (parsed as { kind?: unknown }).kind === 'string'
       ) {
+        const kind = (parsed as { kind: string }).kind;
+        // Capability scoping (DEC-011, issue #78): remote connections
+        // may only invoke the permitted command kinds.
+        if (
+          this.options.allowedCommands !== undefined &&
+          !this.options.allowedCommands.includes(kind)
+        ) {
+          if (socket.readyState === socket.OPEN) {
+            socket.send(
+              JSON.stringify({ ok: false, error: `command not permitted: ${kind}` }),
+            );
+          }
+          return;
+        }
         // Command dispatch path (issue #33).
         const response: Response = await this.options.commandApi.execute(parsed as Command);
         if (socket.readyState === socket.OPEN) {
@@ -194,10 +260,10 @@ export class WebSocketControlPlaneServer {
     });
 
     socket.on('close', () => {
-      release();
+      release?.();
     });
     socket.on('error', () => {
-      release();
+      release?.();
     });
   }
 }
