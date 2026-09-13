@@ -14,6 +14,7 @@
  */
 import type { ChatMessage } from './messages.js';
 import { assistantToolCalls, toolResult } from './messages.js';
+import type { Condenser } from './condenser.js';
 import type { CompletionResponse, ModelConnector } from './model-connector.js';
 import { ConnectorError } from './model-connector.js';
 import type { ToolContext, ToolRegistry } from './tool-registry.js';
@@ -44,6 +45,13 @@ export type LoopEvent =
     }
   | { readonly kind: 'completed'; readonly iterations: number }
   | {
+      readonly kind: 'condensed';
+      readonly iteration: number;
+      /** Messages rolled up into the summary (positions into the history). */
+      readonly forgottenCount: number;
+      readonly keptCount: number;
+    }
+  | {
       readonly kind: 'iteration_limit';
       readonly iterations: number;
     };
@@ -60,6 +68,13 @@ export interface SecretaryLoopOptions {
   readonly temperature?: number;
   /** Context handed through to every tool execution. */
   readonly toolContext?: ToolContext;
+  /**
+   * Optional {@link Condenser} — when set, the history is compacted before
+   * every model call and each compaction emits a `condensed` event with
+   * provenance (DEC-035). The un-condensed history is still returned in
+   * `LoopResult.messages` so the full record stays journalable.
+   */
+  readonly condenser?: Condenser;
 }
 
 /** Outcome of {@link SecretaryLoop.run}. */
@@ -89,6 +104,7 @@ export class SecretaryLoop {
   private readonly onEvent: ((event: LoopEvent) => void) | undefined;
   private readonly temperature: number | undefined;
   private readonly toolContext: ToolContext;
+  private readonly condenser: Condenser | undefined;
 
   constructor(options: SecretaryLoopOptions) {
     this.connector = options.connector;
@@ -97,6 +113,7 @@ export class SecretaryLoop {
     this.onEvent = options.onEvent;
     this.temperature = options.temperature;
     this.toolContext = options.toolContext ?? {};
+    this.condenser = options.condenser;
   }
 
   /**
@@ -111,10 +128,26 @@ export class SecretaryLoop {
       iteration += 1;
       this.emit({ kind: 'iteration', iteration });
 
+      // Continuous compaction (DEC-035): the model sees the condensed
+      // view; `history` keeps the full record for the journal.
+      let view: readonly ChatMessage[] = history;
+      if (this.condenser !== undefined) {
+        const condensed = await this.condenser.condense(history);
+        if (condensed.condensation !== null) {
+          this.emit({
+            kind: 'condensed',
+            iteration,
+            forgottenCount: condensed.condensation.forgottenIndexes.length,
+            keptCount: condensed.condensation.keptCount,
+          });
+          view = condensed.messages;
+        }
+      }
+
       let response: CompletionResponse;
       try {
         response = await this.connector.complete({
-          messages: history,
+          messages: view,
           tools: this.tools.specs(),
           temperature: this.temperature,
         });

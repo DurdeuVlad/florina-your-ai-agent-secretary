@@ -20,3 +20,5 @@ export type { TodoItem, TodoStatus } from './todo-tool.js';
 export { TodoStore, TodoToolError, createTodoTool } from './todo-tool.js';
 export type { LoopEvent, LoopResult, SecretaryLoopOptions } from './loop.js';
 export { SecretaryLoop, LoopError } from './loop.js';
+export type { Condensation, CondenseResult, CondenserOptions, Summarizer } from './condenser.js';
+export { Condenser, extractiveSummarizer } from './condenser.js';
