@@ -214,6 +214,122 @@ function barrelViolation(relPath: string): string | null {
   return null;
 }
 
+const OUTBOUND_PREFIX = 'src/adapters/outbound/';
+const OUTBOUND_ROOT_BARREL = 'src/adapters/outbound/index.ts';
+
+/** The adapter family of a path: first segment after `src/adapters/outbound/`. */
+function outboundFamily(relPath: string): string {
+  return relPath.slice(OUTBOUND_PREFIX.length).split('/')[0] ?? '';
+}
+
+/**
+ * Evaluate one import edge for a file under `src/adapters/outbound`.
+ * Outbound adapters may import `src/core/**`, siblings inside the same
+ * adapter family, node builtins, and external packages — nothing else (no
+ * legacy daemon/storage/attention/secretary paths, legacy adapter facades,
+ * inbound adapters, bootstrap composition, or other adapter families).
+ * `src/adapters/outbound/index.ts` is the only root barrel and may
+ * additionally import each family's `index.ts`.
+ */
+function outboundEdgeViolation(edge: ImportEdge): string | null {
+  if (!edge.source.startsWith(OUTBOUND_PREFIX)) {
+    return null;
+  }
+  if (!isRelativeSpecifier(edge.specifier)) {
+    return null; // node builtin or external package — allowed in adapters
+  }
+  if (edge.target === null) {
+    return `${edge.source} -> ${edge.specifier} (unresolvable module specifier)`;
+  }
+  if (edge.target.startsWith('src/core/')) {
+    return null;
+  }
+  if (!edge.target.startsWith(OUTBOUND_PREFIX)) {
+    return (
+      `${edge.source} -> ${edge.target} ` +
+      '(outbound adapters may only import src/core or their same adapter family)'
+    );
+  }
+  if (edge.source === OUTBOUND_ROOT_BARREL) {
+    return edge.target.endsWith('/index.ts')
+      ? null
+      : `${edge.source} -> ${edge.target} (the root barrel may only import family barrels)`;
+  }
+  if (outboundFamily(edge.source) === outboundFamily(edge.target)) {
+    return null;
+  }
+  return (
+    `${edge.source} -> ${edge.target} ` +
+    '(cross-family import: outbound adapters may only import src/core or ' +
+    'their same adapter family)'
+  );
+}
+
+/**
+ * Assert a legacy compatibility wrapper file: every statement is an import,
+ * export, function, class, or interface declaration; exports must resolve
+ * into `allowedExportPrefixes`, imports into `allowedImportPrefixes`, and
+ * function declarations are restricted to `allowedFunctionNames`. Returns
+ * readable violation messages.
+ */
+function wrapperViolations(
+  fileAbs: string,
+  options: {
+    readonly allowedImportPrefixes: readonly string[];
+    readonly allowedExportPrefixes: readonly string[];
+    readonly allowedFunctionNames?: readonly string[];
+    readonly allowClasses?: boolean;
+  },
+): string[] {
+  const rel = toRelPosix(fileAbs);
+  if (!fs.existsSync(fileAbs)) {
+    return [`${rel}: expected a compatibility wrapper but the file is missing`];
+  }
+  const text = fs.readFileSync(fileAbs, 'utf8');
+  const sourceFile = ts.createSourceFile(fileAbs, text, ts.ScriptTarget.Latest, true);
+  const violations: string[] = [];
+  const specifierAllowed = (specifier: string, prefixes: readonly string[]): boolean => {
+    const resolved = resolveSpecifier(fileAbs, specifier);
+    if (resolved === null) {
+      violations.push(`${rel} -> ${specifier} (unresolvable module specifier)`);
+      return false;
+    }
+    return prefixes.some((prefix) => toRelPosix(resolved).startsWith(prefix));
+  };
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement)) {
+      if (!options.allowedFunctionNames?.includes(statement.name?.text ?? '')) {
+        violations.push(`${rel}: function "${statement.name?.text ?? '<anon>'}" is not allowed`);
+      }
+      continue;
+    }
+    if (ts.isClassDeclaration(statement) || ts.isInterfaceDeclaration(statement)) {
+      if (options.allowClasses !== true) {
+        violations.push(`${rel}: class/interface declarations are not allowed in this wrapper`);
+      }
+      continue;
+    }
+    if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) {
+      const specifier = statement.moduleSpecifier;
+      if (specifier === undefined || !ts.isStringLiteral(specifier)) {
+        continue;
+      }
+      const prefixes = ts.isImportDeclaration(statement)
+        ? options.allowedImportPrefixes
+        : options.allowedExportPrefixes;
+      if (!specifierAllowed(specifier.text, prefixes)) {
+        const resolved = resolveSpecifier(fileAbs, specifier.text);
+        violations.push(
+          `${rel} -> ${resolved === null ? specifier.text : toRelPosix(resolved)} (wrapper boundary)`,
+        );
+      }
+      continue;
+    }
+    violations.push(`${rel}: expected wrapper but found a disallowed statement`);
+  }
+  return violations;
+}
+
 /**
  * Assert a legacy file is a pure compatibility facade: every statement is an
  * `export ... from` declaration resolving into `requiredPrefix` (a
@@ -417,6 +533,8 @@ describe('src/core boundary conformance', () => {
       'credential-vault',
       'context-sources',
       'preference-profile',
+      'quota-reader',
+      'git-client',
       'index',
     ]) {
       expect(
@@ -430,6 +548,7 @@ describe('src/core boundary conformance', () => {
       'index.ts',
       'metrics.ts',
       'routing/quota-ledger.ts',
+      'routing/quota-exhaustion.ts',
       'routing/capacity-router.ts',
       'routing/index.ts',
       'context/context-isolation.ts',
@@ -456,6 +575,7 @@ describe('src/core boundary conformance', () => {
       'attention/failure-tracker.ts',
       'attention/liveness-monitor.ts',
       'attention/attention-aggregator.ts',
+      'attention/diff-analyzer.ts',
       'attention/index.ts',
       'secretary/messages.ts',
       'secretary/tool-registry.ts',
@@ -549,14 +669,6 @@ describe('migrated use-case compatibility facades', () => {
     expect(violations).toEqual([]);
   });
 
-  it('model-connector stays an outbound adapter importing the core model port directly', () => {
-    const edges = collectEdges(path.join(SRC_DIR, 'secretary', 'model-connector.ts'));
-    expect(
-      edges.some((e) => e.target === 'src/core/application/ports/outbound/model.ts'),
-      'src/secretary/model-connector.ts must import src/core/application/ports/outbound/model.ts',
-    ).toBe(true);
-  });
-
   it('legacy context-router is a compatibility wrapper: factory plus re-exports only', () => {
     const fileAbs = path.join(SRC_DIR, 'daemon', 'context-router.ts');
     const text = fs.readFileSync(fileAbs, 'utf8');
@@ -604,15 +716,60 @@ describe('migrated use-case compatibility facades', () => {
     expect(violations).toEqual([]);
   });
 
-  it('remaining outbound implementations import core ports directly', () => {
+  it('outbound implementations import the core ports they satisfy directly', () => {
     const expectations: Readonly<Record<string, readonly string[]>> = {
-      'src/daemon/preference-profile.ts': [
+      'src/adapters/outbound/persistence/sqlite/repositories/task.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/event.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/approval.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/session.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/context-capsule.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/decision.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/persistence/sqlite/repositories/completion-digest.ts': [
+        'src/core/application/ports/outbound/repositories.ts',
+      ],
+      'src/adapters/outbound/credentials/os-credential-vault.ts': [
+        'src/core/application/ports/outbound/credential-vault.ts',
+      ],
+      'src/adapters/outbound/model/litellm-connector.ts': [
+        'src/core/application/ports/outbound/model.ts',
+      ],
+      'src/adapters/outbound/preferences/json-preference-profile.ts': [
         'src/core/application/ports/outbound/preference-profile.ts',
       ],
-      'src/daemon/worktree.ts': ['src/core/application/ports/outbound/worktree.ts'],
-      'src/adapters/registry.ts': [
+      'src/adapters/outbound/quota/quota-readers.ts': [
+        'src/core/application/ports/outbound/quota-reader.ts',
+      ],
+      'src/adapters/outbound/git/node-git-client.ts': [
+        'src/core/application/ports/outbound/git-client.ts',
+      ],
+      'src/adapters/outbound/git/worktree-manager.ts': [
+        'src/core/application/ports/outbound/worktree.ts',
+      ],
+      'src/adapters/outbound/agents/registry.ts': [
         'src/core/application/ports/outbound/agent-runtime.ts',
         'src/core/application/ports/outbound/runtime-registry.ts',
+      ],
+      'src/adapters/outbound/agents/base.ts': [
+        'src/core/application/ports/outbound/agent-runtime.ts',
+        'src/core/application/ports/outbound/event-stream.ts',
+      ],
+      // The legacy worktree wrapper still satisfies the core worktree port
+      // through the canonical adapter and retains the TaskRepository seam.
+      'src/daemon/worktree.ts': [
+        'src/core/application/ports/outbound/worktree.ts',
+        'src/adapters/outbound/git/worktree-manager.ts',
       ],
     };
     const violations: string[] = [];
@@ -628,15 +785,255 @@ describe('migrated use-case compatibility facades', () => {
   });
 
   it('adapter registry imports neither the daemon EventBus nor the event-stream port', () => {
-    const edges = collectEdges(path.join(SRC_DIR, 'adapters', 'registry.ts'));
+    const edges = collectEdges(
+      path.join(SRC_DIR, 'adapters', 'outbound', 'agents', 'registry.ts'),
+    );
     expect(
       edges.every(
         (e) =>
           e.target !== 'src/daemon/event-stream.ts' &&
           e.target !== 'src/core/application/ports/outbound/event-stream.ts',
       ),
-      'src/adapters/registry.ts must not import an event bus: adapters are ' +
-        'created without one and the session manager publishes streamed events',
+      'src/adapters/outbound/agents/registry.ts must not import an event bus: ' +
+        'adapters are created without one and the session manager publishes ' +
+        'streamed events',
     ).toBe(true);
+  });
+});
+
+describe('src/adapters/outbound tree', () => {
+  const OUTBOUND_EXPECTED: readonly string[] = [
+    // SQLite persistence adapter
+    'persistence/sqlite/database.ts',
+    'persistence/sqlite/migrations.ts',
+    'persistence/sqlite/schema.ts',
+    'persistence/sqlite/index.ts',
+    'persistence/sqlite/repositories/agent.ts',
+    'persistence/sqlite/repositories/approval.ts',
+    'persistence/sqlite/repositories/attention-item.ts',
+    'persistence/sqlite/repositories/base.ts',
+    'persistence/sqlite/repositories/completion-digest.ts',
+    'persistence/sqlite/repositories/context-capsule.ts',
+    'persistence/sqlite/repositories/decision.ts',
+    'persistence/sqlite/repositories/deliverable.ts',
+    'persistence/sqlite/repositories/event.ts',
+    'persistence/sqlite/repositories/metrics.ts',
+    'persistence/sqlite/repositories/project.ts',
+    'persistence/sqlite/repositories/session.ts',
+    'persistence/sqlite/repositories/task.ts',
+    'persistence/sqlite/repositories/index.ts',
+    // Provider runtime adapters
+    'agents/base.ts',
+    'agents/registry.ts',
+    'agents/codex-adapter.ts',
+    'agents/codex-mapper.ts',
+    'agents/claude-adapter.ts',
+    'agents/claude-hooks-adapter.ts',
+    'agents/claude-hooks-mapper.ts',
+    'agents/claude-mapper.ts',
+    'agents/acp-adapter.ts',
+    'agents/agy-adapter.ts',
+    'agents/stub-adapter.ts',
+    'agents/index.ts',
+    // Quota observation readers
+    'quota/quota-readers.ts',
+    'quota/index.ts',
+    // File-backed preference profile adapter
+    'preferences/json-preference-profile.ts',
+    'preferences/index.ts',
+    // OS credential vault adapter
+    'credentials/os-credential-vault.ts',
+    'credentials/index.ts',
+    // LiteLLM model connector adapter
+    'model/litellm-connector.ts',
+    'model/index.ts',
+    // Git adapters (worktree + diff intelligence)
+    'git/node-git-client.ts',
+    'git/diff-analyzer.ts',
+    'git/worktree-manager.ts',
+    'git/index.ts',
+    // Outbound barrel
+    'index.ts',
+  ];
+
+  it('the expected outbound adapter tree exists', () => {
+    const missing = OUTBOUND_EXPECTED.filter(
+      (rel) => !fs.existsSync(path.join(SRC_DIR, 'adapters', 'outbound', rel)),
+    );
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('src/adapters/outbound boundary conformance', () => {
+  it('outbound edge classification allows core, same adapter family, node, and packages', () => {
+    const legal: readonly ImportEdge[] = [
+      {
+        source: 'src/adapters/outbound/agents/stub-adapter.ts',
+        specifier: '../../../core/domain/events.js',
+        target: 'src/core/domain/events.ts',
+      },
+      {
+        source: 'src/adapters/outbound/agents/stub-adapter.ts',
+        specifier: './base.js',
+        target: 'src/adapters/outbound/agents/base.ts',
+      },
+      {
+        source: 'src/adapters/outbound/git/diff-analyzer.ts',
+        specifier: './node-git-client.js',
+        target: 'src/adapters/outbound/git/node-git-client.ts',
+      },
+      {
+        source: 'src/adapters/outbound/git/node-git-client.ts',
+        specifier: 'node:child_process',
+        target: null,
+      },
+      {
+        source: 'src/adapters/outbound/persistence/sqlite/database.ts',
+        specifier: 'better-sqlite3',
+        target: null,
+      },
+    ];
+    for (const edge of legal) {
+      expect(outboundEdgeViolation(edge)).toBeNull();
+    }
+  });
+
+  it('outbound edge classification rejects legacy, inbound, and bootstrap edges', () => {
+    const illegal: readonly ImportEdge[] = [
+      {
+        source: 'src/adapters/outbound/agents/stub-adapter.ts',
+        specifier: '../../daemon/event-stream.js',
+        target: 'src/daemon/event-stream.ts',
+      },
+      {
+        source: 'src/adapters/outbound/persistence/sqlite/repositories/task.ts',
+        specifier: '../../../storage/schema.js',
+        target: 'src/storage/schema.ts',
+      },
+      {
+        source: 'src/adapters/outbound/agents/stub-adapter.ts',
+        specifier: '../base.js',
+        target: 'src/adapters/base.ts',
+      },
+      {
+        source: 'src/adapters/outbound/git/diff-analyzer.ts',
+        specifier: '../../attention/diff-digest.js',
+        target: 'src/attention/diff-digest.ts',
+      },
+      {
+        source: 'src/adapters/outbound/agents/base.ts',
+        specifier: '../../bootstrap/index.js',
+        target: 'src/bootstrap/index.ts',
+      },
+      {
+        source: 'src/adapters/outbound/agents/base.ts',
+        specifier: '../inbound/x.js',
+        target: 'src/adapters/inbound/x.ts',
+      },
+      {
+        // Cross-family import: agents must not reach into git (or any
+        // other adapter family) — families stay isolated behind their
+        // own barrels.
+        source: 'src/adapters/outbound/agents/stub-adapter.ts',
+        specifier: '../git/node-git-client.js',
+        target: 'src/adapters/outbound/git/node-git-client.ts',
+      },
+      {
+        // The root barrel may only import family barrels, not
+        // implementation files.
+        source: 'src/adapters/outbound/index.ts',
+        specifier: './git/node-git-client.js',
+        target: 'src/adapters/outbound/git/node-git-client.ts',
+      },
+      {
+        source: 'src/adapters/outbound/git/worktree-manager.ts',
+        specifier: '../../does-not-exist.js',
+        target: null,
+      },
+    ];
+    for (const edge of illegal) {
+      expect(outboundEdgeViolation(edge)).not.toBeNull();
+    }
+    // Non-outbound sources are never flagged by the outbound rule.
+    expect(
+      outboundEdgeViolation({
+        source: 'src/daemon/daemon.ts',
+        specifier: '../storage/index.js',
+        target: 'src/storage/index.ts',
+      }),
+    ).toBeNull();
+  });
+
+  it('no file under src/adapters/outbound imports outside core or its same adapter family', () => {
+    const outboundDir = path.join(SRC_DIR, 'adapters', 'outbound');
+    const outboundFiles = listTsFiles(outboundDir);
+    expect(outboundFiles.length).toBeGreaterThan(0);
+    const violations = outboundFiles
+      .flatMap((f) => collectEdges(f))
+      .map(outboundEdgeViolation)
+      .filter((v): v is string => v !== null);
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('migrated outbound compatibility facades', () => {
+  const OUTBOUND_FACADES: readonly string[] = [
+    // SQLite persistence facades
+    'src/storage/database.ts',
+    'src/storage/migrations.ts',
+    'src/storage/schema.ts',
+    'src/storage/repositories/agent.ts',
+    'src/storage/repositories/approval.ts',
+    'src/storage/repositories/attention-item.ts',
+    'src/storage/repositories/base.ts',
+    'src/storage/repositories/completion-digest.ts',
+    'src/storage/repositories/context-capsule.ts',
+    'src/storage/repositories/decision.ts',
+    'src/storage/repositories/deliverable.ts',
+    'src/storage/repositories/event.ts',
+    'src/storage/repositories/metrics.ts',
+    'src/storage/repositories/project.ts',
+    'src/storage/repositories/session.ts',
+    'src/storage/repositories/task.ts',
+    'src/storage/repositories/index.ts',
+    // Provider runtime adapter facades
+    'src/adapters/base.ts',
+    'src/adapters/registry.ts',
+    'src/adapters/codex-adapter.ts',
+    'src/adapters/codex-mapper.ts',
+    'src/adapters/claude-adapter.ts',
+    'src/adapters/claude-hooks-adapter.ts',
+    'src/adapters/claude-hooks-mapper.ts',
+    'src/adapters/claude-mapper.ts',
+    'src/adapters/acp-adapter.ts',
+    'src/adapters/agy-adapter.ts',
+    'src/adapters/stub-adapter.ts',
+    'src/adapters/quota-readers.ts',
+    // Preference + credential + model facades
+    'src/daemon/preference-profile.ts',
+    'src/daemon/credential-broker.ts',
+    'src/secretary/model-connector.ts',
+    // Diff analyzer facade
+    'src/attention/diff-analyzer.ts',
+  ];
+
+  it('each moved implementation file is a facade into src/adapters/outbound', () => {
+    const violations = OUTBOUND_FACADES.flatMap((rel) =>
+      facadeViolations(path.join(REPO_ROOT, rel), 'src/adapters/outbound/'),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('daemon/worktree.ts is a compatibility wrapper, not a pure facade', () => {
+    // Allowed statements: imports/exports resolving to src/core or
+    // src/adapters/outbound (plus the TaskRepository storage seam), class and
+    // interface declarations for WorktreeManager/WorktreeManagerOptions.
+    expect(
+      wrapperViolations(path.join(SRC_DIR, 'daemon', 'worktree.ts'), {
+        allowedImportPrefixes: ['src/core/', 'src/adapters/outbound/', 'src/storage/'],
+        allowedExportPrefixes: ['src/core/', 'src/adapters/outbound/'],
+        allowClasses: true,
+      }),
+    ).toEqual([]);
   });
 });
