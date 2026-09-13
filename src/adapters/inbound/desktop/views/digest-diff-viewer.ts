@@ -32,10 +32,7 @@ import type { CompletionDigest } from '../../../../core/application/use-cases/at
 import type { DiffDigest } from '../../../../core/application/use-cases/attention/diff-digest.js';
 import type { RiskHighlight } from '../../../../core/application/use-cases/attention/completion-digest.js';
 import type { ChangedFileStatus } from '../../../../core/application/use-cases/attention/diff-digest.js';
-import type {
-  DiffViewData,
-  FileChangeView,
-} from './digest-types.js';
+import type { DiffViewData, FileChangeView } from './digest-types.js';
 import type { DigestViewModel } from './digest-view.js';
 import type { DiffViewModel } from './diff-view.js';
 import type {
@@ -79,12 +76,7 @@ export const DIGEST_FIELD_COUNT = DIGEST_FIELDS.length;
  * Status ordering for file-tree grouping (mirrors DiffViewModel)
  * ------------------------------------------------------------------ */
 
-const STATUS_ORDER: readonly ChangedFileStatus[] = [
-  'added',
-  'modified',
-  'deleted',
-  'renamed',
-];
+const STATUS_ORDER: readonly ChangedFileStatus[] = ['added', 'modified', 'deleted', 'renamed'];
 
 /* ------------------------------------------------------------------ *
  * DigestDiffViewerModel
@@ -136,11 +128,7 @@ export class DigestDiffViewerModel {
     const resolvedDiff = diff ?? digest.diffSummary ?? null;
     const diffView = resolvedDiff ? this.diffViewModel.buildView(resolvedDiff) : null;
 
-    const pagination = this.computePagination(
-      diffView ? diffView.files.length : 0,
-      page,
-      pageSize,
-    );
+    const pagination = this.computePagination(diffView ? diffView.files.length : 0, page, pageSize);
     const riskHotspots = this.buildRiskHotspots(digest, diffView);
 
     return {
@@ -169,11 +157,7 @@ export class DigestDiffViewerModel {
   buildDiffPage(data: DigestDiffViewerData, page: number): DiffPageView | null {
     if (data.diff === null) return null;
     const pageSize = data.pagination.pageSize;
-    const pagination = this.computePagination(
-      data.diff.files.length,
-      page,
-      pageSize,
-    );
+    const pagination = this.computePagination(data.diff.files.length, page, pageSize);
     const start = pagination.page * pageSize;
     const end = start + pageSize;
     const pageFiles = data.diff.files.slice(start, end);
@@ -198,10 +182,7 @@ export class DigestDiffViewerModel {
    * @param diffView - The display-ready diff view data (may be `null`).
    * @returns Risk hotspots with drill-down targets.
    */
-  buildRiskHotspots(
-    digest: CompletionDigest,
-    diffView: DiffViewData | null,
-  ): RiskHotspotView[] {
+  buildRiskHotspots(digest: CompletionDigest, diffView: DiffViewData | null): RiskHotspotView[] {
     return digest.riskHighlights.map((h) => {
       const target = this.resolveDrillTarget(h, diffView);
       return {
@@ -209,10 +190,7 @@ export class DigestDiffViewerModel {
         message: h.message,
         color: riskColorFor(h.kind),
         drillTarget: target,
-        command:
-          target !== null
-            ? `drill-risk:${h.kind}:${target}`
-            : `drill-risk:${h.kind}`,
+        command: target !== null ? `drill-risk:${h.kind}:${target}` : `drill-risk:${h.kind}`,
       };
     });
   }
@@ -234,7 +212,12 @@ export class DigestDiffViewerModel {
     taskId: string,
     title?: string,
     body?: string,
-  ): { readonly kind: 'create-pr'; readonly taskId: string; readonly title?: string; readonly body?: string } {
+  ): {
+    readonly kind: 'create-pr';
+    readonly taskId: string;
+    readonly title?: string;
+    readonly body?: string;
+  } {
     const cmd: { kind: 'create-pr'; taskId: string; title?: string; body?: string } = {
       kind: 'create-pr',
       taskId,
@@ -255,11 +238,7 @@ export class DigestDiffViewerModel {
    * there are no files). `totalPages` is at least 1 so the renderer always
    * has a valid page to render (even an empty one).
    */
-  private computePagination(
-    totalFiles: number,
-    page: number,
-    pageSize: number,
-  ): PaginationView {
+  private computePagination(totalFiles: number, page: number, pageSize: number): PaginationView {
     const safePageSize = pageSize > 0 ? pageSize : DEFAULT_DIFF_PAGE_SIZE;
     const totalPages = Math.max(1, Math.ceil(totalFiles / safePageSize));
     const clampedPage = Math.max(0, Math.min(page, totalPages - 1));
@@ -306,7 +285,11 @@ export class DigestDiffViewerModel {
     for (const file of files) {
       byStatus.get(file.status)?.push(file);
     }
-    const groups: Array<{ status: ChangedFileStatus; files: readonly FileChangeView[]; count: number }> = [];
+    const groups: Array<{
+      status: ChangedFileStatus;
+      files: readonly FileChangeView[];
+      count: number;
+    }> = [];
     for (const status of STATUS_ORDER) {
       const bucket = byStatus.get(status);
       if (bucket === undefined || bucket.length === 0) continue;

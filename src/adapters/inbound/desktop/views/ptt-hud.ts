@@ -18,7 +18,10 @@
  * push-to-talk hotkeys and a floating voice HUD.
  */
 import { VoiceSessionState } from '../../../../core/application/ports/outbound/voice.js';
-import type { VoicePipelineMode, VoicePipelineState } from '../../../../core/application/use-cases/voice/voice-pipeline.js';
+import type {
+  VoicePipelineMode,
+  VoicePipelineState,
+} from '../../../../core/application/use-cases/voice/voice-pipeline.js';
 
 /* ------------------------------------------------------------------ *
  * PttHudState
@@ -99,8 +102,7 @@ export class PttHudViewModel {
    * @returns The new HUD state (a copy).
    */
   update(pipelineState: VoicePipelineState): PttHudState {
-    const { isListening, isProcessing, isResponding } =
-      deriveActivityFlags(pipelineState);
+    const { isListening, isProcessing, isResponding } = deriveActivityFlags(pipelineState);
     const next: PttHudState = {
       ...this.state,
       voiceMode: pipelineState.mode,

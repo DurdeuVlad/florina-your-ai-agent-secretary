@@ -14,12 +14,7 @@
  * The home screen is an attention inbox, not a Kanban board (DEC-006).
  */
 import type { AttentionItemPriority } from '../../../../core/application/use-cases/attention/attention-item.js';
-import type {
-  AttentionItemView,
-  InboxViewData,
-  RenderTree,
-  ViewFilter,
-} from './view-types.js';
+import type { AttentionItemView, InboxViewData, RenderTree, ViewFilter } from './view-types.js';
 import { PRIORITY_METADATA } from './inbox-view.js';
 
 /* ------------------------------------------------------------------ *
@@ -72,18 +67,14 @@ export function renderInboxItem(item: AttentionItemView): RenderTree {
     [
       el('ItemHeader', { layout: 'row', gap: 'sm' }, [
         el('Icon', { name: item.priorityMeta.icon, color: item.priorityMeta.color }, []),
-        el('PriorityLabel', { color: item.priorityMeta.color }, [
-          text(item.priorityMeta.label),
-        ]),
+        el('PriorityLabel', { color: item.priorityMeta.color }, [text(item.priorityMeta.label)]),
         el('KindLabel', { color: item.kindMeta.color, icon: item.kindMeta.icon }, [
           text(item.kindMeta.label),
         ]),
       ]),
       el('ItemTitle', { weight: 'semibold' }, [text(item.title)]),
       el('ItemSummary', { color: 'muted' }, [text(item.summary)]),
-      ...(actions.length > 0
-        ? [el('ItemActions', { layout: 'row', gap: 'sm' }, actions)]
-        : []),
+      ...(actions.length > 0 ? [el('ItemActions', { layout: 'row', gap: 'sm' }, actions)] : []),
     ],
   );
 }
@@ -103,9 +94,7 @@ export function renderInboxGroup(
     { priority, color: meta.color, icon: meta.icon, spacing: 'md' },
     [
       el('Icon', { name: meta.icon, color: meta.color }, []),
-      el('GroupLabel', { color: meta.color, weight: 'bold' }, [
-        text(meta.label),
-      ]),
+      el('GroupLabel', { color: meta.color, weight: 'bold' }, [text(meta.label)]),
       el('GroupCount', { color: 'muted' }, [text(String(items.length))]),
     ],
   );
@@ -123,7 +112,11 @@ export function renderInboxList(view: InboxViewData): RenderTree {
   if (view.isEmpty) {
     return renderEmptyState();
   }
-  return el('InboxList', { layout: 'column', gap: 'lg', totalCount: view.totalCount }, view.groups.map((group) => renderInboxGroup(group.priority, group.items)));
+  return el(
+    'InboxList',
+    { layout: 'column', gap: 'lg', totalCount: view.totalCount },
+    view.groups.map((group) => renderInboxGroup(group.priority, group.items)),
+  );
 }
 
 /**
@@ -166,11 +159,7 @@ export function renderFilterBar(filters: ViewFilter): RenderTree {
   ];
   if (chips.length > 0) {
     children.push(
-      el(
-        'ClearAllButton',
-        { command: 'clear-filter:all', variant: 'ghost' },
-        [text('Clear all')],
-      ),
+      el('ClearAllButton', { command: 'clear-filter:all', variant: 'ghost' }, [text('Clear all')]),
     );
   }
   return el('FilterBar', { layout: 'row', gap: 'sm', wrap: true }, children);
@@ -227,11 +216,7 @@ function actionButton(
 }
 
 /** Build a filter chip node with a serializable clear command. */
-function filterChip(
-  facet: string,
-  value: string,
-  clearCommand: string,
-): RenderTree {
+function filterChip(facet: string, value: string, clearCommand: string): RenderTree {
   return el('FilterChip', { facet, value, clearCommand, color: 'blue' }, [
     text(`${facet}: ${value}`),
     el('ChipClear', { command: clearCommand }, [text('×')]),

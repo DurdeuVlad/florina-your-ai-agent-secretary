@@ -20,12 +20,7 @@ import type {
   ChangedFileStatus,
   DiffDigest,
 } from '../../../../core/application/use-cases/attention/diff-digest.js';
-import type {
-  DiffStatsView,
-  DiffViewData,
-  FileChangeView,
-  FileGroupView,
-} from './digest-types.js';
+import type { DiffStatsView, DiffViewData, FileChangeView, FileGroupView } from './digest-types.js';
 
 /* ------------------------------------------------------------------ *
  * Constants
@@ -41,12 +36,7 @@ export const LARGE_CHANGE_THRESHOLD = 100;
  * The ordered list of file statuses used for grouping. Matches the order
  * `git diff --name-status` reports them, with `added` first.
  */
-const STATUS_ORDER: readonly ChangedFileStatus[] = [
-  'added',
-  'modified',
-  'deleted',
-  'renamed',
-];
+const STATUS_ORDER: readonly ChangedFileStatus[] = ['added', 'modified', 'deleted', 'renamed'];
 
 /* ------------------------------------------------------------------ *
  * DiffViewModel

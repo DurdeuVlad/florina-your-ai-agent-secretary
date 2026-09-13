@@ -8,29 +8,13 @@
  * a single entry point. No real Electron/Tauri runtime is required; the
  * module ships in-memory mocks for testing.
  */
-export {
-  DesktopApp,
-  DesktopConnectionError,
-} from './desktop-app.js';
+export { DesktopApp, DesktopConnectionError } from './desktop-app.js';
 export type { DesktopAppOptions } from './desktop-app.js';
 
-export {
-  IpcBridge,
-  IpcError,
-  IPC_CHANNELS,
-  MockIpcTransport,
-} from './ipc-bridge.js';
-export type {
-  IpcChannel,
-  IpcMessageHandler,
-  IpcTransport,
-} from './ipc-bridge.js';
+export { IpcBridge, IpcError, IPC_CHANNELS, MockIpcTransport } from './ipc-bridge.js';
+export type { IpcChannel, IpcMessageHandler, IpcTransport } from './ipc-bridge.js';
 
-export {
-  RendererState,
-  DEFAULT_RENDERER_STATE,
-  DEFAULT_VOICE_STATE,
-} from './renderer-state.js';
+export { RendererState, DEFAULT_RENDERER_STATE, DEFAULT_VOICE_STATE } from './renderer-state.js';
 export type {
   DaemonStatus,
   RendererStateData,
@@ -69,7 +53,12 @@ export type {
   ViewFilter,
 } from './views/view-types.js';
 
-export { ApprovalCardViewModel, CAPABILITY_LABELS, RISK_COLORS, RISK_LABELS } from './views/approval-card.js';
+export {
+  ApprovalCardViewModel,
+  CAPABILITY_LABELS,
+  RISK_COLORS,
+  RISK_LABELS,
+} from './views/approval-card.js';
 export {
   renderApprovalCard,
   renderRiskBadge,
@@ -109,6 +98,91 @@ export type {
   TestResultsView,
 } from './views/digest-types.js';
 
+/* ------------------------------------------------------------------ *
+ * M6 drill-down views (issue #74)
+ * ------------------------------------------------------------------ */
+
+export {
+  buildFleetView,
+  renderFleetView,
+  renderProviderRow,
+  renderParkedTask,
+  formatCountdown,
+} from './views/fleet-view.js';
+export type {
+  FleetViewData,
+  ProviderView,
+  QuotaWindowView,
+  ParkedTaskView,
+} from './views/fleet-view.js';
+
+export {
+  buildProjectView,
+  renderProjectView,
+  renderManagerCard,
+  renderWorkerRow,
+} from './views/project-view.js';
+export type { ProjectViewData, ManagerCardView, WorkerRowView } from './views/project-view.js';
+
+export {
+  buildSessionInspector,
+  renderSessionInspector,
+  renderTimelineEntry,
+  renderTranscriptLine,
+} from './views/session-inspector-view.js';
+export type {
+  SessionInspectorData,
+  TimelineEntryView,
+  TranscriptLineView,
+  DiffRefView,
+  InspectorSection,
+} from './views/session-inspector-view.js';
+
+export {
+  buildIdeasView,
+  renderIdeasView,
+  renderIdeaRow,
+  renderBriefCard,
+  IDEA_STATUS_METADATA,
+} from './views/ideas-view.js';
+export type { IdeasViewData, IdeaRowView, BriefCardView } from './views/ideas-view.js';
+
+export {
+  buildPreferencesView,
+  renderPreferencesView,
+  renderRoutingRule,
+  renderDenyRule,
+} from './views/preferences-view.js';
+export type {
+  PreferencesViewData,
+  RoutingRuleView,
+  DenyRuleView,
+  RuleProvenance,
+} from './views/preferences-view.js';
+
+export {
+  buildSecretaryView,
+  renderSecretaryView,
+  renderTodoRow,
+  renderResearchJob,
+  renderPendingMemory,
+  TODO_STATUS_METADATA,
+} from './views/secretary-view.js';
+export type {
+  SecretarySnapshot,
+  SecretaryViewData,
+  ResearchJobView,
+  PendingMemoryView,
+} from './views/secretary-view.js';
+
+export {
+  buildContextHealthView,
+  renderContextHealthView,
+  renderAgentHealthRow,
+  HEALTH_METADATA,
+} from './views/context-health-view.js';
+export type { ContextHealthViewData, AgentHealthView } from './views/context-health-view.js';
+
 export { PttHudViewModel, DEFAULT_PTT_HUD_STATE } from './views/ptt-hud.js';
 export type { PttHudState, PttHudStateCallback } from './views/ptt-hud.js';
 export {
@@ -126,20 +200,10 @@ export {
   DEFAULT_HOTKEYS,
   parseAccelerator,
 } from './hotkeys.js';
-export type {
-  HotkeyAction,
-  KeyEventLike,
-  KeyboardBackend,
-  ParsedAccelerator,
-} from './hotkeys.js';
+export type { HotkeyAction, KeyEventLike, KeyboardBackend, ParsedAccelerator } from './hotkeys.js';
 
 export { SystemTrayManager, MockTrayBackend } from './system-tray.js';
-export type {
-  TrayAction,
-  TrayActionCallback,
-  TrayBackend,
-  TrayMenuItem,
-} from './system-tray.js';
+export type { TrayAction, TrayActionCallback, TrayBackend, TrayMenuItem } from './system-tray.js';
 
 export { KeyboardNavigator } from './keyboard-nav.js';
 export type { NavAction, NavActionCallback } from './keyboard-nav.js';
