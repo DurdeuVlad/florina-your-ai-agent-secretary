@@ -76,6 +76,8 @@ import type { HealthStatus } from '../core/application/use-cases/health.js';
 import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
 import { CapacityRouter } from '../core/application/use-cases/routing/capacity-router.js';
 import { FailoverService } from '../core/application/use-cases/tasks/failover.js';
+import { DelegationService } from '../core/application/use-cases/federation/delegation.js';
+import { RemoteSecretaryAdapter } from '../adapters/outbound/federation/remote-secretary-adapter.js';
 import { CapsuleRollupService } from '../core/application/use-cases/context/capsule-rollup.js';
 import { PreferenceProfileStore } from '../adapters/outbound/preferences/json-preference-profile.js';
 import { SecretaryMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
@@ -121,6 +123,31 @@ export interface DaemonOptions {
   readonly preferenceProfilePath?: string;
   /** When true, do not install SIGINT/SIGTERM handlers (useful for tests). */
   readonly installSignalHandlers?: boolean;
+  /**
+   * Shared-secret auth for remote parents (DEC-036, issue #78). When
+   * set, every control-plane connection must authenticate with
+   * `{type:'auth', token}` before commands or subscription.
+   */
+  readonly authToken?: string;
+  /**
+   * Command kinds a remote connection may invoke (DEC-011). Unset →
+   * all commands. A federated child typically scopes this to the
+   * delegation surface (e.g. `delegate-task`, `stop-task`, `query-task`).
+   */
+  readonly allowedCommands?: readonly string[];
+  /**
+   * Remote capacity pools (DEC-036): child daemons registered in the
+   * adapter registry under `provider@host` ids so the router treats
+   * them as provider capacity.
+   */
+  readonly remoteProviders?: readonly {
+    readonly id: string;
+    readonly host: string;
+    readonly port: number;
+    readonly projectId: string;
+    readonly preferProvider?: string;
+    readonly authToken?: string;
+  }[];
 }
 
 /** Daemon lifecycle states. */
@@ -153,6 +180,9 @@ export class SecretaryDaemon extends EventEmitter {
     preferenceProfilePath: string;
     installSignalHandlers: boolean;
     ideasDir?: string;
+    authToken?: string;
+    allowedCommands?: readonly string[];
+    remoteProviders?: NonNullable<DaemonOptions['remoteProviders']>;
   };
   private state: DaemonState = 'stopped';
   private server: WebSocketControlPlaneServer | null = null;
@@ -195,6 +225,13 @@ export class SecretaryDaemon extends EventEmitter {
         path.join(os.homedir(), '.agent-secretary', 'preferences.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
       ...(options.ideasDir !== undefined ? { ideasDir: options.ideasDir } : {}),
+      ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
+      ...(options.allowedCommands !== undefined
+        ? { allowedCommands: options.allowedCommands }
+        : {}),
+      ...(options.remoteProviders !== undefined
+        ? { remoteProviders: options.remoteProviders }
+        : {}),
     };
   }
 
@@ -399,6 +436,27 @@ export class SecretaryDaemon extends EventEmitter {
       // the SessionManager is the sole event publisher (no duplicates).
       this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter());
 
+      // Federated capacity pools (DEC-036, issue #78): each configured
+      // child daemon registers under its `provider@host` id — the router
+      // treats it as ordinary provider capacity.
+      for (const remote of this.options.remoteProviders ?? []) {
+        this.adapterRegistry.register(remote.id, () => {
+          const adapter = new RemoteSecretaryAdapter(null, {
+            id: remote.id,
+            remote: {
+              host: remote.host,
+              port: remote.port,
+              ...(remote.authToken !== undefined ? { authToken: remote.authToken } : {}),
+            },
+            projectId: remote.projectId,
+            ...(remote.preferProvider !== undefined
+              ? { preferProvider: remote.preferProvider }
+              : {}),
+          });
+          return adapter;
+        });
+      }
+
       // Wire the capsule rollup pipeline (issue #76): when a session ends —
       // by stop/freeze or natural stream completion — its journal events are
       // folded into the Task Capsule's rolledUpEventSummaries. The hook is
@@ -471,6 +529,30 @@ export class SecretaryDaemon extends EventEmitter {
         dispatcher: briefDispatcher,
       });
 
+      // Federated delegation surface (DEC-036, issue #78): remote
+      // parents delegate into this daemon through `delegate-task`. The
+      // command API is resolved lazily — delegation delegates arrive
+      // only after construction completes.
+      const delegation = new DelegationService({
+        commandApi: {
+          execute: (cmd) => {
+            const api = this.commandApi;
+            if (api === null) {
+              return Promise.resolve({ ok: false, error: 'daemon not started' });
+            }
+            return api.execute(cmd);
+          },
+        },
+        router: () =>
+          new CapacityRouter({
+            ledger: this.quotaLedger ?? new QuotaLedger(),
+            profile: this.preferenceStore?.toProfile() ?? { rules: [], denied: [] },
+          }),
+        taskStore: repos.tasks,
+        worktreeManager: this.worktreeManager,
+        projects: repos.projects,
+      });
+
       this.commandApi = new CommandApi({
         eventBus: this.bus,
         taskStateMachine: this.taskStateMachine,
@@ -487,6 +569,7 @@ export class SecretaryDaemon extends EventEmitter {
         contextHealth: this.contextHealth ?? undefined,
         ideas: this.ideaService,
         preferences: this.preferenceStore,
+        delegation,
         onShutdown: () => {
           void this.stop();
         },
@@ -540,6 +623,12 @@ export class SecretaryDaemon extends EventEmitter {
         commandApi: this.commandApi,
         controlPlaneApi: this.api,
         eventStream: this.stream,
+        ...(this.options.authToken !== undefined
+          ? { authToken: this.options.authToken }
+          : {}),
+        ...(this.options.allowedCommands !== undefined
+          ? { allowedCommands: this.options.allowedCommands }
+          : {}),
         onConnection: (socket) => this.emit('connection', socket),
         onError: (err) => this.emit('error', err),
       });
