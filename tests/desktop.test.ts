@@ -79,6 +79,12 @@ class MockDaemonServer {
     });
   }
 
+  /** Abruptly drop the connected client while keeping the server listening. */
+  dropClient(): void {
+    this.client?.terminate();
+    this.client = null;
+  }
+
   close(): Promise<void> {
     return new Promise((resolve) => {
       this.client?.close();
@@ -562,11 +568,15 @@ describe('DesktopApp', () => {
     const transport = new MockIpcTransport();
     const app = new DesktopApp({ window, ipcTransport: transport, connectTimeoutMs: 500 });
     app.start();
-    // Connect to a port that is not listening.
+    // Connect to a port that is not listening. The first attempt rejects
+    // and the app drops into the auto-reconnect loop (#122): status is
+    // 'reconnecting' and the last error stays readable in state.
     await expect(app.connectToDaemon('ws://127.0.0.1:1')).rejects.toThrow(DesktopConnectionError);
-    expect(app.getState().daemonStatus).toBe('error');
+    expect(app.getState().daemonStatus).toBe('reconnecting');
     expect(app.getState().connected).toBe(false);
     expect(app.getState().error).toBeTruthy();
+    await app.disconnect();
+    expect(app.getState().daemonStatus).toBe('disconnected');
   });
 
   it('connection timeout rejects with DesktopConnectionError', async () => {
@@ -588,7 +598,8 @@ describe('DesktopApp', () => {
     });
     app.start();
     await expect(app.connectToDaemon(url)).rejects.toThrow(DesktopConnectionError);
-    expect(app.getState().daemonStatus).toBe('error');
+    expect(app.getState().daemonStatus).toBe('reconnecting');
+    await app.disconnect();
     await new Promise<void>((resolve) => stall.close(() => resolve()));
   });
 
@@ -617,7 +628,7 @@ describe('DesktopApp', () => {
     expect(res.ok).toBe(true);
   });
 
-  it('daemon socket close updates state to disconnected', async () => {
+  it('daemon socket close flips to reconnecting, then disconnect stops retries', async () => {
     const window = new MockWindowBackend();
     const transport = new MockIpcTransport();
     const app = new DesktopApp({ window, ipcTransport: transport });
@@ -625,11 +636,14 @@ describe('DesktopApp', () => {
     const conn = server.waitForConnection();
     await app.connectToDaemon(server.url);
     const socket = await conn;
-    // Wait for the state to flip to disconnected after the server closes.
-    const disconnected = waitForState(app, (s) => !s.connected);
+    // Wait for the state to leave 'connected' after the server closes —
+    // the app now reports 'reconnecting' instead of dying (#122).
+    const dropped = waitForState(app, (s) => !s.connected);
     socket.close();
-    await disconnected;
+    await dropped;
     expect(app.getState().connected).toBe(false);
+    expect(app.getState().daemonStatus).toBe('reconnecting');
+    await app.disconnect();
     expect(app.getState().daemonStatus).toBe('disconnected');
   });
 
@@ -719,9 +733,10 @@ describe('DesktopApp', () => {
     const trayBackend = new MockTrayBackend();
     const app = new DesktopApp({ window, ipcTransport: transport, trayBackend });
     app.start();
-    // Connect to a port that is not listening -> error.
+    // Connect to a port that is not listening -> reconnect loop (#122).
     await expect(app.connectToDaemon('ws://127.0.0.1:1')).rejects.toBeDefined();
-    expect(trayBackend.tooltip).toContain('Error');
+    expect(trayBackend.tooltip).toContain('Reconnecting');
+    await app.disconnect();
   });
 });
 
@@ -891,5 +906,133 @@ describe('handleRendererCommand', () => {
       res: { ok: true },
     });
     expect(sawCommand).toBe(false);
+  });
+});
+
+/* ================================================================== *
+ * Auto-reconnect / offline UX (issue #122)
+ * ================================================================== */
+
+describe('reconnect', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function fastApp(transport: MockIpcTransport): DesktopApp {
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      reconnectBaseDelayMs: 20,
+      reconnectMaxDelayMs: 80,
+    });
+    app.start();
+    return app;
+  }
+
+  it('reports reconnecting after a drop, then re-syncs when the daemon returns', async () => {
+    const transport = new MockIpcTransport();
+    const app = fastApp(transport);
+    const first = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await first;
+    socket.on('message', () => {}); // drain
+    server.dropClient();
+
+    await waitForState(app, (s) => s.daemonStatus === 'reconnecting');
+
+    const second = server.waitForConnection();
+    const socket2 = await second;
+    socket2.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as { kind?: string };
+      if (cmd.kind === 'query-inbox') socket2.send(JSON.stringify({ ok: true, items: [] }));
+      else if (cmd.kind !== undefined) socket2.send(JSON.stringify({ ok: true }));
+    });
+    await waitForState(app, (s) => s.daemonStatus === 'connected' && s.connected);
+    // Resync pushed a fresh tree to the renderer.
+    await waitFor(() => transport.toRenderer.some((m) => m.channel === 'inbox:update'));
+    await app.disconnect();
+  });
+
+  it('keeps last-known inbox items readable while reconnecting', async () => {
+    const transport = new MockIpcTransport();
+    const app = fastApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_keep',
+            taskId: 't1',
+            kind: 'Failure',
+            priority: 'Normal',
+            status: 'Pending',
+            createdAt: '2026-09-16T10:00:00Z',
+            payload: {},
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+    server.dropClient();
+    await waitForState(app, (s) => s.daemonStatus === 'reconnecting');
+    expect(app.getState().inboxItems).toHaveLength(1);
+    await app.disconnect();
+  });
+
+  it('retries an unreachable daemon until it comes up', async () => {
+    const transport = new MockIpcTransport();
+    const app = fastApp(transport);
+    const dead = new MockDaemonServer();
+    await dead.start();
+    const url = dead.url;
+    const port = dead.actualPort;
+    await dead.close(); // port now refuses connections
+
+    const attempt = app.connectToDaemon(url);
+    await expect(attempt).rejects.toThrow(DesktopConnectionError);
+    await waitForState(app, (s) => s.daemonStatus === 'reconnecting');
+
+    const revived = new MockDaemonServer(port);
+    await revived.start();
+    const conn = revived.waitForConnection();
+    const socket = await conn;
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as { kind?: string };
+      if (cmd.kind === 'query-inbox') socket.send(JSON.stringify({ ok: true, items: [] }));
+      else if (cmd.kind !== undefined) socket.send(JSON.stringify({ ok: true }));
+    });
+    await waitForState(app, (s) => s.daemonStatus === 'connected' && s.connected, 5000);
+    await app.disconnect();
+    await revived.close();
+  });
+
+  it('an explicit disconnect cancels the retry loop', async () => {
+    const transport = new MockIpcTransport();
+    const app = fastApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    await conn;
+    await app.disconnect();
+    expect(app.getState().daemonStatus).toBe('disconnected');
+    server.dropClient();
+    // Give any pending timer a chance to fire — none should be pending.
+    await new Promise((r) => setTimeout(r, 120));
+    let reconnects = 0;
+    void server.waitForConnection().then(() => {
+      reconnects += 1;
+    });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(reconnects).toBe(0);
+    expect(app.getState().daemonStatus).toBe('disconnected');
   });
 });

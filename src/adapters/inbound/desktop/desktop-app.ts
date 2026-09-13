@@ -48,6 +48,13 @@ export interface DesktopAppOptions {
   /** Connection timeout in milliseconds (default 10s). */
   readonly connectTimeoutMs?: number;
   /**
+   * Base delay for the first reconnect attempt after a drop (default 1s).
+   * Doubles each attempt up to {@link DesktopAppOptions.reconnectMaxDelayMs}.
+   */
+  readonly reconnectBaseDelayMs?: number;
+  /** Upper bound on the reconnect backoff (default 30s). */
+  readonly reconnectMaxDelayMs?: number;
+  /**
    * Optional system tray backend. When supplied, the app creates a
    * {@link SystemTrayManager} on {@link DesktopApp.start} and tears it down
    * on {@link DesktopApp.stop}. When omitted, no tray is created (useful for
@@ -97,6 +104,13 @@ export class DesktopApp {
   private readonly tray: SystemTrayManager | null;
   private socket: WebSocket | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private wantsConnection = false;
+  private socketUrl: string | null = null;
+  private authToken: string | undefined;
+  private readonly reconnectBaseDelayMs: number;
+  private readonly reconnectMaxDelayMs: number;
   private started = false;
 
   constructor(options: DesktopAppOptions) {
@@ -104,6 +118,8 @@ export class DesktopApp {
     this.bridge = new IpcBridge(options.ipcTransport);
     this.state = new RendererState();
     this.connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
+    this.reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 1_000;
+    this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
     this.windowOptions = options.windowOptions ?? {};
     if (options.trayBackend !== undefined) {
       this.tray = new SystemTrayManager(options.trayBackend);
@@ -157,13 +173,45 @@ export class DesktopApp {
   }
 
   /**
-   * Connect to the Florina daemon at the given WebSocket URL. On success,
-   * updates renderer state to `connected` and wires incoming daemon messages
-   * to renderer-state updates. Rejects with {@link DesktopConnectionError}
-   * on failure.
+   * Connect to the Florina daemon at the given WebSocket URL and stay
+   * connected: if the socket drops (or this first attempt fails), the app
+   * retries with exponential backoff and reports `reconnecting` until the
+   * link is re-established or {@link disconnect} is called (#122).
+   * The returned promise reflects only the first attempt.
    */
   connectToDaemon(socketUrl: string, authToken?: string): Promise<void> {
-    this.updateDaemonStatus('connecting', { connected: false, error: undefined });
+    // Record the intent — the app keeps retrying (with backoff) until it
+    // either connects or the user explicitly disconnects (#122).
+    this.socketUrl = socketUrl;
+    this.authToken = authToken;
+    this.wantsConnection = true;
+    this.reconnectAttempt = 0;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    return this.openSocket().catch((err: unknown) => {
+      this.scheduleReconnect();
+      throw err;
+    });
+  }
+
+  /**
+   * Single connection attempt. On success, updates renderer state to
+   * `connected` and wires incoming daemon messages to renderer-state
+   * updates. Rejects with {@link DesktopConnectionError} on failure.
+   */
+  private openSocket(): Promise<void> {
+    const socketUrl = this.socketUrl;
+    const authToken = this.authToken;
+    if (socketUrl === null) {
+      return Promise.reject(new DesktopConnectionError('No daemon URL configured'));
+    }
+    const reconnecting = this.reconnectAttempt > 0 || this.socket !== null;
+    this.updateDaemonStatus(reconnecting ? 'reconnecting' : 'connecting', {
+      connected: false,
+      error: undefined,
+    });
     return new Promise<void>((resolve, reject) => {
       let socket: WebSocket;
       try {
@@ -194,10 +242,7 @@ export class DesktopApp {
           socket.send(JSON.stringify({ type: 'auth', token: authToken }));
         } else {
           clearTimeout(timer);
-          this.socket = socket;
-          this.updateDaemonStatus('connected', { connected: true, error: undefined });
-          this.wireDaemonSocket(socket);
-          resolve();
+          this.adoptSocket(socket, resolve, reject);
         }
       });
 
@@ -227,10 +272,7 @@ export class DesktopApp {
         }
         authenticated = true;
         clearTimeout(timer);
-        this.socket = socket;
-        this.updateDaemonStatus('connected', { connected: true, error: undefined });
-        this.wireDaemonSocket(socket);
-        resolve();
+        this.adoptSocket(socket, resolve, reject);
       });
 
       socket.once('error', (err: Error) => {
@@ -243,6 +285,24 @@ export class DesktopApp {
         reject(e);
       });
     });
+  }
+
+  /**
+   * Take ownership of a freshly-opened (and authenticated) socket. If the
+   * connection was cancelled while the attempt was in flight — e.g.
+   * {@link disconnect} ran during the handshake — the socket is discarded
+   * instead of being adopted (#122 race).
+   */
+  private adoptSocket(socket: WebSocket, resolve: () => void, reject: (err: Error) => void): void {
+    if (!this.wantsConnection) {
+      socket.close();
+      reject(new DesktopConnectionError('Connection cancelled by disconnect'));
+      return;
+    }
+    this.socket = socket;
+    this.updateDaemonStatus('connected', { connected: true, error: undefined });
+    this.wireDaemonSocket(socket);
+    resolve();
   }
 
   /**
@@ -294,8 +354,16 @@ export class DesktopApp {
     return this.state.subscribe(callback);
   }
 
-  /** Disconnect from the daemon and reset connection-related renderer state. */
+  /**
+   * Deliberate disconnect: cancels the reconnect loop, closes the socket,
+   * and resets connection-related renderer state.
+   */
   disconnect(): Promise<void> {
+    this.wantsConnection = false;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     return new Promise<void>((resolve) => {
       const socket = this.socket;
       this.socket = null;
@@ -364,14 +432,52 @@ export class DesktopApp {
     });
 
     socket.once('close', () => {
-      this.socket = null;
-      this.updateDaemonStatus('disconnected', { connected: false, error: undefined });
+      if (this.socket === socket) this.socket = null;
+      this.handleSocketDrop();
     });
 
-    socket.once('error', (err: Error) => {
-      this.socket = null;
-      this.updateDaemonStatus('error', { connected: false, error: err.message });
+    socket.once('error', () => {
+      // 'close' follows 'error' on a live socket — force it so the drop
+      // handler runs even when ws doesn't close on its own.
+      if (socket.readyState !== WebSocket.CLOSED) socket.close();
     });
+  }
+
+  /**
+   * A live socket went away. While the app still wants the connection,
+   * report `reconnecting` (amber — last known state stays readable, DG-01
+   * §4) and schedule the next attempt with exponential backoff.
+   */
+  private handleSocketDrop(): void {
+    if (this.wantsConnection) {
+      this.scheduleReconnect();
+    } else {
+      this.updateDaemonStatus('disconnected', { connected: false, error: undefined });
+    }
+  }
+
+  /** Schedule the next reconnect attempt; no-op unless a connect was requested. */
+  private scheduleReconnect(): void {
+    if (!this.wantsConnection || this.reconnectTimer !== null) return;
+    // Keep the last error in state — DG-01 wants the raw daemon error
+    // readable/copyable while the amber dot says "reconnecting".
+    this.updateDaemonStatus('reconnecting', { connected: false });
+    const delay = Math.min(
+      this.reconnectBaseDelayMs * 2 ** this.reconnectAttempt,
+      this.reconnectMaxDelayMs,
+    );
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.openSocket()
+        .then(() => {
+          // Re-subscribe and re-pull so the renderer resyncs after a gap.
+          this.reconnectAttempt = 0;
+          this.subscribeToEvents();
+          void this.refreshNow();
+        })
+        .catch(() => this.scheduleReconnect());
+    }, delay);
   }
 
   /**
@@ -481,9 +587,7 @@ export class DesktopApp {
     if (typeof cmd !== 'string') return cmd as Command;
     const [verb, itemId] = cmd.split(':', 2);
     if (verb === 'approve' || verb === 'deny') {
-      const item = this.state
-        .snapshot()
-        .inboxItems.find((i) => i.id === itemId);
+      const item = this.state.snapshot().inboxItems.find((i) => i.id === itemId);
       const approvalId = item?.payload['approvalId'];
       if (item === undefined || typeof approvalId !== 'string') {
         return { error: `Cannot ${verb}: no pending approval for ${itemId ?? '?'}` };
@@ -523,20 +627,23 @@ export class DesktopApp {
    * renderer (NEEDS YOU / WORKING / DONE — issue #120).
    */
   private async refreshViews(): Promise<void> {
+    // A dropped socket mid-refresh is normal (reconnect races) — treat a
+    // failed send as "no answer" and keep the last known state rather than
+    // blanking the renderer or throwing an unhandled rejection.
     const [inboxRes, tasksRes] = await Promise.all([
-      this.sendCommand({ kind: 'query-inbox' }),
-      this.sendCommand({ kind: 'list-tasks' }),
+      this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
+      this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
     ]);
+    if (inboxRes === null && tasksRes === null) return; // offline — keep last known
     const items =
-      inboxRes.ok && 'items' in inboxRes
+      inboxRes !== null && inboxRes.ok && 'items' in inboxRes
         ? (inboxRes as { items: AttentionItemSnapshot[] }).items
-        : [];
+        : [...this.state.snapshot().inboxItems];
     const tasks =
-      tasksRes.ok && 'tasks' in tasksRes ? (tasksRes as { tasks: TaskSnapshot[] }).tasks : [];
+      tasksRes !== null && tasksRes.ok && 'tasks' in tasksRes
+        ? (tasksRes as { tasks: TaskSnapshot[] }).tasks
+        : [];
     this.state.update({ inboxItems: items });
-    this.bridge.sendToRenderer(
-      'inbox:update',
-      renderHomeView(items as AttentionItem[], tasks),
-    );
+    this.bridge.sendToRenderer('inbox:update', renderHomeView(items as AttentionItem[], tasks));
   }
 }

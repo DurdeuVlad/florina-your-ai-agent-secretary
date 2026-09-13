@@ -35,7 +35,7 @@ export interface VoiceState {
 export type RendererView = 'inbox' | 'task' | 'digest' | 'metrics' | 'settings';
 
 /** Daemon connection status surfaced to the UI. */
-export type DaemonStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type DaemonStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 /** The full renderer view-state. */
 export interface RendererStateData {

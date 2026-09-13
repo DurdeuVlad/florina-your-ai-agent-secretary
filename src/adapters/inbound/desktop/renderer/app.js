@@ -16,6 +16,7 @@ const bridge = window.florina;
 const STATUS_LABEL = {
   connected: ['on', 'daemon connected'],
   connecting: ['wait', 'connecting…'],
+  reconnecting: ['wait', 'reconnecting…'],
   disconnected: ['err', 'daemon disconnected'],
   error: ['err', 'daemon unreachable'],
 };
@@ -65,19 +66,19 @@ const TITLES = {
 };
 
 function showView(name) {
-  document.querySelectorAll('.navitem').forEach((x) =>
-    x.classList.toggle('active', x.dataset.view === name),
-  );
-  document.querySelectorAll('.view').forEach((x) =>
-    x.classList.toggle('active', x.id === 'v-' + name),
-  );
+  document
+    .querySelectorAll('.navitem')
+    .forEach((x) => x.classList.toggle('active', x.dataset.view === name));
+  document
+    .querySelectorAll('.view')
+    .forEach((x) => x.classList.toggle('active', x.id === 'v-' + name));
   $('viewTitle').textContent = TITLES[name][0];
   $('viewSub').textContent = TITLES[name][1];
 }
 
-document.querySelectorAll('.navitem').forEach((n) =>
-  n.addEventListener('click', () => showView(n.dataset.view)),
-);
+document
+  .querySelectorAll('.navitem')
+  .forEach((n) => n.addEventListener('click', () => showView(n.dataset.view)));
 
 /* ---------- keyboard nav (DG-01 §4) ---------- */
 
