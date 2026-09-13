@@ -119,3 +119,17 @@ export type {
   StatuslineSource,
   ClaudeQuotaReaderOptions,
 } from './quota-readers.js';
+
+/* Generic ACP adapter (DEC-030, issue #61) */
+export {
+  AcpAdapter,
+  nodeAcpSpawner,
+  devinAcpAdapter,
+  geminiAcpAdapter,
+} from './acp-adapter.js';
+export type {
+  AcpAdapterOptions,
+  AcpProcess,
+  AcpSpawner,
+  PermissionResponder,
+} from './acp-adapter.js';
