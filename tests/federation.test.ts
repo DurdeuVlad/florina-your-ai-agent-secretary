@@ -41,7 +41,10 @@ async function seedChild(daemon: SecretaryDaemon): Promise<string> {
   // The delegated worktree branches from a real repo — init one.
   const repoPath = join(tmpDir, `repo-${++lockSeq}`);
   await mkdir(repoPath, { recursive: true });
-  execSync('git init -q && git commit -q --allow-empty -m init', { cwd: repoPath });
+  execSync(
+    'git init -q && git -c user.email=test@local -c user.name=test commit -q --allow-empty -m init',
+    { cwd: repoPath },
+  );
   const project = buildProject({ name: 'child', repo: { path: repoPath } });
   new ProjectRepository(db).insert(project);
   db.prepare(
