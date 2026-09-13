@@ -27,7 +27,7 @@ import type {
   AudioTransport,
   ResponseEvent,
   ToolCallEvent,
-  RealtimeVoicePort,
+  RealtimeSessionPort,
   TranscriptEvent,
   VoiceErrorEvent,
   VoiceSessionState,
@@ -162,7 +162,7 @@ export type ToolCallCallback = (event: ToolCallEvent) => void;
  * {@link RealtimeBridge.onTranscript} / {@link RealtimeBridge.onResponse} /
  * {@link RealtimeBridge.onStateChange} / {@link RealtimeBridge.onError}.
  */
-export class RealtimeBridge implements RealtimeVoicePort {
+export class RealtimeBridge implements RealtimeSessionPort {
   private readonly audioTransport: AudioTransport;
   private readonly socketFactory: SocketFactory;
 

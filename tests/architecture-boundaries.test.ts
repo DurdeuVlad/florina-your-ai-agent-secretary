@@ -930,6 +930,9 @@ describe('migrated use-case compatibility facades', () => {
       'src/adapters/outbound/voice/whisper-adapter.ts': [
         'src/core/application/ports/outbound/voice.ts',
       ],
+      'src/adapters/outbound/voice/stdin-audio-transport.ts': [
+        'src/core/application/ports/outbound/voice.ts',
+      ],
       // The core voice pipeline orchestrates ports only — it must import
       // the voice port and nothing outside src/core.
       'src/core/application/use-cases/voice/voice-pipeline.ts': [
@@ -952,6 +955,31 @@ describe('migrated use-case compatibility facades', () => {
         'src/core/application/use-cases/control-plane/control-plane-api.ts',
         'src/core/application/use-cases/tasks/command-api.ts',
         'src/adapters/inbound/websocket/event-stream.ts',
+      ],
+      // The CLI adapter family speaks the typed command API and renders
+      // core snapshots — never daemon/storage facades.
+      'src/adapters/inbound/cli/client.ts': [
+        'src/core/application/use-cases/tasks/command-api.ts',
+      ],
+      'src/adapters/inbound/cli/formatters.ts': [
+        'src/core/application/use-cases/tasks/command-api.ts',
+        'src/core/application/use-cases/metrics.ts',
+        'src/core/application/use-cases/attention/completion-digest.ts',
+      ],
+      'src/adapters/inbound/cli/cli.ts': [
+        'src/core/application/use-cases/tasks/command-api.ts',
+        'src/core/domain/enums.ts',
+      ],
+      // The inbound voice surface translates model tool calls into typed
+      // commands and drives the engine through the session port only.
+      'src/adapters/inbound/voice/voice-tools.ts': [
+        'src/core/application/use-cases/tasks/command-api.ts',
+        'src/core/application/ports/outbound/voice.ts',
+      ],
+      'src/adapters/inbound/voice/voice-session-manager.ts': [
+        'src/core/application/ports/outbound/voice.ts',
+        'src/core/application/use-cases/tasks/command-api.ts',
+        'src/core/application/use-cases/voice/voice-pipeline.ts',
       ],
       // The core control-plane and health use cases talk to ports only.
       'src/core/application/use-cases/control-plane/control-plane-api.ts': [
@@ -1072,11 +1100,12 @@ describe('src/adapters/outbound tree', () => {
     'git/diff-analyzer.ts',
     'git/worktree-manager.ts',
     'git/index.ts',
-    // Voice adapters (realtime + whisper)
+    // Voice adapters (realtime + whisper + stdio audio transport)
     'voice/realtime-message.ts',
     'voice/realtime-bridge.ts',
     'voice/whisper-backend.ts',
     'voice/whisper-adapter.ts',
+    'voice/stdin-audio-transport.ts',
     'voice/index.ts',
     // In-memory event bus adapter
     'events/in-memory-event-bus.ts',
@@ -1252,6 +1281,7 @@ describe('migrated outbound compatibility facades', () => {
     'src/voice/realtime-bridge.ts',
     'src/voice/whisper-backend.ts',
     'src/voice/whisper-adapter.ts',
+    'src/voice/stdin-audio-transport.ts',
     // Security auditor facade
     'src/security/auditors.ts',
   ];
@@ -1368,6 +1398,16 @@ describe('src/adapters/inbound tree', () => {
     'websocket/event-stream.ts',
     'websocket/control-plane-server.ts',
     'websocket/index.ts',
+    // CLI inbound adapter family (secretary/asec binary surface)
+    'cli/client.ts',
+    'cli/formatters.ts',
+    'cli/deps.ts',
+    'cli/cli.ts',
+    'cli/index.ts',
+    // Voice inbound adapter family (session manager + tool mapping)
+    'voice/voice-tools.ts',
+    'voice/voice-session-manager.ts',
+    'voice/index.ts',
     // Inbound barrel
     'index.ts',
   ];
@@ -1505,6 +1545,10 @@ describe('migrated inbound compatibility facades', () => {
     'src/desktop/views/ptt-hud.ts',
     'src/desktop/views/ptt-templates.ts',
     'src/desktop/views/view-types.ts',
+    // CLI + voice-session legacy surfaces
+    'src/cli/client.ts',
+    'src/cli/formatters.ts',
+    'src/daemon/voice-session-manager.ts',
   ];
 
   it('each moved desktop file is a facade into src/adapters/inbound', () => {
@@ -1557,7 +1601,13 @@ function bootstrapEdgeViolation(edge: ImportEdge): string | null {
 }
 
 describe('src/bootstrap composition root', () => {
-  const BOOTSTRAP_EXPECTED: readonly string[] = ['daemon.ts', 'index.ts'];
+  const BOOTSTRAP_EXPECTED: readonly string[] = [
+    'daemon.ts',
+    'daemon-runner.ts',
+    'cli.ts',
+    'voice-session.ts',
+    'index.ts',
+  ];
 
   it('the expected bootstrap tree exists', () => {
     const missing = BOOTSTRAP_EXPECTED.filter(
@@ -1695,6 +1745,120 @@ describe('src/bootstrap composition root', () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it('bootstrap daemon-runner composes the daemon process lifecycle', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'bootstrap', 'daemon-runner.ts'));
+    expect(
+      edges.some((e) => e.target === 'src/bootstrap/daemon.ts'),
+      'src/bootstrap/daemon-runner.ts must import the daemon composition root',
+    ).toBe(true);
+  });
+
+  it('bootstrap cli composes the inbound CLI adapter with concrete services', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'bootstrap', 'cli.ts'));
+    const requiredTargets: readonly string[] = [
+      'src/adapters/inbound/cli/cli.ts',
+      'src/adapters/inbound/cli/client.ts',
+      'src/bootstrap/daemon-runner.ts',
+      'src/bootstrap/voice-session.ts',
+    ];
+    const violations: string[] = [];
+    for (const target of requiredTargets) {
+      if (!edges.some((e) => e.target === target)) {
+        violations.push(`src/bootstrap/cli.ts must directly import ${target}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('bootstrap voice-session composes the inbound voice surface with outbound engines', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'bootstrap', 'voice-session.ts'));
+    const requiredTargets: readonly string[] = [
+      'src/adapters/inbound/voice/voice-session-manager.ts',
+      'src/adapters/outbound/voice/stdin-audio-transport.ts',
+      'src/adapters/outbound/voice/realtime-bridge.ts',
+      'src/adapters/outbound/voice/whisper-adapter.ts',
+      'src/adapters/outbound/voice/whisper-backend.ts',
+    ];
+    const violations: string[] = [];
+    for (const target of requiredTargets) {
+      if (!edges.some((e) => e.target === target)) {
+        violations.push(`src/bootstrap/voice-session.ts must directly import ${target}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('legacy CLI surfaces (issue #93)', () => {
+  it('src/cli/daemon-runner.ts is a facade into the bootstrap composition root', () => {
+    expect(
+      facadeViolations(
+        path.join(REPO_ROOT, 'src', 'cli', 'daemon-runner.ts'),
+        'src/bootstrap/',
+      ),
+    ).toEqual([]);
+  });
+
+  it('src/cli/index.ts is an entrypoint shim: re-exports plus one run guard', () => {
+    // The package.json `bin` entry stays at dist/cli/index.js. The shim may
+    // only re-export the canonical CLI surface (inbound adapter + bootstrap
+    // composition root + core types) and carry a single run-as-main guard
+    // `if` statement. Everything else lives in canonical locations.
+    const fileAbs = path.join(SRC_DIR, 'cli', 'index.ts');
+    const text = fs.readFileSync(fileAbs, 'utf8');
+    const sourceFile = ts.createSourceFile(fileAbs, text, ts.ScriptTarget.Latest, true);
+    const violations: string[] = [];
+    let ifCount = 0;
+    for (const statement of sourceFile.statements) {
+      if (ts.isIfStatement(statement)) {
+        ifCount++;
+        continue;
+      }
+      if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) {
+        const specifier = statement.moduleSpecifier;
+        if (specifier === undefined || !ts.isStringLiteral(specifier)) {
+          continue;
+        }
+        const resolved = resolveSpecifier(fileAbs, specifier.text);
+        if (resolved === null) {
+          violations.push(
+            `${toRelPosix(fileAbs)} -> ${specifier.text} (unresolvable module specifier)`,
+          );
+          continue;
+        }
+        const targetRel = toRelPosix(resolved);
+        const allowed =
+          targetRel.startsWith('src/bootstrap/') ||
+          targetRel.startsWith('src/adapters/inbound/') ||
+          targetRel.startsWith('src/core/');
+        if (!allowed) {
+          violations.push(
+            `${toRelPosix(fileAbs)} -> ${targetRel} (entry shim may only reach ` +
+              'bootstrap, canonical inbound adapters, or core)',
+          );
+        }
+        continue;
+      }
+      violations.push(
+        `${toRelPosix(fileAbs)}: expected an entrypoint shim but found a ` +
+          'disallowed statement',
+      );
+    }
+    if (ifCount !== 1) {
+      violations.push(
+        `${toRelPosix(fileAbs)}: expected exactly one run-as-main guard ` +
+          `if-statement, found ${ifCount}`,
+      );
+    }
+    expect(violations).toEqual([]);
+
+    const edges = collectEdges(fileAbs);
+    expect(
+      edges.some((e) => e.target === 'src/bootstrap/cli.ts'),
+      'src/cli/index.ts must delegate to the bootstrap CLI composition root',
+    ).toBe(true);
   });
 });
 

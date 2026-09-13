@@ -457,6 +457,17 @@ export interface CommandApiDeps {
  * ================================================================== */
 
 /**
+ * Minimal structural surface of the typed command API — the system's
+ * driving port (DEC-002, DEC-037). Every inbound surface (CLI, voice,
+ * desktop, MCP) ultimately funnels typed {@link Command}s through an
+ * object shaped like this: the daemon's {@link CommandApi} itself, or a
+ * transport proxy that forwards commands to it.
+ */
+export interface CommandExecutor {
+  execute(command: Command): Promise<Response>;
+}
+
+/**
  * Typed command API shared by every surface (CLI, voice, desktop, remote).
  *
  * Construct with a {@link CommandApiDeps} object, then call
