@@ -417,6 +417,26 @@ export class RealtimeBridge implements RealtimeSessionPort {
     });
   }
 
+  /**
+   * Inject a user-role text message and request a response (issue #73).
+   *
+   * Long-running tool work finishes after the speech turn that triggered
+   * it; the result is injected as a user message followed by
+   * `response.create` so the Secretary speaks again when the result is
+   * ready — the original turn was never blocked.
+   */
+  sendUserMessage(text: string): void {
+    this.sendMessage({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text }],
+      },
+    });
+    this.sendMessage({ type: 'response.create' });
+  }
+
   /* ---------------------------------------------------------------- *
    * Socket event handlers
    * ---------------------------------------------------------------- */

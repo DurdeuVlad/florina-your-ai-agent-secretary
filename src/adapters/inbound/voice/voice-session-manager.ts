@@ -33,6 +33,7 @@ import type { CommandExecutor } from '../../../core/application/use-cases/tasks/
 import { VoicePipeline } from '../../../core/application/use-cases/voice/voice-pipeline.js';
 import type { VoicePipelineMode } from '../../../core/application/use-cases/voice/voice-pipeline.js';
 import {
+  ASYNC_VOICE_TOOLS,
   buildDefaultVoiceTools,
   DEFAULT_VOICE_INSTRUCTIONS,
   mapToolCallToCommand,
@@ -68,7 +69,22 @@ export interface VoiceSessionManagerOptions {
   readonly bridgeOptions?: Omit<RealtimeSessionOptions, 'tools'>;
   /** Override the default tool definitions. */
   readonly tools?: readonly VoiceToolDefinition[];
+  /**
+   * Runner for long-lived voice tools (issue #73) — e.g. `research`
+   * driven by the Secretary loop. When absent, async tools return a
+   * clear error rather than hanging the turn.
+   */
+  readonly asyncToolRunner?: AsyncVoiceToolRunner;
 }
+
+/**
+ * Runs a long-lived voice tool outside the speech turn (issue #73).
+ * The returned string is spoken to the user when the work finishes.
+ */
+export type AsyncVoiceToolRunner = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<string>;
 
 /**
  * Manages the voice session lifecycle within the host process.
@@ -240,6 +256,14 @@ export class VoiceSessionManager {
       return;
     }
 
+    // Async tools never block the speech turn (issue #73): the call gets
+    // an immediate "started" output so the model can close the turn, and
+    // the result is spoken later via sendUserMessage.
+    if (ASYNC_VOICE_TOOLS.includes(name)) {
+      this.handleAsyncToolCall(callId, name, args);
+      return;
+    }
+
     const command = mapToolCallToCommand(name, args);
     if (command === null) {
       const errorMsg = `Unknown tool: ${name}`;
@@ -258,6 +282,47 @@ export class VoiceSessionManager {
       this.options.bridge.sendToolCallOutput(callId, JSON.stringify({ error: errorMsg }));
       this.notifyToolCall(name, false, { error: errorMsg });
     }
+  }
+
+  /**
+   * Route a long-lived voice tool (issue #73). The speech turn closes
+   * immediately with a `started` output; the runner's result is then
+   * injected as a user message so the Secretary speaks again when the
+   * work is ready — never blocking a turn on a slow tool.
+   */
+  private handleAsyncToolCall(
+    callId: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): void {
+    const runner = this.options.asyncToolRunner;
+    if (runner === undefined) {
+      const errorMsg = `async tool "${name}" is not wired into this session`;
+      this.options.bridge.sendToolCallOutput(callId, JSON.stringify({ error: errorMsg }));
+      this.notifyToolCall(name, false, { error: errorMsg });
+      return;
+    }
+
+    this.options.bridge.sendToolCallOutput(
+      callId,
+      JSON.stringify({ status: 'started', tool: name }),
+    );
+    this.notifyToolCall(name, true, { status: 'started' });
+
+    void runner(name, args)
+      .then((result) => {
+        if (this.options.bridge.isConnected) {
+          this.options.bridge.sendUserMessage(result);
+        }
+      })
+      .catch((err: unknown) => {
+        if (this.options.bridge.isConnected) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.options.bridge.sendUserMessage(
+            `The ${name} task hit an error: ${message}`,
+          );
+        }
+      });
   }
 
   private notifyToolCall(name: string, success: boolean, result: unknown): void {

@@ -459,6 +459,12 @@ export class SecretaryDaemon extends EventEmitter {
           }).spawnTask(input);
         },
       };
+      // The quota ledger + preference profile must exist before the
+      // command API is composed: brief dispatch routes through them and
+      // `update-preference` mutates the store (DEC-029, issues #63/#73).
+      this.quotaLedger = new QuotaLedger();
+      this.preferenceStore = await PreferenceProfileStore.load(this.options.preferenceProfilePath);
+
       this.ideaService = new IdeaService({
         ledger: new FsIdeaLedger(this.ideasRootDir()),
         briefs: repos.briefs,
@@ -480,15 +486,11 @@ export class SecretaryDaemon extends EventEmitter {
         completionDigestRepository: repos.completionDigests,
         contextHealth: this.contextHealth ?? undefined,
         ideas: this.ideaService,
+        preferences: this.preferenceStore,
         onShutdown: () => {
           void this.stop();
         },
       });
-
-      // Wire the quota ledger + preference profile that the CapacityRouter
-      // (and through it every manager spawn) enforces (DEC-029, issue #63).
-      this.quotaLedger = new QuotaLedger();
-      this.preferenceStore = await PreferenceProfileStore.load(this.options.preferenceProfilePath);
 
       // Wire cross-provider failover (issue #64): freezes a task's session,
       // blocks it, re-routes through a freshly-built CapacityRouter (so

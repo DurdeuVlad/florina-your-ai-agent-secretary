@@ -161,13 +161,28 @@ export interface ResponseCancelMessage {
 }
 
 /**
+ * A user-role text conversation item — used to inject proactive context
+ * into the session (issue #73): long-running tool work reports back by
+ * creating the item and requesting a response.
+ */
+export interface RealtimeUserTextMessage {
+  readonly type: 'message';
+  readonly role: 'user';
+  readonly content: readonly {
+    readonly type: 'input_text';
+    readonly text: string;
+  }[];
+}
+
+/**
  * Create a new conversation item. The bridge uses this to send a
  * {@link RealtimeFunctionCallOutput} back to the server after executing a
- * tool call (DEC-021).
+ * tool call (DEC-021), or a {@link RealtimeUserTextMessage} when the
+ * Secretary speaks again asynchronously (issue #73).
  */
 export interface ConversationItemCreateMessage {
   readonly type: 'conversation.item.create';
-  readonly item: RealtimeFunctionCallOutput;
+  readonly item: RealtimeFunctionCallOutput | RealtimeUserTextMessage;
 }
 
 /**
