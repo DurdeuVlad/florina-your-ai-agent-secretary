@@ -2,25 +2,33 @@
  * Adapter registry (DEC-013, PRODUCT_DESIGN "Agent Adapters").
  *
  * The registry maps stable adapter ids (e.g. `codex`, `claude-code`, `stub`)
- * to factory functions that instantiate the corresponding {@link AgentAdapter}.
- * Factories are registered at startup (by the daemon or by tests) and the
- * daemon selects an adapter by id when a task is delegated.
+ * to factory functions that instantiate the corresponding
+ * {@link AgentRuntimePort}. Factories are registered at startup (by the
+ * daemon or by tests) and the daemon selects an adapter by id when a task
+ * is delegated.
  *
- * Using factories (rather than pre-instantiated singletons) lets the registry
- * create a fresh adapter per run with the correct {@link EventBus} and
- * configuration, avoiding shared mutable state across concurrent sessions.
+ * Using factories (rather than pre-instantiated singletons) lets the
+ * registry create a fresh adapter per run with the correct configuration,
+ * avoiding shared mutable state across concurrent sessions.
+ *
+ * Adapters are created without an event bus: the session manager is the
+ * sole publisher of events yielded by `AgentRuntimePort.streamEvents()`,
+ * so injecting a bus at factory time would permit duplicate publication
+ * and couple adapter construction to application fan-out.
+ *
+ * This is an outbound adapter module: it implements the core-owned
+ * {@link AgentRuntimeRegistryPort} and never depends on the concrete daemon
+ * `EventBus` or the event-stream ports.
  */
-import type { EventBus } from '../daemon/event-stream.js';
-import type { AgentAdapter } from './base.js';
+import type { AgentRuntimePort } from '../core/application/ports/outbound/agent-runtime.js';
+import type { AgentRuntimeRegistryPort } from '../core/application/ports/outbound/runtime-registry.js';
 
 /**
- * A factory that instantiates an {@link AgentAdapter}.
- *
- * The factory receives the {@link EventBus} the adapter should emit events to
- * (the daemon's live stream) so a fresh adapter is wired into the correct
- * fan-out point for each run.
+ * A factory that instantiates an {@link AgentRuntimePort} with no event
+ * bus attached. Event publication is handled by the session manager, which
+ * pipes each event yielded by `streamEvents()` onto the bus exactly once.
  */
-export type AdapterFactory = (bus: EventBus) => AgentAdapter;
+export type AdapterFactory = () => AgentRuntimePort;
 
 /** Error thrown when an unknown adapter id is requested. */
 export class UnknownAdapterError extends Error {
@@ -50,18 +58,18 @@ export class DuplicateAdapterError extends Error {
  * Usage:
  * ```ts
  * const registry = new AdapterRegistry();
- * registry.register('stub', (bus) => new StubAdapter(bus));
- * const adapter = registry.create('stub', daemon.eventBus);
+ * registry.register('stub', () => new StubAdapter());
+ * const adapter = registry.create('stub');
  * ```
  */
-export class AdapterRegistry {
+export class AdapterRegistry implements AgentRuntimeRegistryPort {
   private readonly factories = new Map<string, AdapterFactory>();
 
   /**
    * Register an adapter factory under a stable id.
    *
    * @param adapterId - Stable identifier (e.g. `codex`, `claude-code`).
-   * @param factory - Factory that instantiates the adapter given an EventBus.
+   * @param factory - Factory that instantiates the adapter.
    * @throws {DuplicateAdapterError} if the id is already registered.
    */
   register(adapterId: string, factory: AdapterFactory): void {
@@ -92,13 +100,14 @@ export class AdapterRegistry {
   }
 
   /**
-   * Instantiate the adapter registered under `adapterId`, wiring it to the
-   * supplied {@link EventBus}.
+   * Instantiate the adapter registered under `adapterId`. The adapter is
+   * created without an event bus — the session manager publishes the events
+   * it streams.
    *
    * @throws {UnknownAdapterError} if the id is not registered.
    */
-  create(adapterId: string, bus: EventBus): AgentAdapter {
-    return this.get(adapterId)(bus);
+  create(adapterId: string): AgentRuntimePort {
+    return this.get(adapterId)();
   }
 
   /**

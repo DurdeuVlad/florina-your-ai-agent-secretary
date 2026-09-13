@@ -215,12 +215,16 @@ function barrelViolation(relPath: string): string | null {
 }
 
 /**
- * Assert a legacy `src/domain` file is a pure compatibility facade: every
- * statement is an `export ... from` declaration resolving into
- * `src/core/domain`. Returns readable violation messages.
+ * Assert a legacy file is a pure compatibility facade: every statement is an
+ * `export ... from` declaration resolving into `requiredPrefix` (a
+ * repo-relative posix path prefix such as `src/core/domain/`). Returns
+ * readable violation messages.
  */
-function facadeViolations(fileAbs: string): string[] {
+function facadeViolations(fileAbs: string, requiredPrefix: string): string[] {
   const rel = toRelPosix(fileAbs);
+  if (!fs.existsSync(fileAbs)) {
+    return [`${rel}: expected a compatibility facade but the file is missing`];
+  }
   const text = fs.readFileSync(fileAbs, 'utf8');
   const sourceFile = ts.createSourceFile(fileAbs, text, ts.ScriptTarget.Latest, true);
   const violations: string[] = [];
@@ -240,8 +244,8 @@ function facadeViolations(fileAbs: string): string[] {
       continue;
     }
     const targetRel = toRelPosix(resolved);
-    if (!targetRel.startsWith('src/core/domain/')) {
-      violations.push(`${rel} -> ${targetRel} (facade must resolve inward to src/core/domain)`);
+    if (!targetRel.startsWith(requiredPrefix)) {
+      violations.push(`${rel} -> ${targetRel} (facade must resolve inward to ${requiredPrefix})`);
     }
   }
   return violations;
@@ -407,6 +411,12 @@ describe('src/core boundary conformance', () => {
       'event-stream',
       'agent-runtime',
       'worktree',
+      'model',
+      'repositories',
+      'runtime-registry',
+      'credential-vault',
+      'context-sources',
+      'preference-profile',
       'index',
     ]) {
       expect(
@@ -416,11 +426,70 @@ describe('src/core boundary conformance', () => {
         `missing src/core/application/ports/outbound/${name}.ts`,
       ).toBe(true);
     }
+    for (const rel of [
+      'index.ts',
+      'metrics.ts',
+      'routing/quota-ledger.ts',
+      'routing/capacity-router.ts',
+      'routing/index.ts',
+      'context/context-isolation.ts',
+      'context/context-store.ts',
+      'context/context-router.ts',
+      'context/context-estimator.ts',
+      'context/context-resolver.ts',
+      'context/index.ts',
+      'tasks/task-lifecycle.ts',
+      'tasks/session-manager.ts',
+      'tasks/command-api.ts',
+      'tasks/index.ts',
+      'capabilities/capability-broker.ts',
+      'capabilities/index.ts',
+      'attention/attention-item.ts',
+      'attention/attention-inbox.ts',
+      'attention/engine.ts',
+      'attention/adaptive-policy.ts',
+      'attention/attention-metrics.ts',
+      'attention/attention-tuning.ts',
+      'attention/completion-digest.ts',
+      'attention/diff-digest.ts',
+      'attention/digest-builder.ts',
+      'attention/failure-tracker.ts',
+      'attention/liveness-monitor.ts',
+      'attention/attention-aggregator.ts',
+      'attention/index.ts',
+      'secretary/messages.ts',
+      'secretary/tool-registry.ts',
+      'secretary/todo-tool.ts',
+      'secretary/condenser.ts',
+      'secretary/loop.ts',
+      'secretary/preference-tool.ts',
+      'secretary/index.ts',
+    ]) {
+      expect(
+        fs.existsSync(path.join(CORE_DIR, 'application', 'use-cases', rel)),
+        `missing src/core/application/use-cases/${rel}`,
+      ).toBe(true);
+    }
   });
 
   it('every src/core module only imports inward (domain <- ports/use-cases, no externals)', () => {
     expect(coreFiles.length).toBeGreaterThan(0);
     expect(coreViolations).toEqual([]);
+  });
+
+  it('every use-case file is covered by the core edge scanner with no outward imports', () => {
+    const useCaseFiles = coreFiles.filter((fileAbs) =>
+      toRelPosix(fileAbs).startsWith('src/core/application/use-cases/'),
+    );
+    expect(useCaseFiles.length).toBeGreaterThan(0);
+    for (const fileAbs of useCaseFiles) {
+      expect(coreLayerOf(toRelPosix(fileAbs))).toBe('use-cases');
+    }
+    const violations = useCaseFiles.flatMap(collectEdges).flatMap((edge) => {
+      const violation = coreEdgeViolation(edge);
+      return violation === null ? [] : [violation];
+    });
+    expect(violations).toEqual([]);
   });
 
   it('application and core-root layers contain index.ts barrels only', () => {
@@ -435,7 +504,139 @@ describe('src/domain compatibility facades', () => {
   it('every legacy domain module is a facade resolving into src/core/domain', () => {
     const legacyFiles = listTsFiles(LEGACY_DOMAIN_DIR);
     expect(legacyFiles.length).toBeGreaterThan(0);
-    const violations = legacyFiles.flatMap(facadeViolations);
+    const violations = legacyFiles.flatMap((f) => facadeViolations(f, 'src/core/domain/'));
     expect(violations).toEqual([]);
+  });
+});
+
+describe('migrated use-case compatibility facades', () => {
+  const MIGRATED_FACADES = [
+    'src/daemon/quota-ledger.ts',
+    'src/daemon/capacity-router.ts',
+    'src/daemon/context-isolation.ts',
+    'src/daemon/context-store.ts',
+    'src/daemon/metrics.ts',
+    'src/attention/attention-item.ts',
+    'src/attention/attention-inbox.ts',
+    'src/attention/engine.ts',
+    'src/attention/adaptive-policy.ts',
+    'src/attention/attention-metrics.ts',
+    'src/attention/attention-tuning.ts',
+    'src/attention/completion-digest.ts',
+    'src/attention/diff-digest.ts',
+    'src/attention/digest-builder.ts',
+    'src/attention/failure-tracker.ts',
+    'src/attention/liveness-monitor.ts',
+    'src/attention/attention-aggregator.ts',
+    'src/secretary/messages.ts',
+    'src/secretary/tool-registry.ts',
+    'src/secretary/todo-tool.ts',
+    'src/secretary/condenser.ts',
+    'src/secretary/loop.ts',
+    'src/secretary/preference-tool.ts',
+    'src/daemon/task-lifecycle.ts',
+    'src/daemon/session-manager.ts',
+    'src/daemon/command-api.ts',
+    'src/daemon/capability-broker.ts',
+    'src/storage/context-estimator.ts',
+    'src/storage/context-resolver.ts',
+  ];
+
+  it('each migrated legacy file is a facade into src/core/application/use-cases', () => {
+    const violations = MIGRATED_FACADES.flatMap((rel) =>
+      facadeViolations(path.join(REPO_ROOT, rel), 'src/core/application/use-cases/'),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('model-connector stays an outbound adapter importing the core model port directly', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'secretary', 'model-connector.ts'));
+    expect(
+      edges.some((e) => e.target === 'src/core/application/ports/outbound/model.ts'),
+      'src/secretary/model-connector.ts must import src/core/application/ports/outbound/model.ts',
+    ).toBe(true);
+  });
+
+  it('legacy context-router is a compatibility wrapper: factory plus re-exports only', () => {
+    const fileAbs = path.join(SRC_DIR, 'daemon', 'context-router.ts');
+    const text = fs.readFileSync(fileAbs, 'utf8');
+    const sourceFile = ts.createSourceFile(fileAbs, text, ts.ScriptTarget.Latest, true);
+    const violations: string[] = [];
+    for (const statement of sourceFile.statements) {
+      if (ts.isFunctionDeclaration(statement)) {
+        // Allowed: only the concrete createContextRouter(ContextCapsuleRepository)
+        // compatibility factory — its parameter type keeps it outside core.
+        if (statement.name?.text !== 'createContextRouter') {
+          violations.push(
+            `${toRelPosix(fileAbs)}: only a createContextRouter function declaration is allowed`,
+          );
+        }
+        continue;
+      }
+      if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) {
+        const specifier = statement.moduleSpecifier;
+        if (specifier === undefined || !ts.isStringLiteral(specifier)) {
+          continue;
+        }
+        const resolved = resolveSpecifier(fileAbs, specifier.text);
+        if (resolved === null) {
+          violations.push(
+            `${toRelPosix(fileAbs)} -> ${specifier.text} (unresolvable module specifier)`,
+          );
+          continue;
+        }
+        const targetRel = toRelPosix(resolved);
+        const allowed =
+          targetRel.startsWith('src/core/application/use-cases/') ||
+          (ts.isImportDeclaration(statement) && targetRel.startsWith('src/storage/'));
+        if (!allowed) {
+          violations.push(
+            `${toRelPosix(fileAbs)} -> ${targetRel} (wrapper may only reach use-cases` +
+              ' and the concrete ContextCapsuleRepository)',
+          );
+        }
+        continue;
+      }
+      violations.push(
+        `${toRelPosix(fileAbs)}: expected factory + re-exports only, found another statement`,
+      );
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('remaining outbound implementations import core ports directly', () => {
+    const expectations: Readonly<Record<string, readonly string[]>> = {
+      'src/daemon/preference-profile.ts': [
+        'src/core/application/ports/outbound/preference-profile.ts',
+      ],
+      'src/daemon/worktree.ts': ['src/core/application/ports/outbound/worktree.ts'],
+      'src/adapters/registry.ts': [
+        'src/core/application/ports/outbound/agent-runtime.ts',
+        'src/core/application/ports/outbound/runtime-registry.ts',
+      ],
+    };
+    const violations: string[] = [];
+    for (const [rel, requiredTargets] of Object.entries(expectations)) {
+      const edges = collectEdges(path.join(REPO_ROOT, rel));
+      for (const target of requiredTargets) {
+        if (!edges.some((e) => e.target === target)) {
+          violations.push(`${rel} must directly import ${target}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('adapter registry imports neither the daemon EventBus nor the event-stream port', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'adapters', 'registry.ts'));
+    expect(
+      edges.every(
+        (e) =>
+          e.target !== 'src/daemon/event-stream.ts' &&
+          e.target !== 'src/core/application/ports/outbound/event-stream.ts',
+      ),
+      'src/adapters/registry.ts must not import an event bus: adapters are ' +
+        'created without one and the session manager publishes streamed events',
+    ).toBe(true);
   });
 });

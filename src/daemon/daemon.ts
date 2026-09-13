@@ -215,7 +215,7 @@ export class SecretaryDaemon extends EventEmitter {
       this.adapterRegistry = new AdapterRegistry();
       // The stub factory creates adapters WITHOUT a direct bus reference so
       // the SessionManager is the sole event publisher (no duplicates).
-      this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter(null));
+      this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter());
       this.sessionManager = new SessionManager(this.bus);
 
       this.commandApi = new CommandApi({

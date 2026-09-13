@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { SecretaryDaemon, EventBus } from '../src/daemon/index.js';
+import { SecretaryDaemon } from '../src/daemon/index.js';
 import {
   StorageDatabase,
   EventRepository,
@@ -289,13 +289,11 @@ describe('AdapterRegistry', () => {
     expect(registry.list()).toEqual([]);
     expect(registry.has('stub')).toBe(false);
 
-    registry.register('stub', (bus) => new StubAdapter(bus));
+    registry.register('stub', () => new StubAdapter());
     expect(registry.has('stub')).toBe(true);
     expect(registry.list()).toEqual(['stub']);
 
-    // Create with a real EventBus.
-    const bus = new EventBus();
-    const adapter = registry.create('stub', bus);
+    const adapter = registry.create('stub');
     expect(adapter).toBeInstanceOf(StubAdapter);
     expect(adapter.id).toBe('stub');
     expect(adapter.fidelityTier).toBe(AdapterFidelityTier.E);
@@ -304,22 +302,35 @@ describe('AdapterRegistry', () => {
   it('get throws UnknownAdapterError for unregistered ids', () => {
     const registry = new AdapterRegistry();
     expect(() => registry.get('nope')).toThrow(UnknownAdapterError);
-    expect(() => registry.create('nope', new EventBus())).toThrow(UnknownAdapterError);
+    expect(() => registry.create('nope')).toThrow(UnknownAdapterError);
   });
 
   it('register throws DuplicateAdapterError on double registration', () => {
     const registry = new AdapterRegistry();
-    registry.register('stub', (bus) => new StubAdapter(bus));
-    expect(() => registry.register('stub', (bus) => new StubAdapter(bus))).toThrow(
+    registry.register('stub', () => new StubAdapter());
+    expect(() => registry.register('stub', () => new StubAdapter())).toThrow(
       DuplicateAdapterError,
     );
   });
 
   it('can register multiple adapters and list them', () => {
     const registry = new AdapterRegistry();
-    registry.register('stub', (bus) => new StubAdapter(bus));
-    registry.register('stub-2', (bus) => new StubAdapter(bus, { delayMs: 1 }));
+    registry.register('stub', () => new StubAdapter());
+    registry.register('stub-2', () => new StubAdapter(undefined, { delayMs: 1 }));
     expect(registry.list().sort()).toEqual(['stub', 'stub-2']);
+  });
+
+  it('invokes the registered factory with zero arguments (no event bus injection)', () => {
+    const registry = new AdapterRegistry();
+    const factory = vi.fn(() => new StubAdapter());
+    registry.register('stub', factory);
+
+    const adapter = registry.create('stub');
+
+    // Event publication is owned by the session manager, so the registry
+    // must not pass an event bus (or anything else) into the factory.
+    expect(factory).toHaveBeenCalledWith();
+    expect(adapter).toBeInstanceOf(StubAdapter);
   });
 });
 
@@ -493,7 +504,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
   it('registry-created stub adapter wired to the daemon bus journals events', async () => {
     const bus = daemon.eventBus!;
     const registry = new AdapterRegistry();
-    registry.register(STUB_ADAPTER_ID, (b) => new StubAdapter(b));
+    registry.register(STUB_ADAPTER_ID, () => new StubAdapter());
 
     const cfg: SessionConfig = {
       taskId: 'task-registry',
@@ -516,11 +527,13 @@ describe('integration: daemon + stub adapter + event journal', () => {
     });
 
     try {
-      const adapter = registry.create(STUB_ADAPTER_ID, bus);
+      const adapter = registry.create(STUB_ADAPTER_ID);
       await adapter.connect();
       await adapter.startRun(cfg.taskId, cfg);
-      for await (const _event of adapter.streamEvents()) {
-        // drain
+      // The registry no longer injects a bus; the consumer (the session
+      // manager in production) publishes each streamed event exactly once.
+      for await (const event of adapter.streamEvents()) {
+        bus.publish(event);
       }
       await adapter.disconnect();
 
