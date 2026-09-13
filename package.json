@@ -44,8 +44,10 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.3",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "zod": "^4.6.4"
   },
   "optionalDependencies": {
     "node-pty": "^1.0.0"
