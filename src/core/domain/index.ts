@@ -12,3 +12,4 @@ export * from './policy.js';
 export * from './approval.js';
 export * from './grants.js';
 export * from './events.js';
+export * from './ideas.js';

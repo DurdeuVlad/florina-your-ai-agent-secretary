@@ -18,3 +18,5 @@ export * from './capabilities/index.js';
 export * from './journal/index.js';
 export * from './verification/index.js';
 export * from './voice/index.js';
+export * from './ideas/index.js';
+export * from './managers/index.js';

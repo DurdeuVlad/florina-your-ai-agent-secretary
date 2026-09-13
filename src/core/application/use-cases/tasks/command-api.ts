@@ -57,6 +57,13 @@ import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
 import type { ContextHealthSnapshot } from '../context/context-health-monitor.js';
 import type {
+  Brief,
+  BriefDispatchResult,
+  DelegationPlan,
+  IdeaLedger,
+} from '../../../domain/ideas.js';
+import type { IdeaService } from '../ideas/idea-service.js';
+import type {
   AttentionMetricsReport,
   MetricsQueryOptions,
   MetricsQueryService,
@@ -251,6 +258,66 @@ export interface QueryContextHealthCommand {
   readonly agentId?: string;
 }
 
+/* ------------------------------------------------------------------ *
+ * Idea ledger + Brief commands (DEC-033, issue #69)
+ * ------------------------------------------------------------------ */
+
+/** Open a new idea ledger in the global ideas directory. */
+export interface CreateIdeaCommand {
+  readonly kind: 'idea-create';
+  readonly title: string;
+  readonly body?: string;
+}
+
+/** List all idea ledgers the daemon can see. */
+export interface ListIdeasCommand {
+  readonly kind: 'idea-list';
+}
+
+/**
+ * Append a titled section to a ledger — research notes, open questions,
+ * decisions in progress.
+ */
+export interface AppendIdeaCommand {
+  readonly kind: 'idea-append';
+  readonly ideaId: string;
+  readonly heading: string;
+  readonly body: string;
+}
+
+/**
+ * Promote a ledger into a project — the file moves into `targetDir`
+ * (DEC-033: ideas precede project selection; promotion moves them in).
+ */
+export interface PromoteIdeaCommand {
+  readonly kind: 'idea-promote';
+  readonly ideaId: string;
+  readonly projectId: string;
+  readonly targetDir: string;
+}
+
+/**
+ * Compile a ledger into a reviewable Brief. The caller supplies the
+ * delegation plan (project + task breakdown with provider/model intent).
+ */
+export interface CompileBriefCommand {
+  readonly kind: 'brief-compile';
+  readonly ideaId: string;
+  readonly plan: DelegationPlan;
+}
+
+/**
+ * Confirm a Brief — the hard delegation gate. The confirmation is
+ * journaled (DEC-012) and the plan dispatches through the normal spawn
+ * path (DEC-018).
+ */
+export interface ConfirmBriefCommand {
+  readonly kind: 'brief-confirm';
+  readonly briefId: string;
+  /** Who confirmed — recorded on the journaled gate decision. */
+  readonly confirmedBy?: string;
+}
+
 /** Query the latest completion digest for a task (issue #37). */
 export interface GetDigestCommand {
   readonly kind: 'get-digest';
@@ -295,6 +362,12 @@ export type Command =
   | PruneWorktreeCommand
   | ShutdownCommand
   | QueryContextHealthCommand
+  | CreateIdeaCommand
+  | ListIdeasCommand
+  | AppendIdeaCommand
+  | PromoteIdeaCommand
+  | CompileBriefCommand
+  | ConfirmBriefCommand
   | GetDigestCommand
   | CreatePrCommand;
 
@@ -314,6 +387,12 @@ export const COMMAND_KINDS: readonly string[] = [
   'prune-worktree',
   'shutdown',
   'context-health',
+  'idea-create',
+  'idea-list',
+  'idea-append',
+  'idea-promote',
+  'brief-compile',
+  'brief-confirm',
   'get-digest',
   'create-pr',
 ] as const;
@@ -414,6 +493,38 @@ export interface ContextHealthResponse {
   readonly snapshots: readonly ContextHealthSnapshot[];
 }
 
+/* ------------------------------------------------------------------ *
+ * Idea ledger + Brief responses (DEC-033, issue #69)
+ * ------------------------------------------------------------------ */
+
+/** Response to idea mutations (`idea-create`, `idea-append`, `idea-promote`). */
+export interface IdeaResponse {
+  readonly ok: boolean;
+  readonly idea: IdeaLedger | null;
+  readonly error?: string;
+}
+
+/** Response to `idea-list`. */
+export interface IdeaListResponse {
+  readonly ok: boolean;
+  readonly ideas: readonly IdeaLedger[];
+}
+
+/** Response to `brief-compile` — the persisted draft. */
+export interface BriefResponse {
+  readonly ok: boolean;
+  readonly brief: Brief | null;
+  readonly error?: string;
+}
+
+/** Response to `brief-confirm` — the gate result + per-task dispatch. */
+export interface BriefConfirmResponse {
+  readonly ok: boolean;
+  readonly brief: Brief | null;
+  readonly results: readonly BriefDispatchResult[];
+  readonly error?: string;
+}
+
 /** Generic error response for unknown / malformed commands. */
 export interface UnknownCommandResponse {
   readonly ok: false;
@@ -440,6 +551,10 @@ export type Response =
   | DigestResponse
   | CreatePrResponse
   | ContextHealthResponse
+  | IdeaResponse
+  | IdeaListResponse
+  | BriefResponse
+  | BriefConfirmResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -531,6 +646,12 @@ export interface CommandApiDeps {
    * snapshots; when absent the command returns an empty list.
    */
   readonly contextHealth?: ContextHealthReadPort;
+  /**
+   * Idea ledger + Brief service (DEC-033, issue #69). When wired, the
+   * `idea-*`/`brief-*` commands are served; when absent they return a
+   * clear `ok: false` rather than pretending to succeed.
+   */
+  readonly ideas?: IdeaService;
 }
 
 /* ================================================================== *
@@ -572,6 +693,7 @@ export class CommandApi {
   private readonly completionDigestRepository?: CompletionDigestRepositoryPort<CompletionDigest>;
   private readonly metricsQueryService?: MetricsQueryService;
   private readonly contextHealth?: ContextHealthReadPort;
+  private readonly ideas?: IdeaService;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -592,6 +714,7 @@ export class CommandApi {
     this.completionDigestRepository = deps.completionDigestRepository;
     this.metricsQueryService = deps.metricsQueryService;
     this.contextHealth = deps.contextHealth;
+    this.ideas = deps.ideas;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -636,6 +759,18 @@ export class CommandApi {
         return this.handleShutdown(command);
       case 'context-health':
         return this.handleContextHealth(command);
+      case 'idea-create':
+        return this.handleCreateIdea(command);
+      case 'idea-list':
+        return this.handleListIdeas();
+      case 'idea-append':
+        return this.handleAppendIdea(command);
+      case 'idea-promote':
+        return this.handlePromoteIdea(command);
+      case 'brief-compile':
+        return this.handleCompileBrief(command);
+      case 'brief-confirm':
+        return this.handleConfirmBrief(command);
       case 'get-digest':
         return this.handleGetDigest(command);
       case 'create-pr':
@@ -1193,6 +1328,79 @@ export class CommandApi {
     return { ok: true, snapshots: this.contextHealth.listSnapshots() };
   }
 
+  /* ---------------------------------------------------------------- *
+   * Idea ledger + Brief handlers (DEC-033, issue #69)
+   * ---------------------------------------------------------------- */
+
+  private ideasUnavailable(): { ok: false; error: string } {
+    return { ok: false, error: 'idea ledger service is not wired into this daemon' };
+  }
+
+  private async handleCreateIdea(cmd: CreateIdeaCommand): Promise<IdeaResponse> {
+    if (this.ideas === undefined) return { ...this.ideasUnavailable(), idea: null };
+    try {
+      return {
+        ok: true,
+        idea: this.ideas.createIdea(cmd.title, cmd.body),
+      };
+    } catch (err) {
+      return { ok: false, idea: null, error: errorMessage(err) };
+    }
+  }
+
+  private async handleListIdeas(): Promise<IdeaListResponse> {
+    if (this.ideas === undefined) return { ok: false, ideas: [] };
+    return { ok: true, ideas: this.ideas.listIdeas() };
+  }
+
+  private async handleAppendIdea(cmd: AppendIdeaCommand): Promise<IdeaResponse> {
+    if (this.ideas === undefined) return { ...this.ideasUnavailable(), idea: null };
+    try {
+      return {
+        ok: true,
+        idea: this.ideas.appendToIdea(cmd.ideaId, cmd.heading, cmd.body),
+      };
+    } catch (err) {
+      return { ok: false, idea: null, error: errorMessage(err) };
+    }
+  }
+
+  private async handlePromoteIdea(cmd: PromoteIdeaCommand): Promise<IdeaResponse> {
+    if (this.ideas === undefined) return { ...this.ideasUnavailable(), idea: null };
+    try {
+      return {
+        ok: true,
+        idea: this.ideas.promoteIdea(cmd.ideaId, cmd.projectId, cmd.targetDir),
+      };
+    } catch (err) {
+      return { ok: false, idea: null, error: errorMessage(err) };
+    }
+  }
+
+  private async handleCompileBrief(cmd: CompileBriefCommand): Promise<BriefResponse> {
+    if (this.ideas === undefined) return { ...this.ideasUnavailable(), brief: null };
+    try {
+      return { ok: true, brief: this.ideas.compileBrief(cmd.ideaId, cmd.plan) };
+    } catch (err) {
+      return { ok: false, brief: null, error: errorMessage(err) };
+    }
+  }
+
+  private async handleConfirmBrief(cmd: ConfirmBriefCommand): Promise<BriefConfirmResponse> {
+    if (this.ideas === undefined) {
+      return { ...this.ideasUnavailable(), brief: null, results: [] };
+    }
+    try {
+      const { brief, results } = await this.ideas.confirmBrief(
+        cmd.briefId,
+        cmd.confirmedBy ?? 'cli',
+      );
+      return { ok: true, brief, results };
+    } catch (err) {
+      return { ok: false, brief: null, results: [], error: errorMessage(err) };
+    }
+  }
+
   /** get-digest: return the latest completion digest for a task (issue #37). */
   private async handleGetDigest(cmd: GetDigestCommand): Promise<DigestResponse> {
     if (!cmd.taskId) {
@@ -1353,11 +1561,19 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                           ? ShutdownResponse
                           : C extends QueryContextHealthCommand
                             ? ContextHealthResponse
-                            : C extends GetDigestCommand
-                              ? DigestResponse
-                              : C extends CreatePrCommand
-                                ? CreatePrResponse
-                                : Response;
+                            : C extends CreateIdeaCommand | AppendIdeaCommand | PromoteIdeaCommand
+                              ? IdeaResponse
+                              : C extends ListIdeasCommand
+                                ? IdeaListResponse
+                                : C extends CompileBriefCommand
+                                  ? BriefResponse
+                                  : C extends ConfirmBriefCommand
+                                    ? BriefConfirmResponse
+                                    : C extends GetDigestCommand
+                                      ? DigestResponse
+                                      : C extends CreatePrCommand
+                                        ? CreatePrResponse
+                                        : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the

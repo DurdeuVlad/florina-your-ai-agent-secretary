@@ -64,6 +64,13 @@ import { GrantService } from '../core/application/use-cases/capabilities/grant-s
 import { EventJournalWriter } from '../core/application/use-cases/journal/event-journal-writer.js';
 import { VerificationGate } from '../core/application/use-cases/verification/verification-gate.js';
 import { ContextHealthMonitor } from '../core/application/use-cases/context/context-health-monitor.js';
+import {
+  IdeaService,
+  type BriefDispatcherPort,
+} from '../core/application/use-cases/ideas/idea-service.js';
+import { ManagerToolService } from '../core/application/use-cases/managers/manager-tools.js';
+import { FsIdeaLedger } from '../adapters/outbound/ideas/fs-idea-ledger.js';
+import { BriefRepository } from '../adapters/outbound/persistence/sqlite/repositories/brief.js';
 import { collectHealth } from '../core/application/use-cases/health.js';
 import type { HealthStatus } from '../core/application/use-cases/health.js';
 import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
@@ -95,6 +102,12 @@ export interface DaemonOptions {
   readonly lockfile?: string;
   /** SQLite database path. Use `:memory:` for ephemeral (tests). */
   readonly dbPath?: string;
+  /**
+   * Root directory for idea ledgers (DEC-033, issue #69). Defaults to
+   * `ideas/` beside {@link dbPath}; required for `:memory:` databases
+   * to be deterministic (falls back to an isolated tempdir).
+   */
+  readonly ideasDir?: string;
   /**
    * Localhost port for the manager MCP HTTP surface (DEC-018, issue #63).
    * Defaults to {@link DEFAULT_MCP_PORT}. Pass `null` to disable the MCP
@@ -139,6 +152,7 @@ export class SecretaryDaemon extends EventEmitter {
     mcpPort: number | null;
     preferenceProfilePath: string;
     installSignalHandlers: boolean;
+    ideasDir?: string;
   };
   private state: DaemonState = 'stopped';
   private server: WebSocketControlPlaneServer | null = null;
@@ -163,6 +177,7 @@ export class SecretaryDaemon extends EventEmitter {
   private journalWriter: EventJournalWriter | null = null;
   private verificationGate: VerificationGate | null = null;
   private contextHealth: ContextHealthMonitor | null = null;
+  private ideaService: IdeaService | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -179,6 +194,7 @@ export class SecretaryDaemon extends EventEmitter {
         options.preferenceProfilePath ??
         path.join(os.homedir(), '.agent-secretary', 'preferences.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
+      ...(options.ideasDir !== undefined ? { ideasDir: options.ideasDir } : {}),
     };
   }
 
@@ -253,6 +269,14 @@ export class SecretaryDaemon extends EventEmitter {
    */
   get contextHealthMonitor(): ContextHealthMonitor | null {
     return this.contextHealth;
+  }
+
+  /**
+   * The wired idea-ledger + Brief service (DEC-033, issue #69) —
+   * ledgers, compiled Briefs, and the confirmed-gate dispatch path.
+   */
+  get ideas(): IdeaService | null {
+    return this.ideaService;
   }
 
   /**
@@ -393,6 +417,54 @@ export class SecretaryDaemon extends EventEmitter {
         },
       });
 
+      // Idea ledger + Brief pipeline (DEC-033, issue #69): ledgers live
+      // beside the daemon database; confirmed Briefs dispatch through
+      // the same ManagerToolService spawn path the MCP surface uses —
+      // the dispatcher resolves its deps lazily at confirm time.
+      const briefDispatcher: BriefDispatcherPort = {
+        spawnTask: (projectId, input) => {
+          const project = repos.projects.getById(projectId);
+          if (project === null) {
+            return Promise.resolve({
+              status: 'error' as const,
+              error: `unknown project: ${projectId}`,
+            });
+          }
+          const commandApi = this.commandApi;
+          const quotaLedger = this.quotaLedger;
+          const worktreeManager = this.worktreeManager;
+          const preferenceStore = this.preferenceStore;
+          if (
+            commandApi === null ||
+            quotaLedger === null ||
+            worktreeManager === null ||
+            preferenceStore === null
+          ) {
+            return Promise.resolve({
+              status: 'error' as const,
+              error: 'daemon not fully started',
+            });
+          }
+          const router = new CapacityRouter({
+            ledger: quotaLedger,
+            profile: preferenceStore.toProfile(),
+          });
+          return new ManagerToolService({
+            commandApi,
+            router,
+            taskStore: repos.tasks,
+            worktreeManager,
+            repoPath: project.repo.path,
+            projectId,
+          }).spawnTask(input);
+        },
+      };
+      this.ideaService = new IdeaService({
+        ledger: new FsIdeaLedger(this.ideasRootDir()),
+        briefs: repos.briefs,
+        dispatcher: briefDispatcher,
+      });
+
       this.commandApi = new CommandApi({
         eventBus: this.bus,
         taskStateMachine: this.taskStateMachine,
@@ -407,6 +479,7 @@ export class SecretaryDaemon extends EventEmitter {
         sessionManager: this.sessionManager,
         completionDigestRepository: repos.completionDigests,
         contextHealth: this.contextHealth ?? undefined,
+        ideas: this.ideaService,
         onShutdown: () => {
           void this.stop();
         },
@@ -535,6 +608,7 @@ export class SecretaryDaemon extends EventEmitter {
       capsules: new ContextCapsuleRepository(raw),
       completionDigests: new CompletionDigestRepository(raw),
       capabilityGrants: new CapabilityGrantRepository(raw),
+      briefs: new BriefRepository(raw),
     };
   }
 
@@ -588,6 +662,23 @@ export class SecretaryDaemon extends EventEmitter {
     }
   }
 
+  /**
+   * Ideas root for the {@link FsIdeaLedger} (DEC-033, issue #69):
+   * `ideas/` beside the database file. For `:memory:` databases (tests)
+   * each daemon gets an isolated tempdir so ledgers never leak across
+   * daemon instances or into the repo working tree.
+   */
+  private ideasRootDir(): string {
+    if (this.options.ideasDir !== undefined) {
+      return this.options.ideasDir;
+    }
+    const dbPath = this.options.dbPath;
+    if (dbPath === ':memory:') {
+      return fs.mkdtempSync(path.join(os.tmpdir(), 'secretary-ideas-'));
+    }
+    return path.join(path.dirname(dbPath), 'ideas');
+  }
+
   private openDatabase(): void {
     const dbPath = this.options.dbPath;
     if (dbPath !== ':memory:') {
@@ -638,6 +729,7 @@ export class SecretaryDaemon extends EventEmitter {
       this.journalWriter = null;
       this.contextHealth?.stop();
       this.contextHealth = null;
+      this.ideaService = null;
     }
     if (this.metricsCollector) {
       this.metricsCollector.detach();

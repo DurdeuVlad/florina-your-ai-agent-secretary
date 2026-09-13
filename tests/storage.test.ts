@@ -82,7 +82,7 @@ describe('storage: database initialization & migrations', () => {
   it('initializes an in-memory database and runs migrations', () => {
     const db = new StorageDatabase({ path: ':memory:' });
     const result = db.open();
-    expect(result.appliedVersion).toBe(2);
+    expect(result.appliedVersion).toBe(3);
     expect(db.isOpen).toBe(true);
     db.close();
     expect(db.isOpen).toBe(false);
@@ -93,7 +93,7 @@ describe('storage: database initialization & migrations', () => {
     db.open();
     // Running runMigrations again on the same connection should be a no-op.
     const version = runMigrations(db.connection);
-    expect(version).toBe(2);
+    expect(version).toBe(3);
     db.close();
   });
 
@@ -136,6 +136,7 @@ describe('storage: database initialization & migrations', () => {
     expect(names).toContain('decisions');
     expect(names).toContain('approvals');
     expect(names).toContain('capability_grants');
+    expect(names).toContain('briefs');
     expect(names).toContain('context_capsules');
     expect(names).toContain('_migrations');
     db.close();
@@ -884,11 +885,13 @@ describe('storage: migration framework is forward-only', () => {
       version: number;
       description: string;
     }[];
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows[0].version).toBe(1);
     expect(rows[0].description).toContain('Create all tables');
     expect(rows[1].version).toBe(2);
     expect(rows[1].description).toContain('capability_grants');
+    expect(rows[2].version).toBe(3);
+    expect(rows[2].description).toContain('briefs');
     db.close();
   });
 
@@ -897,13 +900,13 @@ describe('storage: migration framework is forward-only', () => {
     const tmp = path.join(os.tmpdir(), `asec-test-${Date.now()}.db`);
     const db1 = new StorageDatabase({ path: tmp });
     const r1 = db1.open();
-    expect(r1.appliedVersion).toBe(2);
+    expect(r1.appliedVersion).toBe(3);
     db1.close();
 
     const db2 = new StorageDatabase({ path: tmp });
     const r2 = db2.open();
-    // Migrations should not be re-applied; version stays at 2.
-    expect(r2.appliedVersion).toBe(2);
+    // Migrations should not be re-applied; version stays at 3.
+    expect(r2.appliedVersion).toBe(3);
     db2.close();
 
     // Clean up.

@@ -23,6 +23,7 @@ import type {
 } from '../../../domain/types.js';
 import type { ContextCapsuleScope } from '../../../domain/enums.js';
 import type { CapabilityGrant } from '../../../domain/grants.js';
+import type { Brief } from '../../../domain/ideas.js';
 
 /** Task store (DEC-004). */
 export interface TaskRepositoryPort {
@@ -117,6 +118,20 @@ export interface DeliverableRepositoryPort {
   listByTask(taskId: EntityId): Deliverable[];
   listBySession(sessionId: EntityId): Deliverable[];
   update(deliverable: Deliverable): void;
+}
+
+/**
+ * Brief store (DEC-033, issue #69). Compiled Briefs and their
+ * confirmation record — the journaled gate decision (DEC-012). Briefs
+ * are never deleted; status moves `draft` → `confirmed` → `dispatched`.
+ */
+export interface BriefRepositoryPort {
+  insert(brief: Brief): void;
+  getById(id: EntityId): Brief | null;
+  /** All briefs compiled from an idea ledger. */
+  listByIdea(ideaId: EntityId): Brief[];
+  list(): Brief[];
+  update(brief: Brief): void;
 }
 
 /**

@@ -75,6 +75,38 @@ export const MIGRATION_002_CAPABILITY_GRANTS: Migration = {
 };
 
 /**
+ * Migration 3 (issue #69): the `briefs` table — compiled Briefs and their
+ * confirmation record. Confirming a Brief is the human gate before any
+ * delegation (DEC-033); the row is the journaled decision (DEC-012) —
+ * append-only, never deleted.
+ */
+export const MIGRATION_003_BRIEFS: Migration = {
+  version: 3,
+  description: 'Create the briefs table',
+  run: (db: Database.Database) => {
+    db.exec(/* sql */ `
+      CREATE TABLE IF NOT EXISTS briefs (
+        id            TEXT PRIMARY KEY,
+        idea_id       TEXT NOT NULL,
+        title         TEXT NOT NULL,
+        spec          TEXT NOT NULL,
+        plan          TEXT NOT NULL,
+        status        TEXT NOT NULL,
+        project_id    TEXT,
+        created_at    TEXT NOT NULL,
+        confirmed_at  TEXT,
+        confirmed_by  TEXT,
+        dispatched_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_briefs_idea
+        ON briefs (idea_id);
+      CREATE INDEX IF NOT EXISTS idx_briefs_status
+        ON briefs (status);
+    `);
+  },
+};
+
+/**
  * The ordered list of all known migrations. New migrations are appended here
  * with an incrementing version number; the framework applies only those not
  * yet recorded in the `_migrations` table.
@@ -82,6 +114,7 @@ export const MIGRATION_002_CAPABILITY_GRANTS: Migration = {
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_001_INITIAL,
   MIGRATION_002_CAPABILITY_GRANTS,
+  MIGRATION_003_BRIEFS,
 ];
 
 /**

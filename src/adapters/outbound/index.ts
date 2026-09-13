@@ -17,3 +17,4 @@ export * from './git/index.js';
 export * from './voice/index.js';
 export * from './events/index.js';
 export * from './security/index.js';
+export * from './ideas/index.js';
