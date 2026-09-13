@@ -24,9 +24,7 @@ class FakeAcpProcess implements AcpProcess {
     const msg = JSON.parse(line) as { id?: number; method?: string };
     if (msg.id !== undefined && msg.method !== undefined && msg.method in this.replies) {
       const reply = this.replies[msg.method];
-      queueMicrotask(() =>
-        this.feed({ jsonrpc: '2.0', id: msg.id, result: reply }),
-      );
+      queueMicrotask(() => this.feed({ jsonrpc: '2.0', id: msg.id, result: reply }));
     }
   }
 
@@ -131,6 +129,37 @@ describe('AcpAdapter', () => {
     expect(methods).toEqual(['initialize', 'session/new', 'session/prompt']);
     expect(collected[0].type).toBe('AgentStarted');
     expect(collected[collected.length - 1].type).toBe('AgentCompleted');
+  });
+
+  it('session/new registers MCP servers from the launch config (issue #63)', async () => {
+    const { adapter, proc } = makeAdapter({
+      'session/prompt': { stopReason: 'end_turn' },
+    });
+    await adapter.connect();
+    void collect(adapter);
+    await adapter.startRun('task-1', {
+      ...config,
+      mcpServers: [
+        {
+          name: 'secretary',
+          url: 'http://127.0.0.1:9090/mcp',
+          headers: { 'x-secretary-project': 'proj-1' },
+        },
+      ],
+    });
+
+    const sessionNew = proc.sent
+      .map((l) => JSON.parse(l) as { method?: string; params?: Record<string, unknown> })
+      .find((m) => m.method === 'session/new');
+    expect(sessionNew?.params?.['mcpServers']).toEqual([
+      {
+        type: 'http',
+        name: 'secretary',
+        url: 'http://127.0.0.1:9090/mcp',
+        headers: [{ name: 'x-secretary-project', value: 'proj-1' }],
+      },
+    ]);
+    await adapter.disconnect();
   });
 
   it('maps session/update notifications to SupervisorEvents', async () => {

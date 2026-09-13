@@ -42,6 +42,7 @@ import type { CompletionDigest } from '../attention/completion-digest.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
 import type {
   AgentRuntimePort,
+  McpServerSpec,
   SessionConfig as AdapterSessionConfig,
 } from '../../ports/outbound/agent-runtime.js';
 import type { AgentRuntimeRegistryPort } from '../../ports/outbound/runtime-registry.js';
@@ -96,6 +97,12 @@ export interface SessionConfig {
    * (issue #64).
    */
   readonly prompt?: string;
+  /**
+   * MCP servers the session registers at launch (DEC-018, issue #63) —
+   * manager-role tasks carry the Secretary's own tool server so the
+   * manager agent can call `secretary_spawn_task` et al.
+   */
+  readonly mcpServers?: readonly McpServerSpec[];
 }
 
 /**
@@ -921,6 +928,7 @@ export class CommandApi {
         objective: cmd.sessionConfig.prompt ?? task.objective,
         model: cmd.sessionConfig.model,
         autonomyLevel: cmd.sessionConfig.autonomyLevel,
+        mcpServers: cmd.sessionConfig.mcpServers,
       };
       const sessionResult = await this.sessionManager.startSession(
         cmd.taskId,
@@ -1445,9 +1453,7 @@ export class CommandApi {
    * issue #73). Mutations persist immediately — a spoken preference is
    * a routing fact, not a prompt hint.
    */
-  private async handleUpdatePreference(
-    cmd: UpdatePreferenceCommand,
-  ): Promise<PreferenceResponse> {
+  private async handleUpdatePreference(cmd: UpdatePreferenceCommand): Promise<PreferenceResponse> {
     if (this.preferences === undefined) {
       return { ok: false, error: 'preference profile is not wired into this daemon' };
     }
@@ -1668,10 +1674,10 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                     : C extends UpdatePreferenceCommand
                                       ? PreferenceResponse
                                       : C extends GetDigestCommand
-                                      ? DigestResponse
-                                      : C extends CreatePrCommand
-                                        ? CreatePrResponse
-                                        : Response;
+                                        ? DigestResponse
+                                        : C extends CreatePrCommand
+                                          ? CreatePrResponse
+                                          : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the

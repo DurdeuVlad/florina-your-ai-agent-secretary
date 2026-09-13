@@ -21,6 +21,26 @@ import type { TaskState as TaskStateType } from '../../../domain/enums.js';
 import type { AttentionItemSnapshot, CommandApi, TaskSnapshot } from '../tasks/command-api.js';
 import type { CapacityRouter } from '../routing/capacity-router.js';
 import type { AttentionItemPriority } from '../attention/attention-item.js';
+import type { McpServerSpec } from '../../ports/outbound/agent-runtime.js';
+
+/**
+ * The MCP registration name every provider's launch config uses for the
+ * Secretary's tool server (DEC-018, issue #63).
+ */
+export const SECRETARY_MCP_SERVER_NAME = 'secretary';
+
+/**
+ * Build the {@link McpServerSpec} a manager task's launch config carries:
+ * the daemon's MCP HTTP endpoint plus the `x-secretary-project` scoping
+ * header so the server resolves this manager's project (DEC-003).
+ */
+export function secretaryMcpSpec(mcpUrl: string, projectId: string): McpServerSpec {
+  return {
+    name: SECRETARY_MCP_SERVER_NAME,
+    url: mcpUrl,
+    headers: { 'x-secretary-project': projectId },
+  };
+}
 
 /** Raised when a manager tool call is malformed or cannot be completed. */
 export class ManagerToolError extends Error {
@@ -63,6 +83,12 @@ export interface ManagerToolDeps {
   readonly repoPath: string;
   /** Project this manager owns; spawned tasks attach to it (DEC-004). */
   readonly projectId: string;
+  /**
+   * The daemon's MCP HTTP URL (e.g. `http://127.0.0.1:PORT/mcp`). Required
+   * for {@link ManagerToolService.spawnManagerTask} — a manager's launch
+   * config registers this server so the agent can call its tools.
+   */
+  readonly mcpUrl?: string;
   readonly now?: () => Date;
   readonly generateId?: (prefix: string) => EntityId;
 }
@@ -116,11 +142,39 @@ export class ManagerToolService {
    * later retry (DEC-024 prune policy).
    */
   async spawnTask(input: SpawnTaskInput): Promise<SpawnTaskResult> {
+    return this.spawnTaskWithConfig(input, { workType: input.workType });
+  }
+
+  /**
+   * Spawn a **manager** task (issue #63): same route→create→worktree→start
+   * path as {@link spawnTask}, but the launch config registers the
+   * Secretary's MCP server (via {@link secretaryMcpSpec}) so the provider
+   * agent discovers `secretary_spawn_task` et al. The manager itself is
+   * provider-run and quota-tracked — it gets no privileged channel.
+   */
+  async spawnManagerTask(input: SpawnTaskInput): Promise<SpawnTaskResult> {
+    if (this.deps.mcpUrl === undefined) {
+      return { status: 'error', error: 'MCP server is not listening' };
+    }
+    return this.spawnTaskWithConfig(input, {
+      workType: input.workType ?? 'manage',
+      mcpServers: [secretaryMcpSpec(this.deps.mcpUrl, this.deps.projectId)],
+    });
+  }
+
+  /**
+   * Shared spawn path for worker and manager tasks; manager spawns add the
+   * MCP registration to the session launch config.
+   */
+  private async spawnTaskWithConfig(
+    input: SpawnTaskInput,
+    launch: { workType?: string; mcpServers?: readonly McpServerSpec[] },
+  ): Promise<SpawnTaskResult> {
     if (!input.objective || input.objective.trim().length === 0) {
       return { status: 'error', error: 'objective is required' };
     }
     const decision = this.deps.router.route({
-      workType: input.workType,
+      workType: launch.workType,
       excludeProviders: input.excludeProviders,
       preferProvider: input.preferProvider,
       preferModel: input.preferModel,
@@ -158,7 +212,11 @@ export class ManagerToolService {
       kind: 'start-task',
       taskId,
       agentId: decision.provider,
-      sessionConfig: { workingDir: worktreePath, model: decision.model },
+      sessionConfig: {
+        workingDir: worktreePath,
+        model: decision.model,
+        ...(launch.mcpServers !== undefined ? { mcpServers: launch.mcpServers } : {}),
+      },
     });
     if (!res.ok || !('sessionId' in res)) {
       return {
