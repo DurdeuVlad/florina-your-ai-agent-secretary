@@ -131,6 +131,7 @@ describe('daemon: lifecycle', () => {
   it('starts, listens on localhost, and stops cleanly', async () => {
     const daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -154,6 +155,7 @@ describe('daemon: lifecycle', () => {
   it('stop is a no-op when already stopped', async () => {
     const daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -181,6 +183,7 @@ describe('daemon: single-instance enforcement', () => {
   it('second start fails when another instance holds the lockfile', async () => {
     const first = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -189,6 +192,7 @@ describe('daemon: single-instance enforcement', () => {
 
     const second = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -204,6 +208,7 @@ describe('daemon: single-instance enforcement', () => {
     fs.writeFileSync(lockfile, String(stalePid));
     const daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -223,6 +228,7 @@ describe('daemon: control-plane API', () => {
     lockfile = uniqueLockfile();
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -378,6 +384,7 @@ describe('daemon: live event stream', () => {
     lockfile = uniqueLockfile();
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -452,6 +459,7 @@ describe('daemon: health check', () => {
   it('returns daemon + storage status', async () => {
     const daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -471,6 +479,7 @@ describe('daemon: health check', () => {
   it('throws when daemon is not running', () => {
     const daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -497,6 +506,7 @@ describe('daemon: integration (start, API, events, stop)', () => {
   it('full flow: start daemon, call API, receive events, stop', async () => {
     const daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,

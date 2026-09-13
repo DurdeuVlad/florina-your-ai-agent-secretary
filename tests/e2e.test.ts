@@ -114,11 +114,7 @@ function seedApproval(daemon: SecretaryDaemon, taskId: string): string {
  * `timeoutMs`. Uses real timers (not fake) so async adapter event
  * piping progresses naturally.
  */
-async function waitFor(
-  fn: () => boolean,
-  timeoutMs = 3000,
-  intervalMs = 10,
-): Promise<void> {
+async function waitFor(fn: () => boolean, timeoutMs = 3000, intervalMs = 10): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fn()) return;
@@ -149,6 +145,7 @@ describe('e2e: full daemon lifecycle (#39)', () => {
     lockfile = uniqueLockfile();
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -199,9 +196,13 @@ describe('e2e: full daemon lifecycle (#39)', () => {
     // --- query-metrics (via WebSocket) ------------------------------
     // Wait until events have been counted by the MetricsCollector.
     await waitFor(() => {
-      const mc = (daemon as unknown as {
-        metricsCollector: { snapshot: () => { counters: { eventsEmitted: Record<string, number> } } };
-      }).metricsCollector;
+      const mc = (
+        daemon as unknown as {
+          metricsCollector: {
+            snapshot: () => { counters: { eventsEmitted: Record<string, number> } };
+          };
+        }
+      ).metricsCollector;
       return totalEvents(mc.snapshot()) >= 5;
     });
 
@@ -220,9 +221,11 @@ describe('e2e: full daemon lifecycle (#39)', () => {
     // Wait until the AttentionAggregator has created items from the
     // stub's ApprovalRequested / AgentCompleted / AgentFailed events.
     await waitFor(() => {
-      const inbox = (daemon as unknown as {
-        attentionInbox: { size: number };
-      }).attentionInbox;
+      const inbox = (
+        daemon as unknown as {
+          attentionInbox: { size: number };
+        }
+      ).attentionInbox;
       return inbox.size >= 1;
     });
 
@@ -290,6 +293,7 @@ describe('e2e: error scenarios (#39)', () => {
     lockfile = uniqueLockfile();
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -313,9 +317,7 @@ describe('e2e: error scenarios (#39)', () => {
     // Pick a high random port that is almost certainly unused.
     const unusedPort = 18000 + Math.floor(Math.random() * 1000);
     const badClient = new DaemonClient({ port: unusedPort, timeoutMs: 1000 });
-    await expect(badClient.send({ kind: 'query-metrics' })).rejects.toThrow(
-      DaemonConnectionError,
-    );
+    await expect(badClient.send({ kind: 'query-metrics' })).rejects.toThrow(DaemonConnectionError);
   });
 
   it('invalid command kind: returns an UnknownCommandResponse', async () => {
@@ -415,6 +417,7 @@ describe('e2e: multi-surface (CLI + desktop) (#39)', () => {
     lockfile = uniqueLockfile();
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -464,9 +467,13 @@ describe('e2e: multi-surface (CLI + desktop) (#39)', () => {
     // Wait for the stub's events to flow through the EventBus and be
     // counted by the MetricsCollector (shared daemon state).
     await waitFor(() => {
-      const mc = (daemon as unknown as {
-        metricsCollector: { snapshot: () => { counters: { eventsEmitted: Record<string, number> } } };
-      }).metricsCollector;
+      const mc = (
+        daemon as unknown as {
+          metricsCollector: {
+            snapshot: () => { counters: { eventsEmitted: Record<string, number> } };
+          };
+        }
+      ).metricsCollector;
       return totalEvents(mc.snapshot()) >= 5;
     });
 

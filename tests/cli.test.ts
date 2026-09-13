@@ -15,11 +15,7 @@ import {
   setColorEnabled,
   isColorEnabled,
 } from '../src/cli/formatters.js';
-import {
-  DaemonClient,
-  DaemonConnectionError,
-  type WebSocketTransport,
-} from '../src/cli/client.js';
+import { DaemonClient, DaemonConnectionError, type WebSocketTransport } from '../src/cli/client.js';
 import { DaemonRunner, DEFAULT_PID_FILE } from '../src/cli/daemon-runner.js';
 import type {
   AttentionItemSnapshot,
@@ -389,15 +385,11 @@ describe('DaemonClient', () => {
   });
 
   it('propagates a connection error from the transport', async () => {
-    const transport: WebSocketTransport = vi.fn(
-      async () => {
-        throw new DaemonConnectionError('cannot connect');
-      },
-    ) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => {
+      throw new DaemonConnectionError('cannot connect');
+    }) as unknown as WebSocketTransport;
     const client = new DaemonClient();
-    await expect(client.sendRaw({ kind: 'shutdown' }, transport)).rejects.toThrow(
-      'cannot connect',
-    );
+    await expect(client.sendRaw({ kind: 'shutdown' }, transport)).rejects.toThrow('cannot connect');
   });
 
   it('ping resolves false when the transport cannot connect', async () => {
@@ -418,6 +410,7 @@ describe('DaemonRunner', () => {
       lockfile: uniqueLockfile(),
       dbPath: uniqueDbPath(),
       port: 0,
+      mcpPort: 0,
     });
     const status = await runner.status();
     expect(status.running).toBe(false);
@@ -429,7 +422,8 @@ describe('DaemonRunner', () => {
       pidFile,
       lockfile: uniqueLockfile(),
       dbPath: uniqueDbPath(),
-      port: 0, // OS-assigned port
+      port: 0,
+      mcpPort: 0, // OS-assigned port
     });
     const pid = await runner.start();
     expect(pid).toBe(process.pid);
@@ -450,6 +444,7 @@ describe('DaemonRunner', () => {
       lockfile: uniqueLockfile(),
       dbPath: uniqueDbPath(),
       port: 0,
+      mcpPort: 0,
     });
     const stopped = await runner.stop();
     expect(stopped).toBe(false);
@@ -461,6 +456,7 @@ describe('DaemonRunner', () => {
       lockfile: uniqueLockfile(),
       dbPath: uniqueDbPath(),
       port: 0,
+      mcpPort: 0,
     });
     expect(runner.readPid()).toBeUndefined();
   });
@@ -472,6 +468,7 @@ describe('DaemonRunner', () => {
       lockfile: uniqueLockfile(),
       dbPath: uniqueDbPath(),
       port: 0,
+      mcpPort: 0,
     });
     await runner.start();
     expect(runner.readPid()).toBe(process.pid);
@@ -549,30 +546,37 @@ async function mainWithTransport(
 describe('subcommand dispatch (mocked transport)', () => {
   it('inbox formats items from the daemon response', async () => {
     const response: InboxResponse = { ok: true, items: [makeItem()] };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['inbox'], transport);
     expect(code).toBe(0);
     expect(transport).toHaveBeenCalled();
   });
 
   it('inbox exits 1 on an error response', async () => {
-    const transport: WebSocketTransport = vi.fn(
-      async () => ({ ok: false, error: 'boom' }),
-    ) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: false,
+      error: 'boom',
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['inbox'], transport);
     expect(code).toBe(1);
   });
 
   it('tasks lists tasks from the daemon', async () => {
     const response: TaskListResponse = { ok: true, tasks: [makeTask()] };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['tasks'], transport);
     expect(code).toBe(0);
   });
 
   it('tasks --status filters by state', async () => {
     const response: TaskListResponse = { ok: true, tasks: [] };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     await mainWithTransport(['tasks', '--status', 'running'], transport);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
     expect(sentCommand).toEqual({ kind: 'list-tasks', status: 'running' });
@@ -580,25 +584,28 @@ describe('subcommand dispatch (mocked transport)', () => {
 
   it('task <id> shows task details', async () => {
     const response: TaskResponse = { ok: true, task: makeTask() };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['task', 'task_1'], transport);
     expect(code).toBe(0);
   });
 
   it('task <id> exits 1 when task is not found', async () => {
     const response: TaskResponse = { ok: false, task: null };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['task', 'missing'], transport);
     expect(code).toBe(1);
   });
 
   it('approve --grant sends an approve command', async () => {
     const response: ApproveResponse = { ok: true, approvalId: 'appr_1' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
-    const code = await mainWithTransport(
-      ['approve', 'task_1', 'appr_1', '--grant'],
-      transport,
-    );
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['approve', 'task_1', 'appr_1', '--grant'], transport);
     expect(code).toBe(0);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
     expect(sentCommand).toEqual({
@@ -612,7 +619,9 @@ describe('subcommand dispatch (mocked transport)', () => {
 
   it('approve --deny sends a deny decision', async () => {
     const response: ApproveResponse = { ok: true, approvalId: 'appr_1' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     await mainWithTransport(
       ['approve', 'task_1', 'appr_1', '--deny', '--note', 'too risky'],
       transport,
@@ -622,20 +631,26 @@ describe('subcommand dispatch (mocked transport)', () => {
   });
 
   it('approve exits 1 without --grant or --deny', async () => {
-    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['approve', 'task_1', 'appr_1'], transport);
     expect(code).toBe(1);
   });
 
   it('approve exits 1 with missing positionals', async () => {
-    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['approve', 'task_1'], transport);
     expect(code).toBe(1);
   });
 
   it('ack <itemId> sends an ack-item command and exits 0', async () => {
     const response: ItemMutationResponse = { ok: true, itemId: 'attn_1' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['ack', 'attn_1'], transport);
     expect(code).toBe(0);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
@@ -643,23 +658,29 @@ describe('subcommand dispatch (mocked transport)', () => {
   });
 
   it('ack exits 1 without an itemId', async () => {
-    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['ack'], transport);
     expect(code).toBe(1);
     expect(transport).not.toHaveBeenCalled();
   });
 
   it('ack exits 1 on an error response', async () => {
-    const transport: WebSocketTransport = vi.fn(
-      async () => ({ ok: false, itemId: 'attn_1', error: 'item not found' }),
-    ) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: false,
+      itemId: 'attn_1',
+      error: 'item not found',
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['ack', 'attn_1'], transport);
     expect(code).toBe(1);
   });
 
   it('resolve <itemId> sends a resolve-item command and exits 0', async () => {
     const response: ItemMutationResponse = { ok: true, itemId: 'attn_1' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['resolve', 'attn_1'], transport);
     expect(code).toBe(0);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
@@ -667,23 +688,29 @@ describe('subcommand dispatch (mocked transport)', () => {
   });
 
   it('resolve exits 1 without an itemId', async () => {
-    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['resolve'], transport);
     expect(code).toBe(1);
     expect(transport).not.toHaveBeenCalled();
   });
 
   it('resolve exits 1 on an error response', async () => {
-    const transport: WebSocketTransport = vi.fn(
-      async () => ({ ok: false, itemId: 'attn_1', error: 'already resolved' }),
-    ) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: false,
+      itemId: 'attn_1',
+      error: 'already resolved',
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['resolve', 'attn_1'], transport);
     expect(code).toBe(1);
   });
 
   it('escalate <itemId> sends an escalate-item command and exits 0', async () => {
     const response: ItemMutationResponse = { ok: true, itemId: 'attn_1' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['escalate', 'attn_1'], transport);
     expect(code).toBe(0);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
@@ -691,30 +718,38 @@ describe('subcommand dispatch (mocked transport)', () => {
   });
 
   it('escalate exits 1 without an itemId', async () => {
-    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['escalate'], transport);
     expect(code).toBe(1);
     expect(transport).not.toHaveBeenCalled();
   });
 
   it('escalate exits 1 on an error response', async () => {
-    const transport: WebSocketTransport = vi.fn(
-      async () => ({ ok: false, itemId: 'attn_1', error: 'item not found' }),
-    ) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: false,
+      itemId: 'attn_1',
+      error: 'item not found',
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['escalate', 'attn_1'], transport);
     expect(code).toBe(1);
   });
 
   it('metrics shows the metrics snapshot', async () => {
     const response: MetricsResponse = { ok: true, snapshot: emptyMetrics() };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['metrics'], transport);
     expect(code).toBe(0);
   });
 
   it('metrics --since passes the since value', async () => {
     const response: MetricsResponse = { ok: true, snapshot: emptyMetrics() };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     await mainWithTransport(['metrics', '--since', '1000'], transport);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
     expect(sentCommand).toMatchObject({ kind: 'query-metrics', since: 1000 });
@@ -722,21 +757,27 @@ describe('subcommand dispatch (mocked transport)', () => {
 
   it('prune sends a prune-worktree command', async () => {
     const response: PruneResponse = { ok: true, taskId: 'task_1' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['prune', 'task_1'], transport);
     expect(code).toBe(0);
   });
 
   it('prune exits 1 on error', async () => {
     const response: PruneResponse = { ok: false, taskId: 'task_1', error: 'dirty worktree' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['prune', 'task_1'], transport);
     expect(code).toBe(1);
   });
 
   it('digest sends a get-digest command and renders the digest', async () => {
     const response: DigestResponse = { ok: true, digest: makeDigest() };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['digest', 'task_1'], transport);
     expect(code).toBe(0);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
@@ -745,20 +786,26 @@ describe('subcommand dispatch (mocked transport)', () => {
 
   it('digest prints a no-digest message when digest is null', async () => {
     const response: DigestResponse = { ok: true, digest: null };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['digest', 'task_1'], transport);
     expect(code).toBe(0);
   });
 
   it('digest exits 1 on error response', async () => {
     const response: DigestResponse = { ok: false, digest: null, error: 'repo not configured' };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['digest', 'task_1'], transport);
     expect(code).toBe(1);
   });
 
   it('digest exits 1 without a taskId', async () => {
-    const transport: WebSocketTransport = vi.fn(async () => ({ ok: true })) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
     const code = await mainWithTransport(['digest'], transport);
     expect(code).toBe(1);
     expect(transport).not.toHaveBeenCalled();
@@ -766,7 +813,9 @@ describe('subcommand dispatch (mocked transport)', () => {
 
   it('inbox --priority filter is passed to the command', async () => {
     const response: InboxResponse = { ok: true, items: [] };
-    const transport: WebSocketTransport = vi.fn(async () => response) as unknown as WebSocketTransport;
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
     await mainWithTransport(['inbox', '--priority', 'Critical'], transport);
     const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
     expect(sentCommand).toMatchObject({

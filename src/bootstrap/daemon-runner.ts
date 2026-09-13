@@ -21,7 +21,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { SecretaryDaemon, isPortInUse, DEFAULT_DAEMON_PORT } from './daemon.js';
+import { SecretaryDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_MCP_PORT } from './daemon.js';
 
 /** Default PID file location (per-user OS temp dir). */
 export const DEFAULT_PID_FILE = path.join(os.tmpdir(), 'agent-secretary.pid');
@@ -39,6 +39,11 @@ export interface DaemonRunnerOptions {
   readonly dbPath?: string;
   /** Lockfile path (defaults to the daemon's own default). */
   readonly lockfile?: string;
+  /**
+   * Manager MCP HTTP port (defaults to {@link DEFAULT_MCP_PORT}). Pass
+   * `null` to disable the MCP surface, `0` for an OS-assigned port.
+   */
+  readonly mcpPort?: number | null;
 }
 
 /** Status snapshot returned by {@link DaemonRunner.status}. */
@@ -63,6 +68,7 @@ export class DaemonRunner {
   private readonly port: number;
   private readonly dbPath: string;
   private readonly lockfile: string;
+  private readonly mcpPort: number | null;
   private daemon: SecretaryDaemon | null = null;
 
   constructor(options: DaemonRunnerOptions = {}) {
@@ -70,6 +76,7 @@ export class DaemonRunner {
     this.port = options.port ?? DEFAULT_DAEMON_PORT;
     this.dbPath = options.dbPath ?? DEFAULT_DB_PATH;
     this.lockfile = options.lockfile ?? path.join(os.tmpdir(), 'agent-secretary.lock');
+    this.mcpPort = options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort;
   }
 
   /**
@@ -96,6 +103,7 @@ export class DaemonRunner {
       port: this.port,
       dbPath: this.dbPath,
       lockfile: this.lockfile,
+      mcpPort: this.mcpPort,
       installSignalHandlers: true,
     });
     await this.daemon.start();

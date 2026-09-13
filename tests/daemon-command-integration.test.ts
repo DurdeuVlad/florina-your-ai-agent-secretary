@@ -128,6 +128,7 @@ describe('daemon: CommandApi integration (#33)', () => {
     lockfile = uniqueLockfile();
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -200,8 +201,8 @@ describe('daemon: CommandApi integration (#33)', () => {
 
   it('query-task returns the task when it exists', async () => {
     // Seed a project + task directly through the storage layer.
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);
@@ -221,8 +222,8 @@ describe('daemon: CommandApi integration (#33)', () => {
   });
 
   it('list-tasks returns seeded tasks', async () => {
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);

@@ -101,11 +101,7 @@ function collectEvents(bus: EventBus, count: number, timeoutMs = 3000): Promise<
 }
 
 /** Wait for a condition to become true, polling at an interval. */
-async function waitFor(
-  fn: () => boolean,
-  timeoutMs = 3000,
-  intervalMs = 10,
-): Promise<void> {
+async function waitFor(fn: () => boolean, timeoutMs = 3000, intervalMs = 10): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fn()) return;
@@ -127,6 +123,7 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     lockfile = uniqueLockfile();
     daemon = new SecretaryDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -161,8 +158,8 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
 
   it('start-task connects the stub adapter and pipes events to the EventBus', async () => {
     // Seed a project, an agent (id "stub" to match the adapter), and a task.
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);
@@ -177,7 +174,14 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     });
     db.prepare(
       'INSERT INTO agents (id, name, provider, fidelity_tier, runtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(agent.id, agent.name, agent.provider, agent.fidelityTier, JSON.stringify(agent.runtime), agent.createdAt);
+    ).run(
+      agent.id,
+      agent.name,
+      agent.provider,
+      agent.fidelityTier,
+      JSON.stringify(agent.runtime),
+      agent.createdAt,
+    );
     const task = buildTask({ projectId: project.id, objective: 'Write tests' });
     tasks.insert(task);
 
@@ -234,8 +238,8 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
   });
 
   it('stop-task cancels and disconnects the adapter session', async () => {
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);
@@ -248,7 +252,14 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     daemon.adapterRegistry$!.register('stub-slow', () => new StubAdapter(null, { delayMs: 5000 }));
     db.prepare(
       'INSERT INTO agents (id, name, provider, fidelity_tier, runtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('stub-slow', 'Stub Slow', 'stub', 'E', JSON.stringify({ kind: 'cli' }), new Date().toISOString());
+    ).run(
+      'stub-slow',
+      'Stub Slow',
+      'stub',
+      'E',
+      JSON.stringify({ kind: 'cli' }),
+      new Date().toISOString(),
+    );
     const task = buildTask({ projectId: project.id, objective: 'Write tests' });
     tasks.insert(task);
 
@@ -273,8 +284,8 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
   });
 
   it('start-task with an unknown adapter id returns an error', async () => {
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);
@@ -282,7 +293,14 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     projects.insert(project);
     db.prepare(
       'INSERT INTO agents (id, name, provider, fidelity_tier, runtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('unknown-agent', 'Unknown', 'unknown', 'E', JSON.stringify({ kind: 'cli' }), new Date().toISOString());
+    ).run(
+      'unknown-agent',
+      'Unknown',
+      'unknown',
+      'E',
+      JSON.stringify({ kind: 'cli' }),
+      new Date().toISOString(),
+    );
     const task = buildTask({ projectId: project.id, objective: 'Write tests' });
     tasks.insert(task);
 
