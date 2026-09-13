@@ -11,21 +11,23 @@
  * to the {@link EventBus}; the daemon itself only owns the transport and the
  * fan-out. This keeps the streaming surface decoupled from adapter
  * implementation details.
+ *
+ * The concrete `EventBus` is the outbound adapter in
+ * `src/adapters/outbound/events/in-memory-event-bus.ts` (issue #92);
+ * this module re-exports it for compatibility and keeps only the inbound
+ * WebSocket stream. `EventStream` depends on {@link EventSubscriberPort}.
  */
-import { EventEmitter } from 'node:events';
-
 import type { WebSocket } from 'ws';
 
 import type { SupervisorEvent } from '../domain/events.js';
-import type { EventBusPort } from '../core/application/ports/outbound/event-stream.js';
+import type { EventSubscriberPort } from '../core/application/ports/outbound/event-stream.js';
 
 /**
- * Event names emitted by the internal {@link EventBus}.
+ * Re-export the canonical in-memory event bus so daemon-path consumers keep
+ * working. The source of truth is
+ * `src/adapters/outbound/events/in-memory-event-bus.ts` (issue #92).
  */
-export const EventBusEvents = {
-  /** A new SupervisorEvent was published by an adapter. */
-  Event: 'event',
-} as const;
+export { EventBus, EventBusEvents } from '../adapters/outbound/events/in-memory-event-bus.js';
 
 /**
  * Wire envelope for messages broadcast to subscribers.
@@ -46,43 +48,6 @@ export type EventStreamControlMessage =
   { readonly type: 'subscribe' } | { readonly type: 'unsubscribe' };
 
 /**
- * Internal event bus that adapters publish to and the stream broadcasts from.
- *
- * This is a thin wrapper around `EventEmitter` so the daemon owns a single
- * fan-out point; adapters never touch WebSocket connections directly.
- */
-export class EventBus extends EventEmitter implements EventBusPort {
-  private sequence = 0;
-
-  constructor() {
-    super();
-    // Allow a large number of concurrent subscribers without Node warning.
-    this.setMaxListeners(0);
-  }
-
-  /**
-   * Publish a validated SupervisorEvent to all listeners. The bus assigns a
-   * monotonic sequence number so subscribers can detect gaps after reconnect.
-   */
-  publish(event: SupervisorEvent): number {
-    const seq = ++this.sequence;
-    this.emit(EventBusEvents.Event, event, seq);
-    return seq;
-  }
-
-  /** Subscribe to the event stream. Returns an unsubscribe function. */
-  onEvent(listener: (event: SupervisorEvent, seq: number) => void): () => void {
-    this.on(EventBusEvents.Event, listener);
-    return () => this.off(EventBusEvents.Event, listener);
-  }
-
-  /** Current sequence counter (for diagnostics / health). */
-  get currentSeq(): number {
-    return this.sequence;
-  }
-}
-
-/**
  * Manages the set of WebSocket clients subscribed to the live event stream.
  *
  * The {@link SecretaryDaemon} creates one `EventStream` and registers every
@@ -90,11 +55,11 @@ export class EventBus extends EventEmitter implements EventBusPort {
  * subscriber only after it sends a `subscribe` control message.
  */
 export class EventStream {
-  private readonly bus: EventBus;
+  private readonly bus: EventSubscriberPort;
   /** Map of subscribed WebSocket -> listener unsubscribe function. */
   private readonly subscribers = new Map<WebSocket, () => void>();
 
-  constructor(bus: EventBus) {
+  constructor(bus: EventSubscriberPort) {
     this.bus = bus;
   }
 

@@ -1,5 +1,5 @@
 /**
- * Outbound adapters — canonical implementations of the core outbound ports
+ * Outbound adapters ï¿½ canonical implementations of the core outbound ports
  * (DEC-037, issue #92).
  *
  * Each subtree adapts one outbound boundary: SQLite persistence, provider
@@ -14,3 +14,6 @@ export * from './preferences/index.js';
 export * from './credentials/index.js';
 export * from './model/index.js';
 export * from './git/index.js';
+export * from './voice/index.js';
+export * from './events/index.js';
+export * from './security/index.js';

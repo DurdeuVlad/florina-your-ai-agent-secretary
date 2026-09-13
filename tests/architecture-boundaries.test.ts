@@ -535,6 +535,7 @@ describe('src/core boundary conformance', () => {
       'preference-profile',
       'quota-reader',
       'git-client',
+      'voice',
       'index',
     ]) {
       expect(
@@ -549,6 +550,9 @@ describe('src/core boundary conformance', () => {
       'metrics.ts',
       'routing/quota-ledger.ts',
       'routing/quota-exhaustion.ts',
+      'security/audit-report.ts',
+      'security/hardening.ts',
+      'security/index.ts',
       'routing/capacity-router.ts',
       'routing/index.ts',
       'context/context-isolation.ts',
@@ -660,6 +664,8 @@ describe('migrated use-case compatibility facades', () => {
     'src/daemon/capability-broker.ts',
     'src/storage/context-estimator.ts',
     'src/storage/context-resolver.ts',
+    'src/security/audit-report.ts',
+    'src/security/hardening.ts',
   ];
 
   it('each migrated legacy file is a facade into src/core/application/use-cases', () => {
@@ -751,6 +757,22 @@ describe('migrated use-case compatibility facades', () => {
       'src/adapters/outbound/quota/quota-readers.ts': [
         'src/core/application/ports/outbound/quota-reader.ts',
       ],
+      'src/adapters/outbound/events/in-memory-event-bus.ts': [
+        'src/core/application/ports/outbound/event-stream.ts',
+      ],
+      'src/adapters/outbound/voice/realtime-bridge.ts': [
+        'src/core/application/ports/outbound/voice.ts',
+      ],
+      'src/adapters/outbound/security/filesystem-security-auditor.ts': [
+        'src/core/application/use-cases/security/audit-report.ts',
+      ],
+      // The daemon event stream is an inbound WebSocket surface: it keeps
+      // the transport but must depend on the subscriber port and re-export
+      // the outbound EventBus for compatibility.
+      'src/daemon/event-stream.ts': [
+        'src/core/application/ports/outbound/event-stream.ts',
+        'src/adapters/outbound/events/in-memory-event-bus.ts',
+      ],
       'src/adapters/outbound/git/node-git-client.ts': [
         'src/core/application/ports/outbound/git-client.ts',
       ],
@@ -797,6 +819,15 @@ describe('migrated use-case compatibility facades', () => {
       'src/adapters/outbound/agents/registry.ts must not import an event bus: ' +
         'adapters are created without one and the session manager publishes ' +
         'streamed events',
+    ).toBe(true);
+  });
+
+  it('daemon event-stream no longer owns the EventBus implementation', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'daemon', 'event-stream.ts'));
+    expect(
+      edges.every((e) => e.specifier !== 'node:events'),
+      'src/daemon/event-stream.ts must not import node:events — the ' +
+        'EventEmitter-backed EventBus moved to src/adapters/outbound/events',
     ).toBe(true);
   });
 });
@@ -852,6 +883,18 @@ describe('src/adapters/outbound tree', () => {
     'git/diff-analyzer.ts',
     'git/worktree-manager.ts',
     'git/index.ts',
+    // Voice adapters (realtime + whisper)
+    'voice/realtime-message.ts',
+    'voice/realtime-bridge.ts',
+    'voice/whisper-backend.ts',
+    'voice/whisper-adapter.ts',
+    'voice/index.ts',
+    // In-memory event bus adapter
+    'events/in-memory-event-bus.ts',
+    'events/index.ts',
+    // Security auditor adapter
+    'security/filesystem-security-auditor.ts',
+    'security/index.ts',
     // Outbound barrel
     'index.ts',
   ];
@@ -1015,6 +1058,13 @@ describe('migrated outbound compatibility facades', () => {
     'src/secretary/model-connector.ts',
     // Diff analyzer facade
     'src/attention/diff-analyzer.ts',
+    // Voice adapter facades
+    'src/voice/realtime-message.ts',
+    'src/voice/realtime-bridge.ts',
+    'src/voice/whisper-backend.ts',
+    'src/voice/whisper-adapter.ts',
+    // Security auditor facade
+    'src/security/auditors.ts',
   ];
 
   it('each moved implementation file is a facade into src/adapters/outbound', () => {
@@ -1022,6 +1072,17 @@ describe('migrated outbound compatibility facades', () => {
       facadeViolations(path.join(REPO_ROOT, rel), 'src/adapters/outbound/'),
     );
     expect(violations).toEqual([]);
+  });
+
+  it('voice/audio-types.ts is a facade into the core voice port', () => {
+    // The provider-neutral voice data/device contract lives in
+    // `src/core/application/ports/outbound/voice.ts` (issue #92).
+    expect(
+      facadeViolations(
+        path.join(REPO_ROOT, 'src/voice/audio-types.ts'),
+        'src/core/application/ports/outbound/',
+      ),
+    ).toEqual([]);
   });
 
   it('daemon/worktree.ts is a compatibility wrapper, not a pure facade', () => {
