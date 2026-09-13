@@ -53,6 +53,7 @@ import type {
   TaskRepositoryPort,
 } from '../../ports/outbound/repositories.js';
 import { DirtyWorktreeError, type WorktreePort } from '../../ports/outbound/worktree.js';
+import type { PreferenceProfilePort } from '../../ports/outbound/preference-profile.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
 import type { ContextHealthSnapshot } from '../context/context-health-monitor.js';
@@ -318,6 +319,23 @@ export interface ConfirmBriefCommand {
   readonly confirmedBy?: string;
 }
 
+/**
+ * Mutate the durable provider/model preference profile (DEC-029, issue
+ * #73). The voice `remember_preference` tool lands here — a prompt
+ * preference is never prompt-engineered around, it becomes a persisted
+ * routing fact the CapacityRouter enforces.
+ */
+export interface UpdatePreferenceCommand {
+  readonly kind: 'update-preference';
+  readonly action: 'add-rule' | 'deny' | 'remove-rule' | 'remove-deny';
+  /** Provider id (e.g. claude-code, devin). Required for all actions. */
+  readonly provider: string;
+  /** Optional model pin the rule applies to. */
+  readonly model?: string;
+  /** Work-type tags a routing rule applies to (add-rule only). */
+  readonly workTypes?: readonly string[];
+}
+
 /** Query the latest completion digest for a task (issue #37). */
 export interface GetDigestCommand {
   readonly kind: 'get-digest';
@@ -368,6 +386,7 @@ export type Command =
   | PromoteIdeaCommand
   | CompileBriefCommand
   | ConfirmBriefCommand
+  | UpdatePreferenceCommand
   | GetDigestCommand
   | CreatePrCommand;
 
@@ -393,6 +412,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'idea-promote',
   'brief-compile',
   'brief-confirm',
+  'update-preference',
   'get-digest',
   'create-pr',
 ] as const;
@@ -525,6 +545,14 @@ export interface BriefConfirmResponse {
   readonly error?: string;
 }
 
+/** Response to `update-preference` — the profile after mutation. */
+export interface PreferenceResponse {
+  readonly ok: boolean;
+  /** Rendered rules+denies after the mutation, for the caller to echo. */
+  readonly summary?: string;
+  readonly error?: string;
+}
+
 /** Generic error response for unknown / malformed commands. */
 export interface UnknownCommandResponse {
   readonly ok: false;
@@ -555,6 +583,7 @@ export type Response =
   | IdeaListResponse
   | BriefResponse
   | BriefConfirmResponse
+  | PreferenceResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -652,6 +681,12 @@ export interface CommandApiDeps {
    * clear `ok: false` rather than pretending to succeed.
    */
   readonly ideas?: IdeaService;
+  /**
+   * Durable preference profile (DEC-029, issue #73). When wired,
+   * `update-preference` mutates + persists routing rules and denies;
+   * when absent the command fails cleanly.
+   */
+  readonly preferences?: PreferenceProfilePort;
 }
 
 /* ================================================================== *
@@ -694,6 +729,7 @@ export class CommandApi {
   private readonly metricsQueryService?: MetricsQueryService;
   private readonly contextHealth?: ContextHealthReadPort;
   private readonly ideas?: IdeaService;
+  private readonly preferences?: PreferenceProfilePort;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -715,6 +751,7 @@ export class CommandApi {
     this.metricsQueryService = deps.metricsQueryService;
     this.contextHealth = deps.contextHealth;
     this.ideas = deps.ideas;
+    this.preferences = deps.preferences;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -771,6 +808,8 @@ export class CommandApi {
         return this.handleCompileBrief(command);
       case 'brief-confirm':
         return this.handleConfirmBrief(command);
+      case 'update-preference':
+        return this.handleUpdatePreference(command);
       case 'get-digest':
         return this.handleGetDigest(command);
       case 'create-pr':
@@ -1401,6 +1440,63 @@ export class CommandApi {
     }
   }
 
+  /**
+   * update-preference: mutate the durable routing profile (DEC-029,
+   * issue #73). Mutations persist immediately — a spoken preference is
+   * a routing fact, not a prompt hint.
+   */
+  private async handleUpdatePreference(
+    cmd: UpdatePreferenceCommand,
+  ): Promise<PreferenceResponse> {
+    if (this.preferences === undefined) {
+      return { ok: false, error: 'preference profile is not wired into this daemon' };
+    }
+    if (cmd.provider.trim().length === 0) {
+      return { ok: false, error: 'provider is required' };
+    }
+    const store = this.preferences;
+    try {
+      switch (cmd.action) {
+        case 'add-rule':
+          store.addRule({
+            provider: cmd.provider,
+            ...(cmd.model !== undefined ? { model: cmd.model } : {}),
+            ...(cmd.workTypes !== undefined ? { workTypes: [...cmd.workTypes] } : {}),
+          });
+          break;
+        case 'deny':
+          store.addDeny({
+            provider: cmd.provider,
+            ...(cmd.model !== undefined ? { model: cmd.model } : {}),
+          });
+          break;
+        case 'remove-rule':
+          if (!store.removeRule(cmd.provider, cmd.model)) {
+            return { ok: false, error: `no rule for provider ${cmd.provider}` };
+          }
+          break;
+        case 'remove-deny':
+          if (!store.removeDeny(cmd.provider, cmd.model)) {
+            return { ok: false, error: `no deny for provider ${cmd.provider}` };
+          }
+          break;
+      }
+      await store.save();
+      const profile = store.toProfile();
+      const summary = [
+        ...profile.rules.map(
+          (r) => `rule: ${r.provider}${r.model !== undefined ? `/${r.model}` : ''}`,
+        ),
+        ...profile.denied.map(
+          (d) => `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}`,
+        ),
+      ].join('\n');
+      return { ok: true, summary: summary === '' ? 'no preferences recorded' : summary };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+  }
+
   /** get-digest: return the latest completion digest for a task (issue #37). */
   private async handleGetDigest(cmd: GetDigestCommand): Promise<DigestResponse> {
     if (!cmd.taskId) {
@@ -1569,7 +1665,9 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                   ? BriefResponse
                                   : C extends ConfirmBriefCommand
                                     ? BriefConfirmResponse
-                                    : C extends GetDigestCommand
+                                    : C extends UpdatePreferenceCommand
+                                      ? PreferenceResponse
+                                      : C extends GetDigestCommand
                                       ? DigestResponse
                                       : C extends CreatePrCommand
                                         ? CreatePrResponse

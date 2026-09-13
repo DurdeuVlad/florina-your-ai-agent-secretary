@@ -164,6 +164,8 @@ Commands:
   metrics [--since <ms>]      Show metrics snapshot
   prune <taskId>              Prune the worktree for a task
   voice [--api-key <key>]     Start a voice session (push-to-talk)
+      [--litellm-url <url>]   LiteLLM proxy for Secretary-loop tools
+      [--model <name>]        Model on the proxy (SECRETARY_MODEL)
   version                     Print version
   help                        Print this help
 
@@ -503,7 +505,36 @@ async function cmdVoice(ctx: CommandContext): Promise<CommandResult> {
       },
     };
 
-    const session = await ctx.deps.createVoiceSession({ apiKey, commandApi });
+    // DEC-034 / issue #73: heavyweight voice tools (research, ledger
+    // notes, brief compilation) run in the Secretary loop on a LiteLLM
+    // proxy. Config comes from flags or SECRETARY_LITELLM_* env vars;
+    // when absent the async tools report "not wired" instead of hanging.
+    const litellmUrl =
+      typeof ctx.args.flags['litellm-url'] === 'string'
+        ? ctx.args.flags['litellm-url']
+        : process.env['SECRETARY_LITELLM_URL'];
+    const litellmModel =
+      typeof ctx.args.flags['model'] === 'string'
+        ? ctx.args.flags['model']
+        : process.env['SECRETARY_MODEL'];
+    const litellmKey =
+      typeof ctx.args.flags['litellm-key'] === 'string'
+        ? ctx.args.flags['litellm-key']
+        : process.env['SECRETARY_LITELLM_KEY'];
+    const litellm =
+      typeof litellmUrl === 'string' && typeof litellmModel === 'string'
+        ? {
+            baseUrl: litellmUrl,
+            model: litellmModel,
+            ...(typeof litellmKey === 'string' ? { apiKey: litellmKey } : {}),
+          }
+        : undefined;
+
+    const session = await ctx.deps.createVoiceSession({
+      apiKey,
+      commandApi,
+      ...(litellm !== undefined ? { litellm } : {}),
+    });
 
     session.onTranscript((text, partial) => {
       if (partial) {

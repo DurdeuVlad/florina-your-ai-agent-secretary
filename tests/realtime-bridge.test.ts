@@ -699,6 +699,29 @@ describe('RealtimeBridge', () => {
       }
     });
 
+    it('sendUserMessage creates a user message item then requests a response', async () => {
+      const socket = await connect();
+      bridge.sendUserMessage('The research finished: quota resets hourly.');
+
+      const sent = allSent(socket);
+      const creates = sent.filter((m) => m.type === 'conversation.item.create');
+      expect(creates).toHaveLength(1);
+      if (creates[0]?.type === 'conversation.item.create') {
+        expect(creates[0].item.type).toBe('message');
+        if (creates[0].item.type === 'message') {
+          expect(creates[0].item.role).toBe('user');
+          expect(creates[0].item.content[0]).toEqual({
+            type: 'input_text',
+            text: 'The research finished: quota resets hourly.',
+          });
+        }
+      }
+      // A response.create follows the item so the assistant speaks the result.
+      const createIdx = sent.findIndex((m) => m.type === 'conversation.item.create');
+      const respondIdx = sent.findIndex((m) => m.type === 'response.create');
+      expect(respondIdx).toBeGreaterThan(createIdx);
+    });
+
     it('unsubscribes onToolCall via the returned function', async () => {
       const socket = await connect();
       const calls: string[] = [];

@@ -125,8 +125,113 @@ export function buildDefaultVoiceTools(): readonly VoiceToolDefinition[] {
         required: ['taskId'],
       },
     },
+    /* ---------------------------------------------------------------- *
+     * Secretary-loop tools (DEC-021 + DEC-034, issue #73)
+     * ------------------------------------------------------------------ */
+    {
+      type: 'function',
+      name: 'research',
+      description:
+        'Start a background research pass on a topic while the conversation continues. ' +
+        'The Secretary investigates asynchronously and speaks again when the result is ready — ' +
+        'this call returns immediately.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'What to research.' },
+          ideaId: {
+            type: 'string',
+            description: 'Optional idea ledger the findings should append to.',
+          },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      type: 'function',
+      name: 'update_idea_ledger',
+      description:
+        'Append notes to an idea ledger — research findings, open questions, ' +
+        'decisions in progress. Pass ideaId to update an existing ledger, or ' +
+        'title to open a new one.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ideaId: { type: 'string', description: 'Existing ledger id to append to.' },
+          title: { type: 'string', description: 'Title for a new ledger (when no ideaId).' },
+          heading: { type: 'string', description: 'Section heading for the new content.' },
+          body: { type: 'string', description: 'Markdown body of the section.' },
+        },
+        required: ['heading', 'body'],
+      },
+    },
+    {
+      type: 'function',
+      name: 'compile_brief',
+      description:
+        'Compile an idea ledger into a reviewable Brief: the frozen spec plus a ' +
+        'delegation plan (project + task breakdown). The Brief is shown for review — ' +
+        'nothing is dispatched without explicit confirmation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ideaId: { type: 'string', description: 'The ledger to compile.' },
+          projectId: { type: 'string', description: 'Project the tasks dispatch into.' },
+          tasks: {
+            type: 'array',
+            description: 'Delegation plan tasks.',
+            items: {
+              type: 'object',
+              properties: {
+                objective: { type: 'string', description: 'What the worker should accomplish.' },
+                workType: { type: 'string', description: 'Optional work-type tag.' },
+                provider: { type: 'string', description: 'Preferred provider.' },
+                model: { type: 'string', description: 'Preferred model pin.' },
+              },
+              required: ['objective'],
+            },
+          },
+        },
+        required: ['ideaId', 'projectId', 'tasks'],
+      },
+    },
+    {
+      type: 'function',
+      name: 'remember_preference',
+      description:
+        'Record a durable provider/model routing preference ("never Opus", ' +
+        '"Codex for heavy lifting") so it persists as a routing fact rather ' +
+        'than a one-off instruction.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['add-rule', 'deny', 'remove-rule', 'remove-deny'],
+            description: 'What to change in the profile.',
+          },
+          provider: { type: 'string', description: 'Provider id (e.g. claude-code, devin).' },
+          model: { type: 'string', description: 'Optional model pin.' },
+          workTypes: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Work-type tags a routing rule applies to (add-rule only).',
+          },
+        },
+        required: ['action', 'provider'],
+      },
+    },
   ] as const;
 }
+
+/**
+ * Voice tools that run asynchronously (issue #73): their result cannot
+ * come back inside the speech turn, so the session manager answers the
+ * tool call immediately and speaks again via `sendUserMessage` when the
+ * work finishes. Everything NOT in this set maps to a typed Command and
+ * executes synchronously through the command API.
+ */
+export const ASYNC_VOICE_TOOLS: readonly string[] = ['research'] as const;
 
 /**
  * Map a voice tool call (name + parsed args) to a typed {@link Command}.
@@ -184,6 +289,72 @@ export function mapToolCallToCommand(
     case 'get_digest':
       if (typeof args['taskId'] !== 'string') return null;
       return { kind: 'get-digest', taskId: args['taskId'] } as Command;
+    case 'update_idea_ledger': {
+      const heading = args['heading'];
+      const body = args['body'];
+      if (typeof heading !== 'string' || typeof body !== 'string') return null;
+      if (typeof args['ideaId'] === 'string') {
+        return {
+          kind: 'idea-append',
+          ideaId: args['ideaId'],
+          heading,
+          body,
+        } as Command;
+      }
+      if (typeof args['title'] === 'string') {
+        // No ledger id — open a new one seeded with this section.
+        return {
+          kind: 'idea-create',
+          title: args['title'],
+          body: `## ${heading}\n\n${body}`,
+        } as Command;
+      }
+      return null;
+    }
+    case 'compile_brief': {
+      if (typeof args['ideaId'] !== 'string' || typeof args['projectId'] !== 'string') {
+        return null;
+      }
+      const rawTasks = args['tasks'];
+      if (!Array.isArray(rawTasks)) return null;
+      const tasks = rawTasks.map((t) => {
+        const task = t as Record<string, unknown>;
+        return {
+          objective: typeof task['objective'] === 'string' ? task['objective'] : '',
+          ...(typeof task['workType'] === 'string' ? { workType: task['workType'] } : {}),
+          ...(typeof task['provider'] === 'string' ? { preferProvider: task['provider'] } : {}),
+          ...(typeof task['model'] === 'string' ? { preferModel: task['model'] } : {}),
+        };
+      });
+      if (tasks.some((t) => t.objective === '')) return null;
+      return {
+        kind: 'brief-compile',
+        ideaId: args['ideaId'],
+        plan: { projectId: args['projectId'], tasks },
+      } as Command;
+    }
+    case 'remember_preference': {
+      const action = args['action'];
+      if (
+        typeof args['provider'] !== 'string' ||
+        (action !== 'add-rule' &&
+          action !== 'deny' &&
+          action !== 'remove-rule' &&
+          action !== 'remove-deny')
+      ) {
+        return null;
+      }
+      const workTypes = args['workTypes'];
+      return {
+        kind: 'update-preference',
+        action,
+        provider: args['provider'],
+        model: typeof args['model'] === 'string' ? args['model'] : undefined,
+        workTypes: Array.isArray(workTypes)
+          ? (workTypes.filter((w) => typeof w === 'string') as string[])
+          : undefined,
+      } as Command;
+    }
     default:
       return null;
   }

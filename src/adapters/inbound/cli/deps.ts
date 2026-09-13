@@ -50,9 +50,7 @@ export interface VoiceSession {
   /** Register a pipeline mode-change callback. */
   onModeChange(callback: (mode: VoicePipelineMode) => void): () => void;
   /** Register a tool-call result callback. */
-  onToolCall(
-    callback: (name: string, success: boolean, result: unknown) => void,
-  ): () => void;
+  onToolCall(callback: (name: string, success: boolean, result: unknown) => void): () => void;
   /** Register a session state-change callback. */
   onStateChange(callback: (state: VoiceSessionState) => void): () => void;
 }
@@ -65,6 +63,15 @@ export interface VoiceSession {
 export type VoiceSessionFactory = (options: {
   readonly apiKey: string;
   readonly commandApi: CommandExecutor;
+  /**
+   * LiteLLM proxy config (DEC-034, issue #73). When present, the session
+   * runs heavyweight voice tools in the Secretary loop on this model.
+   */
+  readonly litellm?: {
+    readonly baseUrl: string;
+    readonly model: string;
+    readonly apiKey?: string;
+  };
 }) => Promise<VoiceSession>;
 
 /** The concrete services the CLI surface requires, injected by bootstrap. */

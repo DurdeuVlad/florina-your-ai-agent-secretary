@@ -265,6 +265,13 @@ export interface RealtimeSessionPort extends RealtimeVoicePort {
   stopListening(): void;
   /** Return a tool call result to the model (JSON-encoded payload). */
   sendToolCallOutput(callId: string, output: string): void;
+  /**
+   * Inject a user-role text message and ask the model to respond
+   * (DEC-021, issue #73). Long-running tool work finishes after the
+   * speech turn that triggered it — this is how the Secretary speaks
+   * again when the result is ready, without blocking a turn.
+   */
+  sendUserMessage(text: string): void;
   /** Subscribe to tool calls requested by the model. */
   onToolCall(callback: (event: ToolCallEvent) => void): () => void;
 }
