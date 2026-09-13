@@ -433,3 +433,18 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 - **Alternatives Considered**: SSH-managed remote agents (rejected — loses the child's own journal, attention engine, and quota ledger; a shell is not a supervisor); treating remote providers as direct adapters over SSH (rejected — no local policy boundary on the remote machine).
 - **Reconsideration Trigger**: If upstream event volume or trust-boundary complexity defeats the attention model.
 - **Resolved By**: Issue #78.
+
+---
+
+**ID**: DEC-037
+**Date**: 2026-09-13
+**Status**: ACCEPTED
+**Decision**: Repository-wide hexagonal (ports & adapters) architecture — the core owns the domain model and all port contracts; adapters depend inward; the bootstrap layer alone composes concrete implementations
+- **Rationale**: The codebase had grown consumer-owned contracts (e.g. `AgentAdapter` living in `src/adapters/base.ts`, `WorktreeStatus` in `src/daemon/worktree.ts`) and a flat module layout where any module could import any other. As adapters, daemon services, storage, and surfaces multiply, inward-pointing dependencies must be enforced mechanically rather than by convention.
+- **Consequences**:
+  - **`src/core/domain/`** is the canonical home of the domain model (enums, types, factories, capabilities, policy, approval, SupervisorEvent). **`src/core/application/ports/`** holds the pure port contracts the core owns (`ClockPort`, `IdGeneratorPort`, `EventBusPort`/`EventPublisherPort`/`EventSubscriberPort`, `AgentRuntimePort`, `WorktreePort`). Core files may import only other core files — never adapters, daemon, storage, node builtins, or external packages.
+  - Dependency direction: `domain <- application ports/use-cases <- inbound/outbound adapters`. A future **`src/bootstrap/`** layer is the only place concrete implementations are composed into the core.
+  - **Compatibility facades**: legacy `src/domain/*.ts` paths are thin `export *` re-exports resolving inward to `src/core/domain`, so existing consumers keep working while migration proceeds incrementally. Facades are temporary migration surfaces, not permanent API.
+  - Conformance is enforced by `tests/architecture-boundaries.test.ts`, which statically scans core import specifiers and the legacy facades — the boundary is a test, not a convention.
+- **Alternatives Considered**: Keep the flat layout and rely on code review (rejected — no mechanical enforcement); big-bang rewrite moving all consumers at once (rejected — unsafe mid-flight with parallel feature work); ports owned by their consumers (rejected — inverts the dependency direction this decision exists to establish).
+- **Resolved By**: Issue #90.
