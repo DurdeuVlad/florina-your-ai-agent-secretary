@@ -7,6 +7,12 @@ This is the product design document for Agent Secretary — an open-source super
 ### Attention Over Activity
 Do not surface every agent event. Surface what matters. Most agent activity should not interrupt the human.
 
+### Energy Conservation
+The mandate is to save the user's limited energy and attention across many projects and a life outside work. Never interrupt with decisions already made, scopes already granted, or answers easily inferred from preference memories and observable state — resolve silently, journal the inference, and let the human audit later. The human debates direction and ideas with the Secretary; they do not manage agents.
+
+### Done Means Proven
+An agent's claim of completion is a claim, not a result. Writing code is the easy part; proving it works is the job. A task surfaces as complete only with verification evidence — tests run, build passing, behavior demonstrated. Work that produced no proof is routed back for verification, not escalated.
+
 ### Deliverables Over Transcripts
 Execution logs and conversation history are secondary. Outcomes are primary. The human interacts with Tasks, Deliverables, Attention Items, and Decisions — not agent sessions.
 
@@ -180,9 +186,9 @@ Heterogeneous agents appear behind a single interface. The secretary never needs
 **Adapter Fidelity Tiers**:
 - **A**: Structured permissions + events (Codex app-server JSON-RPC)
 - **B**: Structured lifecycle hooks (Claude Code hooks)
-- **C**: ACP-native (compatible agents)
-- **D**: Structured JSON CLI output (other tools)
-- **E**: PTY heuristic (last-resort compatibility)
+- **C**: ACP-native — `devin acp`, `gemini --acp`, and other Agent Client Protocol CLIs via the generic ACP adapter (DEC-030)
+- **D**: Structured JSON CLI output (`agy -p --output-format stream-json`, other tools)
+- **E**: PTY heuristic (last-resort compatibility; no adapter shipped, DEC-023)
 
 The attention engine adjusts its behavior based on adapter fidelity:
 - **Tier A–B**: Auto-approve policies are available (the secretary has structured data to evaluate). Permission requests are presented with full structured context.
@@ -240,11 +246,20 @@ Things that logically follow after validation:
 - Continuous real-time voice (Pipecat/LiveKit)
 - Remote companion (paired E2E-encrypted)
 
+### Multi-Provider Orchestration (M6 — locked 2026-09-13, docs/ARCHITECTURE.md)
+- Secretary agentic loop on LiteLLM connector (DEC-034)
+- Quota-aware capacity router: subscriptions as a pooled resource; failover mid-task; park/resume at earliest reset (DEC-029)
+- Per-project manager agents dispatching workers only through daemon MCP tools (DEC-018 amended)
+- Provider preference prompts per project + auto-learned preference memories (DEC-029)
+- Scoped auto-approval grants (DEC-007/010/011)
+- Verification-gated completion — done means proven (DEC-032)
+- Idea ledgers → compiled Briefs → human-gated delegation (DEC-033)
+- Additional providers: Devin `acp` + Gemini `--acp` (Tier C), `agy` headless (Tier D)
+
 ### Later
 Intentionally deferred:
 - Organization/team collaboration
 - Multi-user RBAC
-- Autonomous task decomposition / manager agents
 - Semantic long-term memory
 - Custom code editor / IDE
 - Cloud coding sandbox

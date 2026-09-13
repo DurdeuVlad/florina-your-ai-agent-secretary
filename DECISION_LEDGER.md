@@ -140,12 +140,14 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-013  
 **Date**: 2026-08-19  
-**Status**: ACCEPTED (amended 2026-08-20, issue #40)  
+**Status**: ACCEPTED (amended 2026-08-20 issue #40; provider set expanded 2026-09-13, issues #60–#62)  
 **Decision**: MVP supports Codex and Claude Code only  
 - **Rationale**: These are the two highest-value coding agents with the best structured supervision surfaces. Starting narrow proves the thesis without spreading across ten adapters.
 - **Consequences**: Codex via app-server JSON-RPC (adapter fidelity A), Claude Code via installed CLI + structured lifecycle hooks (adapter fidelity B). The Claude Code hooks adapter (`src/adapters/claude-hooks-adapter.ts`) wraps the user's installed `claude` CLI in headless (`-p`) mode and configures lifecycle hooks (PreToolUse, PostToolUse, PermissionRequest, Stop, Notification, SessionStart) that emit structured JSON events, which are mapped to the canonical `SupervisorEvent` schema. The previous PTY regex adapter (`src/adapters/claude-adapter.ts`) was misclassified as Tier B; it has been reclassified as Tier E per DEC-023 (PTY heuristics are Tier E, not Tier B). Tier B = "installed CLI + structured lifecycle hooks / Agent SDK" — NOT PTY scraping.
 - **Alternatives Considered**: Support more agents immediately; start with a single agent; classify PTY regex as Tier B (rejected — contradicts DEC-023 and DEC-011).
 - **Reconsideration Trigger**: If a third agent achieves significant adoption and has a strong structured API.
+
+**Amendment 2026-09-13 (issues #60–#62)**: The provider set expands beyond the MVP pair — the capacity-routing thesis (DEC-029) requires at least three providers to be meaningful. New providers: Devin CLI via `devin acp` (Tier C, DEC-030), Gemini CLI via `gemini --acp` (Tier C), and Antigravity `agy` headless `stream-json` (Tier D). All providers are local-only; Devin Cloud sessions are explicitly out of scope.
 
 ---
 
@@ -176,7 +178,7 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Status**: ACCEPTED  
 **Decision**: Context Capsules are scoped SQLite state, not a retrieval system  
 - **Rationale**: Capsules must be simple enough for MVP. A RAG/vector-search approach adds complexity without proven value. Scoped rows in SQLite match the existing storage decision.
-- **Consequences**: Three capsule scopes: Project (repo metadata, policies, task list), Task (objective, run history, deliverables, event summaries — maps 1:1 with a worktree), Session (raw events, conversation — ephemeral, summarized into Task Capsule on completion). Secretary loads the relevant capsule on-demand when context switches.
+- **Consequences**: Three capsule scopes: Project (repo metadata, policies, task list), Task (objective, run history, deliverables, event summaries — maps 1:1 with a worktree), Session (raw events, conversation — ephemeral, summarized into Task Capsule on completion). Secretary loads the relevant capsule on-demand when context switches. **Amendment 2026-09-13 (DEC-029, issue #65)**: a fourth **User scope** is added — durable preference memories (provider/model rules, work-type affinities, quota-conditioned fallbacks) auto-written by the Secretary from conversation. User scope is global but read-only to managers/workers; it feeds the CapacityRouter, not task context.
 - **Alternatives Considered**: Vector database / RAG retrieval; in-memory-only capsules; single flat context.
 - **Reconsideration Trigger**: If capsule sizes exceed what fits in a single LLM context window, necessitating retrieval.
 
@@ -267,12 +269,12 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-018  
 **Date**: 2026-08-19  
-**Status**: DEFERRED  
-**Decision**: Autonomous task decomposition  
-- **Rationale**: Those features obscure the hypothesis being tested (is attention compression valuable?).
-- **Consequences**: MVP: one human objective → one selected worker. No manager agents auto-selecting Claude vs Codex, no automatic sub-task creation.
-- **Alternatives Considered**: Hierarchical task decomposition with manager agents; automatic agent routing based on task type.
-- **Reconsideration Trigger**: Users consistently want automated multi-step workflows.
+**Status**: ACCEPTED (amended 2026-09-13, issue #63)  
+**Decision**: Autonomous task decomposition via per-project manager agents  
+- **Rationale**: Originally deferred because decomposition obscured the attention-compression hypothesis. The first user's workflow requires it: the Secretary delegates to a per-project manager agent (itself a provider agent), which decomposes objectives and spawns workers.
+- **Consequences**: Manager agents exist but may only dispatch workers through the Secretary daemon's MCP tool server (`secretary_spawn_task` and friends). Every spawn is journaled (DEC-012), policy-checked (DEC-011), quota-checked (DEC-029), and visible in the attention inbox. Native provider subagents that bypass the daemon are disallowed — there is no parallel orchestration channel. A manager is a Task with a special capsule/tool set and is itself quota-tracked.
+- **Alternatives Considered**: Managers spawning workers natively inside their own runtime (rejected: invisible to journal, policy, and quota); no manager agents (superseded).
+- **Reconsideration Trigger**: If manager-driven decomposition generates attention noise that defeats DEC-015's metric.
 
 ---
 
@@ -319,3 +321,115 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 - **Consequences**: Need a deterministic disambiguation hierarchy for natural language queries (e.g., "how is the auth task doing?" when multiple projects have auth tasks).
 - **Alternatives Considered**: Interactive conversational clarification ("Did you mean Project A or Project B?"); recency bias (most recently active project); error on ambiguity.
 - **Blocked On**: Context routing design.
+
+---
+
+**ID**: DEC-029  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Quota-aware capacity routing across the user's provider subscriptions  
+- **Rationale**: The first user pays for multiple agent subscriptions (Codex, Claude, Devin, Gemini/Antigravity) with per-provider preferences and per-provider quota windows. Treating subscriptions as a pooled capacity resource — rather than silos — is the product's differentiator: work migrates when a provider runs dry and pauses only when all providers are exhausted.
+- **Consequences**:
+  - `QuotaLedger` normalizes per-provider quota as `{provider, window, used_pct, resets_at, source}`. Sources: Codex `account/rateLimits/read` over app-server JSON-RPC (authoritative), Claude statusline `rate_limits` / underlying `anthropic-ratelimit-unified-*` headers, and reactive 429/exhaustion detection for Devin and Gemini/agy (no official quota API).
+  - `CapacityRouter` routes new work to the highest-preference provider with capacity (proactive polling where supported) and triggers failover on exhaustion (reactive everywhere).
+  - **Failover mechanism**: freeze the current session, then resume the Task on the next preferred provider in the *same git worktree*, primed from the Task Capsule (DEC-020/024). All providers are local, so worktree + capsule is the uniform handoff artifact — no diff shipping or cloud handoff.
+  - When every provider is exhausted the project parks; the daemon schedules resume at the earliest `resets_at`.
+  - A **provider preference profile** is a model-level ruleset, not a provider ranking: `provider → model → work-type → quota-conditional fallback`. It supports per-model allow/deny rules (e.g. "Claude: never Opus, never Faber; default latest Sonnet; Haiku for repeatable reading work") and quota-conditioned chains (e.g. "Devin: GPT extra-high until quota, then SWE-2 or GLM-5 whichever is free/better"). The Secretary **auto-writes preference memories** captured from ordinary conversation — stated preferences are persisted without requiring a formal interview — and the profile remains editable via CLI. Built config-first for a single user; generalized onboarding is not a goal. Preference memories persist in a **User-scope Context Capsule** (a fourth scope; see DEC-020 amendment).
+  - **Preferences are prompts, not code** (amendment, 2026-09-13): preference rules are natural-language text injected into manager prompts on a **need-to-know basis** — a project's manager sees only its own project's preferences plus global defaults (DEC-003). Different projects carry different preferences ("this project matters → Claude/Codex priority; that one → Devin/Gemini only"). The split is two-layer: managers *express preference* in their `secretary_spawn_task` calls (soft layer, NL-interpreted); the daemon *enforces feasibility* against the QuotaLedger, model deny-rules, and policy (hard layer — an LLM's provider choice can never defeat a quota exhaustion or a deny rule, per DEC-011). Per-project prompts live in the Project capsule; global defaults in the User capsule.
+- **Alternatives Considered**: Reactive-only failover (insufficient — proactive polling prevents mid-task stalls on Codex/Claude); static per-task provider pinning (rejected — defeats quota pooling); Devin Cloud participation in failover (rejected — local-only providers; cloud handoff breaks the uniform worktree+capsule model).
+- **Resolved By**: Issues #60, #64, #65.
+
+---
+
+**ID**: DEC-030  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: ACP (Agent Client Protocol) is the generic Tier C adapter surface  
+- **Rationale**: Both local Devin CLI (`devin acp`) and Gemini CLI (`gemini --acp`) expose ACP — JSON-RPC 2.0 over stdio with session management, structured permission requests, and usage notifications. One ACP client adapts both providers at Tier C fidelity instead of two bespoke adapters. ACP's `PromptResponse.usage` / `UsageUpdate` also feeds the QuotaLedger (DEC-029).
+- **Consequences**: `src/adapters/acp-adapter.ts` implements a generic ACP client; per-provider config supplies launch command, auth, and capability flags. ACP `session/request_permission` maps to `ApprovalRequested` (supports DEC-010 structured approvals). Native higher-fidelity adapters remain for Codex (Tier A — required for `account/rateLimits/read`) and Claude Code (Tier B hooks). Antigravity `agy` stays Tier D headless stream-json (requires a PTY bridge for its non-TTY output bug — an I/O shim, not Tier E scraping). Gemini ACP has known flaky-429 issues under OAuth; treat 429s as a reactive quota signal.
+- **Alternatives Considered**: Bespoke per-provider adapters (rejected — duplicated effort; ACP already standardizes sessions and permissions); Tier D stream-json for all CLIs (lower fidelity, no structured permission surface).
+- **Resolved By**: Issues #61, #62.
+
+---
+
+**ID**: DEC-031  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Interruption discipline — resolve from memory, grants, and context before ever asking the human  
+- **Rationale**: The user's scarce resource is energy, not information. The product exists so the human can debate direction and ideas with the Secretary — not manage agents. Interrupting with a question whose answer is already recorded (preference memories, granted scopes, project policies) or easily inferable from observable state is a product failure regardless of how politely it is phrased.
+- **Consequences**: Before any Attention Item or spoken question reaches the human, the Secretary must check: User-scope preference memories (DEC-020/029), granted capability scopes (#67), project/task capsule contents, and deterministic observable state (git, tests, quota ledger). A question that resolves there is answered silently and journaled — the human may audit the inference afterward but is never blocked on it. Conversational clarification (DEC-025) is the *last* resort, reserved for genuine ambiguity with material consequences.
+- **Alternatives Considered**: Ask-when-uncertain defaults (rejected — converts the human back into the router); blanket autonomy (rejected by DEC-011 for anything not covered by grants/policy).
+- **Reconsideration Trigger**: If silent inference produces materially wrong decisions that erode trust.
+
+---
+
+**ID**: DEC-032  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Done means proven — task completion is gated on verification evidence, not agent self-report  
+- **Rationale**: Writing code is the easy part; proving it works is the hard, important part. An agent's claim of completion is a claim. The human's attention should only be spent reviewing *verified* deliverables.
+- **Consequences**: A Task may not surface as `completed` in the inbox without verification evidence attached to its Completion Digest: tests run with results, build/lint/typecheck status, and — where applicable — observed runtime behavior. Manager agents (DEC-018) are responsible for driving verification before reporting completion; a "finished" worker that produced no proof is routed back with a verification objective, not surfaced to the human. Verification results are deterministic adapter/journal facts (DEC-010 discipline applies — observed evidence is primary, LLM narrative is supplemental).
+- **Alternatives Considered**: Trust agent self-reports with a human-review step (rejected — review burden lands on the human); post-hoc review agent for everything (kept as Level B diff intelligence, opt-in per PRODUCT_DESIGN).
+- **Resolved By**: Issue #68.
+
+---
+
+**ID**: DEC-033  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Collaborative idea ledger — the Secretary is a thinking partner during ideation, with an explicit human gate before anything becomes delegated work  
+- **Rationale**: The first user ideates chaotically — long unstructured voice monologues mixing goals, constraints, and tangents. The Secretary's job is to think *with* them: build on the ideas, run background research, surface structure, name the fog and open questions, and ask the questions the user cannot ask themselves — living in the user's shoes. She does NOT silently convert conversation into work.
+- **Consequences**:
+  - **Per-idea markdown ledger**: each idea (or each system being updated by an idea) gets a persistent, growing markdown document the Secretary maintains — structured spec, research notes, open questions, decisions-in-progress. The file is a first-class artifact the user can read and edit. Ledgers live in a **global Secretary ideas directory** by default (ideas precede project selection); when a project is specified for an idea, its ledger is **promoted** — moved into that project. Format: single `.md` + YAML frontmatter (status, linked project, created/updated) so the daemon can index and promote without parsing prose.
+  - **Compile-on-request**: when the user says they're ready, the Secretary offers to compile the ledger into an actionable **Brief** (spec + delegation plan: which project, which manager, what task breakdown, provider/model per task). The Brief is *shown to the user* — "if it's all right, I start giving it to agents; if not, we keep working on it."
+  - **Hard delegation gate**: no agent is ever dispatched from ideation without explicit user confirmation of the compiled Brief. Confirming a Brief is a Decision, journaled (DEC-012).
+  - On confirmation, the Brief decomposes into Tasks dispatched to the project's manager agent (DEC-018) through the normal daemon path — no special channel.
+  - Delegation plans include building the **testing/proving systems** first-class — verification infrastructure is part of every task order, per DEC-032 (done means proven).
+- **Alternatives Considered**: Automatic distillation-to-dispatch (rejected — the user must review before agents act); transcript summarization after the fact (rejected — loses the live collaborative-research loop); dedicated ideation mode switch (rejected — ideation is ambient, not a mode).
+- **Resolved By**: Issue #69.
+
+---
+
+**ID**: DEC-034  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: The Secretary runs on our own agentic loop — loop + todo + tools + context management — with LiteLLM as the model connector  
+- **Rationale**: The Secretary is the only agent loop we own (DEC-001); every worker/manager is a provider agent. Owning the loop means the Secretary's reasoning model is pluggable (today's best reasoning model tomorrow, a local model for privacy later) and her capabilities (background research, spec structuring, preference capture, inbox triage) are our tools, not a provider's.
+- **Consequences**:
+  - **`src/secretary/`** module: the reasoning-action loop, a typed tool registry, a plan/todo tool (the model maintains its own plan, per goose's "maintain a plan" pattern), and context management (capsule load/unload per DEC-020 + condenser-style history compression per OpenHands).
+  - **Connector**: LiteLLM proxy — OpenAI-compatible `/chat/completions` against 100+ providers, plus spend tracking/budgets that feed the QuotaLedger (DEC-029). The daemon calls the proxy endpoint; no provider SDKs in our code.
+  - **Voice boundary unchanged** (DEC-021): Realtime API remains the ears/mouth (VAD, interruptions, speech-to-speech). Its tool calls land on the same typed command API; heavyweight reasoning (research, spec structuring, Brief compilation) runs in the Secretary loop on LiteLLM-connected models. The split is turn-taking vs. thinking.
+  - **Patterns stolen from open source**: OpenHands — stateless loop over an append-only event stream (already our journal, DEC-012), condenser, confirmation mode, max-iterations/budget guards; goose — tool inspection pipeline (security → permission → repetition checks before execution) and profile-based capability sets; Cline SDK — harness separated from surfaces so CLI/voice/desktop share one loop; opencode — durable admission before execution (we already journal-first).
+  - Secretary loop events are journaled like provider events (DEC-012) — her reasoning is inspectable, not hidden.
+- **Alternatives Considered**: Riding a provider's agent SDK for the Secretary loop (rejected — reintroduces provider dependence at the one layer that must be ours); LangChain/LangGraph (rejected — heavyweight abstraction for a loop we understand and want to keep small); direct per-provider SDK calls (rejected — LiteLLM gives plug-and-play + spend tracking for free).
+- **Resolved By**: Issue #70.
+
+---
+
+**ID**: DEC-035  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Continuous agents (Secretary, managers) use a three-layer context model — hot working context, warm condenser + capsules, cold journal + durable memory  
+- **Rationale**: The Secretary and project managers run for days, not sessions. Unbounded context growth degrades reasoning and inflates cost; naive truncation loses the plot. OpenHands' condenser and two-tier memory are proven open-source patterns that map cleanly onto our existing journal + capsule primitives.
+- **Consequences**: Threshold-triggered summarization (keep first N + last M verbatim, summarize the middle — OpenHands `RollingCondenser` pattern); condensation itself emits a journaled event carrying `forgotten_event_ids` so compression never destroys the record (DEC-012). Durable memory is two-tier, mirroring capsules: User scope (cross-project preferences, DEC-029) + Project scope (repo knowledge). Context health (window fill, last condensation, memory size) is a first-class per-agent status the attention engine can elevate. Full design: `docs/DESKTOP_UI.md` § Continuous-agent context.
+- **Alternatives Considered**: Fixed sliding window (loses early goals/spec); restart-fresh sessions (breaks continuity, forces manual context carry); vector-store RAG (rejected per DEC-020 — capsules stay simple scoped state).
+- **Reconsideration Trigger**: If condensation measurably drops task-critical facts (detect via verification regressions, DEC-032).
+- **Resolved By**: Issues #75 (condenser), #76 (capsule rollup pipeline), #77 (context health).
+
+---
+
+**ID**: DEC-036  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Federated sub-secretary daemons — remote machines run the full stack and register with a parent daemon as capacity pools  
+- **Rationale**: The first user already runs Codex/Claude on a separate server. A machine-to-machine federation extends capacity across devices without inventing a second protocol: a child daemon presents to its parent as a provider-shaped adapter, so the recursion is the architecture.
+- **Consequences**:
+  - `RemoteSecretaryAdapter` on the parent connects to the child daemon's control-plane WebSocket. The child's entire fleet appears in the parent's QuotaLedger as `provider@host` entries; the child reports its own quota state upstream.
+  - Delegation uses the identical typed command API; the child's `SupervisorEvent`s roll up the chain (fidelity stays structured end-to-end — Tier A/B quality is inherited, not re-derived).
+  - Worktrees and event journals remain local to each machine. The **Task Capsule is the delegation payload** — the same handoff artifact as cross-provider failover (DEC-029), so "move task to the server" and "move task to Gemini" are the same mechanism.
+  - The project (repo) must exist on the remote machine. Recursion composes: a child may itself have sub-secretaries.
+  - **Security**: explicit pairing/auth between daemons; the parent may narrow but never widen a child's policy (DEC-011). Remote commands are capability-scoped like everything else.
+  - Distinct from DEC-016 (remote *control* — the human-facing phone companion, still deferred): this is remote *capacity*.
+- **Alternatives Considered**: SSH-managed remote agents (rejected — loses the child's own journal, attention engine, and quota ledger; a shell is not a supervisor); treating remote providers as direct adapters over SSH (rejected — no local policy boundary on the remote machine).
+- **Reconsideration Trigger**: If upstream event volume or trust-boundary complexity defeats the attention model.
+- **Resolved By**: Issue #78.

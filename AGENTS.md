@@ -54,9 +54,10 @@ Guidance for coding agents (and humans) working in this repository.
 
 ```
 src/
-  daemon/      # local control plane (IPC/WebSocket server)
-  adapters/    # Codex / Claude Code bridges -> SupervisorEvent
+  daemon/      # local control plane (IPC/WebSocket), quota ledger + capacity router (DEC-029)
+  adapters/    # Codex / Claude Code / ACP bridges -> SupervisorEvent (DEC-013/030)
   attention/   # deterministic attention engine (DEC-014)
+  secretary/   # the self-owned agent loop + LiteLLM connector (DEC-034)
   cli/         # `secretary` / `asec` binary (DEC-026)
   voice/       # Realtime + whisper.cpp pipeline (DEC-021)
   desktop/     # Electron/Tauri client skeleton (DEC-028; not yet packaged)
@@ -65,6 +66,9 @@ src/
 tests/         # vitest specs
 dist/          # build output (gitignored)
 ```
+
+The locked multi-provider architecture lives in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (DEC-029–034, milestone M6).
 
 ## Conventions
 
