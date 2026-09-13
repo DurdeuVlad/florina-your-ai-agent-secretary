@@ -10,7 +10,7 @@ Guidance for coding agents (and humans) working in this repository.
 ## Toolchain & Language Rationale
 
 **Language:** TypeScript (strict mode)
-**Runtime:** Node.js >= 20
+**Runtime:** Node.js >= 22
 **Package/repo name:** `agent-secretary`
 **CLI binary:** `secretary` with alias `asec` (DEC-026)
 
