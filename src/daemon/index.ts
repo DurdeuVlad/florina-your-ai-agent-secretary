@@ -85,6 +85,25 @@ export type {
   CapabilityBrokerOptions,
 } from './capability-broker.js';
 
+/* Quota-aware capacity routing (DEC-029, issue #60) */
+export { QuotaLedger } from './quota-ledger.js';
+export type {
+  QuotaSource,
+  QuotaWindow,
+  QuotaWindowStatus,
+  ProviderQuotaState,
+  QuotaLedgerOptions,
+} from './quota-ledger.js';
+export { CapacityRouter } from './capacity-router.js';
+export type {
+  RoutingRule,
+  DenyRule,
+  PreferenceProfile,
+  RouteRequest,
+  RouteResult,
+  CapacityRouterOptions,
+} from './capacity-router.js';
+
 /* Runtime metrics instrumentation (DEC-015, issue #18) */
 export { MetricsCollector, DEFAULT_HISTOGRAM_BUCKETS } from './metrics.js';
 export type { MetricsCollectorOptions, MetricsSnapshot, HistogramSummary } from './metrics.js';
