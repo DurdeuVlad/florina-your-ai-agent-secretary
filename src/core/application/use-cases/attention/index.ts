@@ -9,3 +9,4 @@ export * from './diff-digest.js';
 export * from './digest-builder.js';
 export * from './failure-tracker.js';
 export * from './liveness-monitor.js';
+export * from './attention-aggregator.js';

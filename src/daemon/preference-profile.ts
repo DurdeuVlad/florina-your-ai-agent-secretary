@@ -15,15 +15,20 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import type { DenyRule, PreferenceProfile, RoutingRule } from './capacity-router.js';
+import {
+  PreferenceProfileError,
+  type DenyRule,
+  type PreferenceProfile,
+  type PreferenceProfilePort,
+  type RoutingRule,
+} from '../core/application/ports/outbound/preference-profile.js';
 
-/** Raised when a preference file or mutation is malformed. */
-export class PreferenceProfileError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'PreferenceProfileError';
-  }
-}
+/**
+ * The profile model and error are owned by the core preference-profile port
+ * (DEC-037); re-exported here for compatibility with existing imports.
+ */
+export { PreferenceProfileError };
+export type { DenyRule, PreferenceProfile, RoutingRule };
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -70,7 +75,7 @@ export function validatePreferenceProfile(value: unknown): PreferenceProfile {
  * File-backed preference profile. `load` reads (or seeds an empty) profile;
  * mutations update memory immediately and `save` persists.
  */
-export class PreferenceProfileStore {
+export class PreferenceProfileStore implements PreferenceProfilePort {
   private readonly path: string;
   private profile: PreferenceProfile;
 

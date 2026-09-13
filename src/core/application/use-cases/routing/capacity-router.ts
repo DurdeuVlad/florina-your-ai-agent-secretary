@@ -25,39 +25,16 @@
  * decision).
  */
 import type { ISODateString } from '../../../domain/types.js';
+import type {
+  DenyRule,
+  PreferenceProfile,
+  RoutingRule,
+} from '../../ports/outbound/preference-profile.js';
 import type { QuotaLedger } from './quota-ledger.js';
 
-/**
- * One ordered preference: use `provider` (optionally a specific `model`)
- * for the given work types.
- */
-export interface RoutingRule {
-  /** Provider id, matching the adapter id (e.g. `codex`, `claude-code`). */
-  readonly provider: string;
-  /** Optional model pin (e.g. `haiku`, `gpt-extra-high`). */
-  readonly model?: string;
-  /** Work-type tags this rule applies to; undefined = catch-all. */
-  readonly workTypes?: readonly string[];
-}
-
-/**
- * A model-level deny rule. `{provider, model}` denies that model on that
- * provider; omitting `model` denies the provider entirely.
- */
-export interface DenyRule {
-  readonly provider: string;
-  readonly model?: string;
-}
-
-/**
- * The user's preference profile (issue #65): ordered routing rules plus
- * model-level deny rules. Written by the Secretary's preference memories
- * (User-scope capsule) and editable via CLI.
- */
-export interface PreferenceProfile {
-  readonly rules: readonly RoutingRule[];
-  readonly denied: readonly DenyRule[];
-}
+// The preference profile model is owned by the outbound preference-profile
+// port (DEC-037); re-exported here for compatibility with existing imports.
+export type { DenyRule, PreferenceProfile, RoutingRule };
 
 /** What a piece of work needs routed. */
 export interface RouteRequest {

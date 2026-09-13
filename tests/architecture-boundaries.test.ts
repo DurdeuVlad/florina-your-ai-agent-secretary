@@ -412,6 +412,11 @@ describe('src/core boundary conformance', () => {
       'agent-runtime',
       'worktree',
       'model',
+      'repositories',
+      'runtime-registry',
+      'credential-vault',
+      'context-sources',
+      'preference-profile',
       'index',
     ]) {
       expect(
@@ -429,7 +434,16 @@ describe('src/core boundary conformance', () => {
       'routing/index.ts',
       'context/context-isolation.ts',
       'context/context-store.ts',
+      'context/context-router.ts',
+      'context/context-estimator.ts',
+      'context/context-resolver.ts',
       'context/index.ts',
+      'tasks/task-lifecycle.ts',
+      'tasks/session-manager.ts',
+      'tasks/command-api.ts',
+      'tasks/index.ts',
+      'capabilities/capability-broker.ts',
+      'capabilities/index.ts',
       'attention/attention-item.ts',
       'attention/attention-inbox.ts',
       'attention/engine.ts',
@@ -441,12 +455,14 @@ describe('src/core boundary conformance', () => {
       'attention/digest-builder.ts',
       'attention/failure-tracker.ts',
       'attention/liveness-monitor.ts',
+      'attention/attention-aggregator.ts',
       'attention/index.ts',
       'secretary/messages.ts',
       'secretary/tool-registry.ts',
       'secretary/todo-tool.ts',
       'secretary/condenser.ts',
       'secretary/loop.ts',
+      'secretary/preference-tool.ts',
       'secretary/index.ts',
     ]) {
       expect(
@@ -459,6 +475,21 @@ describe('src/core boundary conformance', () => {
   it('every src/core module only imports inward (domain <- ports/use-cases, no externals)', () => {
     expect(coreFiles.length).toBeGreaterThan(0);
     expect(coreViolations).toEqual([]);
+  });
+
+  it('every use-case file is covered by the core edge scanner with no outward imports', () => {
+    const useCaseFiles = coreFiles.filter((fileAbs) =>
+      toRelPosix(fileAbs).startsWith('src/core/application/use-cases/'),
+    );
+    expect(useCaseFiles.length).toBeGreaterThan(0);
+    for (const fileAbs of useCaseFiles) {
+      expect(coreLayerOf(toRelPosix(fileAbs))).toBe('use-cases');
+    }
+    const violations = useCaseFiles.flatMap(collectEdges).flatMap((edge) => {
+      const violation = coreEdgeViolation(edge);
+      return violation === null ? [] : [violation];
+    });
+    expect(violations).toEqual([]);
   });
 
   it('application and core-root layers contain index.ts barrels only', () => {
@@ -496,11 +527,19 @@ describe('migrated use-case compatibility facades', () => {
     'src/attention/digest-builder.ts',
     'src/attention/failure-tracker.ts',
     'src/attention/liveness-monitor.ts',
+    'src/attention/attention-aggregator.ts',
     'src/secretary/messages.ts',
     'src/secretary/tool-registry.ts',
     'src/secretary/todo-tool.ts',
     'src/secretary/condenser.ts',
     'src/secretary/loop.ts',
+    'src/secretary/preference-tool.ts',
+    'src/daemon/task-lifecycle.ts',
+    'src/daemon/session-manager.ts',
+    'src/daemon/command-api.ts',
+    'src/daemon/capability-broker.ts',
+    'src/storage/context-estimator.ts',
+    'src/storage/context-resolver.ts',
   ];
 
   it('each migrated legacy file is a facade into src/core/application/use-cases', () => {
@@ -515,6 +554,89 @@ describe('migrated use-case compatibility facades', () => {
     expect(
       edges.some((e) => e.target === 'src/core/application/ports/outbound/model.ts'),
       'src/secretary/model-connector.ts must import src/core/application/ports/outbound/model.ts',
+    ).toBe(true);
+  });
+
+  it('legacy context-router is a compatibility wrapper: factory plus re-exports only', () => {
+    const fileAbs = path.join(SRC_DIR, 'daemon', 'context-router.ts');
+    const text = fs.readFileSync(fileAbs, 'utf8');
+    const sourceFile = ts.createSourceFile(fileAbs, text, ts.ScriptTarget.Latest, true);
+    const violations: string[] = [];
+    for (const statement of sourceFile.statements) {
+      if (ts.isFunctionDeclaration(statement)) {
+        // Allowed: only the concrete createContextRouter(ContextCapsuleRepository)
+        // compatibility factory — its parameter type keeps it outside core.
+        if (statement.name?.text !== 'createContextRouter') {
+          violations.push(
+            `${toRelPosix(fileAbs)}: only a createContextRouter function declaration is allowed`,
+          );
+        }
+        continue;
+      }
+      if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) {
+        const specifier = statement.moduleSpecifier;
+        if (specifier === undefined || !ts.isStringLiteral(specifier)) {
+          continue;
+        }
+        const resolved = resolveSpecifier(fileAbs, specifier.text);
+        if (resolved === null) {
+          violations.push(
+            `${toRelPosix(fileAbs)} -> ${specifier.text} (unresolvable module specifier)`,
+          );
+          continue;
+        }
+        const targetRel = toRelPosix(resolved);
+        const allowed =
+          targetRel.startsWith('src/core/application/use-cases/') ||
+          (ts.isImportDeclaration(statement) && targetRel.startsWith('src/storage/'));
+        if (!allowed) {
+          violations.push(
+            `${toRelPosix(fileAbs)} -> ${targetRel} (wrapper may only reach use-cases` +
+              ' and the concrete ContextCapsuleRepository)',
+          );
+        }
+        continue;
+      }
+      violations.push(
+        `${toRelPosix(fileAbs)}: expected factory + re-exports only, found another statement`,
+      );
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('remaining outbound implementations import core ports directly', () => {
+    const expectations: Readonly<Record<string, readonly string[]>> = {
+      'src/daemon/preference-profile.ts': [
+        'src/core/application/ports/outbound/preference-profile.ts',
+      ],
+      'src/daemon/worktree.ts': ['src/core/application/ports/outbound/worktree.ts'],
+      'src/adapters/registry.ts': [
+        'src/core/application/ports/outbound/agent-runtime.ts',
+        'src/core/application/ports/outbound/runtime-registry.ts',
+      ],
+    };
+    const violations: string[] = [];
+    for (const [rel, requiredTargets] of Object.entries(expectations)) {
+      const edges = collectEdges(path.join(REPO_ROOT, rel));
+      for (const target of requiredTargets) {
+        if (!edges.some((e) => e.target === target)) {
+          violations.push(`${rel} must directly import ${target}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('adapter registry imports neither the daemon EventBus nor the event-stream port', () => {
+    const edges = collectEdges(path.join(SRC_DIR, 'adapters', 'registry.ts'));
+    expect(
+      edges.every(
+        (e) =>
+          e.target !== 'src/daemon/event-stream.ts' &&
+          e.target !== 'src/core/application/ports/outbound/event-stream.ts',
+      ),
+      'src/adapters/registry.ts must not import an event bus: adapters are ' +
+        'created without one and the session manager publishes streamed events',
     ).toBe(true);
   });
 });

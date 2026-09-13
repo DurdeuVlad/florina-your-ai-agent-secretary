@@ -4,3 +4,8 @@ export * from './event-stream.js';
 export * from './agent-runtime.js';
 export * from './worktree.js';
 export * from './model.js';
+export * from './repositories.js';
+export * from './runtime-registry.js';
+export * from './credential-vault.js';
+export * from './context-sources.js';
+export * from './preference-profile.js';

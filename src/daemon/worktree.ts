@@ -33,11 +33,12 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import type { EntityId } from '../domain/types.js';
-import type {
-  WorktreeInfo,
-  WorktreePort,
-  WorktreeStatus,
+import type { EntityId } from '../core/domain/types.js';
+import {
+  DirtyWorktreeError,
+  type WorktreeInfo,
+  type WorktreePort,
+  type WorktreeStatus,
 } from '../core/application/ports/outbound/worktree.js';
 import type { TaskRepository } from '../storage/repositories/task.js';
 
@@ -67,24 +68,11 @@ export type {
 } from '../core/application/ports/outbound/worktree.js';
 
 /**
- * Error thrown when an operation is attempted on a dirty worktree that
- * requires a clean one (e.g. `pruneWorktree`). Dirty worktrees are never
- * silently deleted (DEC-024, DEC-011).
+ * `DirtyWorktreeError` is owned by the core worktree port (DEC-037) so use
+ * cases can catch it without depending on this concrete adapter; re-exported
+ * here for compatibility with existing daemon-path imports.
  */
-export class DirtyWorktreeError extends Error {
-  /** The worktree path that was dirty. */
-  readonly worktreePath: string;
-
-  constructor(worktreePath: string) {
-    super(
-      `Worktree "${worktreePath}" has uncommitted changes and cannot be ` +
-        'pruned. Commit or stash the changes first, or remove the worktree ' +
-        'manually after reviewing the work (DEC-024).',
-    );
-    this.name = 'DirtyWorktreeError';
-    this.worktreePath = worktreePath;
-  }
-}
+export { DirtyWorktreeError };
 
 /**
  * Options for constructing a {@link WorktreeManager}.
