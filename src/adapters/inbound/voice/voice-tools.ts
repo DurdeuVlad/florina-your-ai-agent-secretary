@@ -17,7 +17,25 @@ The developer delegates work to coding agents and you route their attention.
 Use the provided tools to query status, list tasks, check the inbox, and approve or deny requests.
 Keep responses concise. When the developer asks for status, use get_inbox or list_tasks.
 When they say "approve", use approve_permission. When they say "deny", use deny_permission.
+When they tell you a provider or model preference ("never Opus", "Codex for heavy lifting"),
+repeat it back in one short sentence, then persist it with remember_preference — the rule
+becomes a routing fact, not a prompt hint. When they ask what their preferences are,
+use list_preferences.
 Never make up information — always use the tools.`;
+
+/**
+ * Setup-interview block appended to the voice instructions when the
+ * preference profile is empty (issue #65): the first voice session
+ * becomes a short onboarding interview instead of dead air.
+ */
+export const SETUP_INTERVIEW_INSTRUCTIONS = `
+This is a fresh install — the developer has no saved preferences yet.
+Open the session with a brief setup interview: ask which agent providers
+they have (Codex, Claude Code, Devin, Gemini, agy), which they prefer for
+what kind of work, and any models to avoid. Keep it conversational — three
+or four questions, not a form. Confirm each preference back, then persist
+it with remember_preference. When done, say the profile is saved and move
+to the inbox.`;
 
 /**
  * Build the default typed tool definitions exposed to the voice model
@@ -33,7 +51,7 @@ export function buildDefaultVoiceTools(): readonly VoiceToolDefinition[] {
     {
       type: 'function',
       name: 'get_inbox',
-      description: 'Get the current attention inbox — items that need the developer\'s attention.',
+      description: "Get the current attention inbox — items that need the developer's attention.",
       parameters: {
         type: 'object',
         properties: {
@@ -57,7 +75,8 @@ export function buildDefaultVoiceTools(): readonly VoiceToolDefinition[] {
         properties: {
           status: {
             type: 'string',
-            description: 'Filter by task state: Created, Delegated, Running, Waiting, Completed, Failed, Cancelled.',
+            description:
+              'Filter by task state: Created, Delegated, Running, Waiting, Completed, Failed, Cancelled.',
           },
         },
       },
@@ -217,8 +236,29 @@ export function buildDefaultVoiceTools(): readonly VoiceToolDefinition[] {
             items: { type: 'string' },
             description: 'Work-type tags a routing rule applies to (add-rule only).',
           },
+          note: {
+            type: 'string',
+            description:
+              "The user's own words for this rule (e.g. 'Sonnet for repeatable reading work').",
+          },
         },
         required: ['action', 'provider'],
+      },
+    },
+    {
+      type: 'function',
+      name: 'list_preferences',
+      description:
+        'Read the durable routing preference profile — answers "what are ' +
+        'my rules for Claude?" and similar questions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: {
+            type: 'string',
+            description: 'Limit the answer to rules visible to this project.',
+          },
+        },
       },
     },
   ] as const;
@@ -353,6 +393,13 @@ export function mapToolCallToCommand(
         workTypes: Array.isArray(workTypes)
           ? (workTypes.filter((w) => typeof w === 'string') as string[])
           : undefined,
+        note: typeof args['note'] === 'string' ? args['note'] : undefined,
+      } as Command;
+    }
+    case 'list_preferences': {
+      return {
+        kind: 'query-preferences',
+        projectId: typeof args['projectId'] === 'string' ? args['projectId'] : undefined,
       } as Command;
     }
     default:

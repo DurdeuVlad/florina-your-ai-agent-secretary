@@ -90,8 +90,13 @@ describe('domain enums', () => {
     ]);
   });
 
-  it('ContextCapsuleScope has the three DEC-020 scopes', () => {
-    expect(Object.values(ContextCapsuleScope).sort()).toEqual(['project', 'session', 'task']);
+  it('ContextCapsuleScope has the DEC-020 scopes plus the amended user scope', () => {
+    expect(Object.values(ContextCapsuleScope).sort()).toEqual([
+      'project',
+      'session',
+      'task',
+      'user',
+    ]);
   });
 });
 

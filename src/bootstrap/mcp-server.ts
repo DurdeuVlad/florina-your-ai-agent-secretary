@@ -75,6 +75,7 @@ export function managerServiceFactory(deps: ManagerServiceFactoryDeps): ManagerS
       worktreeManager: deps.worktreeManager,
       repoPath: project.repo.path,
       projectId,
+      preferences: deps.preferenceStore,
       ...(mcpUrl !== undefined ? { mcpUrl } : {}),
     });
   };

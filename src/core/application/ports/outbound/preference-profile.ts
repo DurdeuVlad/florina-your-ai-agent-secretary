@@ -19,6 +19,19 @@ export interface RoutingRule {
   readonly model?: string;
   /** Work-type tags this rule applies to; undefined = catch-all. */
   readonly workTypes?: readonly string[];
+  /**
+   * Project this rule is scoped to; undefined = global default
+   * (DEC-003 need-to-know — a project's manager sees global rules plus
+   * its own project's rules, never other projects').
+   */
+  readonly projectId?: string;
+  /**
+   * The user's own words — the natural-language soft layer managers
+   * read (e.g. "Sonnet for repeatable reading work"). Structured fields
+   * are what the daemon enforces; the note is what the manager reasons
+   * over.
+   */
+  readonly note?: string;
 }
 
 /**
@@ -28,6 +41,10 @@ export interface RoutingRule {
 export interface DenyRule {
   readonly provider: string;
   readonly model?: string;
+  /** Project scope; undefined = global. */
+  readonly projectId?: string;
+  /** The user's own words for this deny (soft layer). */
+  readonly note?: string;
 }
 
 /**
@@ -38,6 +55,39 @@ export interface DenyRule {
 export interface PreferenceProfile {
   readonly rules: readonly RoutingRule[];
   readonly denied: readonly DenyRule[];
+}
+
+/**
+ * Render the need-to-know preference text injected into a project's
+ * manager prompt (issue #65 soft layer): global rules/denies plus the
+ * given project's own rules — other projects' rules are never included.
+ * Returns `null` when nothing applies, so callers can skip the block.
+ */
+export function preferencePromptText(
+  profile: PreferenceProfile,
+  projectId?: string,
+): string | null {
+  const inScope = (r: { readonly projectId?: string }): boolean =>
+    r.projectId === undefined || r.projectId === projectId;
+  const lines: string[] = [];
+  for (const rule of profile.rules.filter(inScope)) {
+    const target = rule.model !== undefined ? `${rule.provider}/${rule.model}` : rule.provider;
+    const scope = rule.projectId !== undefined ? ' (project rule)' : '';
+    const work = rule.workTypes !== undefined ? ` for ${rule.workTypes.join(', ')}` : '';
+    lines.push(
+      `- Prefer ${target}${work}${scope}${rule.note !== undefined ? ` — ${rule.note}` : ''}`,
+    );
+  }
+  for (const deny of profile.denied.filter(inScope)) {
+    const target = deny.model !== undefined ? `${deny.provider}/${deny.model}` : deny.provider;
+    const scope = deny.projectId !== undefined ? ' (project rule)' : '';
+    lines.push(`- Never ${target}${scope}${deny.note !== undefined ? ` — ${deny.note}` : ''}`);
+  }
+  if (lines.length === 0) return null;
+  return [
+    'Routing preferences (need-to-know; the daemon still enforces quota + deny rules):',
+    ...lines,
+  ].join('\n');
 }
 
 /** Raised when a preference profile or mutation is malformed. */

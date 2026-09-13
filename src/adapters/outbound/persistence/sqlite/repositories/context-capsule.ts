@@ -21,6 +21,7 @@ import type {
   ProjectCapsuleContent,
   SessionCapsuleContent,
   TaskCapsuleContent,
+  UserCapsuleContent,
 } from '../../../../../core/domain/types.js';
 import { BaseRepository } from './base.js';
 import type { ContextCapsuleRepositoryPort } from '../../../../../core/application/ports/outbound/repositories.js';
@@ -35,7 +36,10 @@ interface CapsuleRow {
   updated_at: string;
 }
 
-export class ContextCapsuleRepository extends BaseRepository implements ContextCapsuleRepositoryPort {
+export class ContextCapsuleRepository
+  extends BaseRepository
+  implements ContextCapsuleRepositoryPort
+{
   private readonly insertStmt: Database.Statement;
   private readonly getByIdStmt: Database.Statement;
   private readonly loadByScopeStmt: Database.Statement;
@@ -124,6 +128,12 @@ export class ContextCapsuleRepository extends BaseRepository implements ContextC
     };
 
     switch (scope) {
+      case 'user':
+        return {
+          ...base,
+          scope: 'user',
+          content: this.fromJson<UserCapsuleContent>(row.content),
+        };
       case 'project':
         return {
           ...base,

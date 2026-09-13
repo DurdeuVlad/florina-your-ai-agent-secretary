@@ -339,7 +339,7 @@ export type ApprovalScope = 'one-time' | 'task' | 'project';
  * The three scopes are modelled as a discriminated union so the compiler
  * enforces scope-specific content shapes.
  */
-export type ContextCapsule = ProjectCapsule | TaskCapsule | SessionCapsule;
+export type ContextCapsule = UserCapsule | ProjectCapsule | TaskCapsule | SessionCapsule;
 
 /** Common fields for every capsule scope. */
 interface ContextCapsuleBase {
@@ -409,4 +409,25 @@ export interface SessionCapsuleContent {
   readonly conversation: readonly string[];
   readonly toolCalls: readonly string[];
   readonly eventIds: readonly EntityId[];
+}
+
+/**
+ * User Capsule (issue #65, amends DEC-020): the user's durable preference
+ * memories — natural-language routing preferences every project's manager
+ * may see (global defaults). Per-project overrides stay on the Project
+ * capsule's own preference entries (DEC-003 need-to-know).
+ */
+export interface UserCapsule extends ContextCapsuleBase {
+  readonly scope: 'user';
+  readonly content: UserCapsuleContent;
+}
+
+export interface UserCapsuleContent {
+  /**
+   * Natural-language preference lines, in the user's own words
+   * (e.g. "Codex for long-running work", "never Opus on Claude").
+   * The structured profile (rules + deny list) is the enforced half;
+   * these lines are what managers read.
+   */
+  readonly preferenceNotes: readonly string[];
 }

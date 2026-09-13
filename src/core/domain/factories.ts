@@ -26,6 +26,7 @@ import type {
   ISODateString,
   Project,
   ProjectCapsuleContent,
+  UserCapsuleContent,
   ProjectPolicies,
   RepoMetadata,
   Session,
@@ -324,6 +325,24 @@ export function buildTaskCapsule(input: BuildTaskCapsuleInput): ContextCapsule {
   return {
     id: input.id ?? generateId('capsule'),
     scope: ContextCapsuleScope.Task,
+    ownerId: input.ownerId,
+    content: input.content,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+export interface BuildUserCapsuleInput {
+  readonly ownerId: EntityId;
+  readonly content: UserCapsuleContent;
+  readonly id?: EntityId;
+}
+
+export function buildUserCapsule(input: BuildUserCapsuleInput): ContextCapsule {
+  const ts = now();
+  return {
+    id: input.id ?? generateId('capsule'),
+    scope: ContextCapsuleScope.User,
     ownerId: input.ownerId,
     content: input.content,
     createdAt: ts,

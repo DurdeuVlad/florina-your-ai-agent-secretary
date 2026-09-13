@@ -40,6 +40,11 @@ export async function createStdinVoiceSession(options: {
     readonly model: string;
     readonly apiKey?: string;
   };
+  /**
+   * Override the session instructions (issue #65) — when absent, an empty
+   * preference profile triggers the first-run setup-interview block.
+   */
+  readonly instructions?: string;
 }): Promise<VoiceSessionManager> {
   const { StdinAudioTransport } =
     await import('../adapters/outbound/voice/stdin-audio-transport.js');
@@ -68,6 +73,27 @@ export async function createStdinVoiceSession(options: {
     });
   }
 
+  // Issue #65: an empty preference profile means a fresh install — the first
+  // voice session opens with the setup interview so durable provider/model
+  // rules get captured conversationally. Skipped when the caller supplies
+  // custom instructions or the query fails.
+  let instructions = options.instructions;
+  if (instructions === undefined) {
+    try {
+      const prefs = (await options.commandApi.execute({ kind: 'query-preferences' })) as {
+        ok: boolean;
+        summary?: string;
+      };
+      if (prefs.ok && prefs.summary === 'no preferences recorded') {
+        const { DEFAULT_VOICE_INSTRUCTIONS, SETUP_INTERVIEW_INSTRUCTIONS } =
+          await import('../adapters/inbound/voice/voice-tools.js');
+        instructions = DEFAULT_VOICE_INSTRUCTIONS + SETUP_INTERVIEW_INSTRUCTIONS;
+      }
+    } catch {
+      /* preferences unwired — default instructions only */
+    }
+  }
+
   return new Manager({
     apiKey: options.apiKey,
     audioTransport,
@@ -75,6 +101,7 @@ export async function createStdinVoiceSession(options: {
     whisperAdapter,
     commandApi: options.commandApi,
     ...(asyncToolRunner !== undefined ? { asyncToolRunner } : {}),
+    ...(instructions !== undefined ? { bridgeOptions: { instructions } } : {}),
   });
 }
 
@@ -99,8 +126,7 @@ export function createResearchRunner(
       return `unsupported async tool call: ${name}`;
     }
     const { FlorinaLoop } = await import('../core/application/use-cases/florina/loop.js');
-    const { ToolRegistry } =
-      await import('../core/application/use-cases/florina/tool-registry.js');
+    const { ToolRegistry } = await import('../core/application/use-cases/florina/tool-registry.js');
     const loop = new FlorinaLoop({
       connector,
       tools: new ToolRegistry(),

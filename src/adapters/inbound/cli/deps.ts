@@ -72,6 +72,11 @@ export type VoiceSessionFactory = (options: {
     readonly model: string;
     readonly apiKey?: string;
   };
+  /**
+   * Override session instructions (issue #65) — e.g. the first-run setup
+   * interview appended when the preference profile is empty.
+   */
+  readonly instructions?: string;
 }) => Promise<VoiceSession>;
 
 /** The concrete services the CLI surface requires, injected by bootstrap. */

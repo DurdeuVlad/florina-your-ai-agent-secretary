@@ -93,9 +93,12 @@ export type ApprovalAuthorityLevel =
 /**
  * Context Capsule scopes (DEC-020). Each Project, Task, and Session owns a
  * capsule at the appropriate boundary to ensure strict context isolation
- * (DEC-003).
+ * (DEC-003). `User` is the fourth scope (issue #65, amends DEC-020): the
+ * user's durable preference memories — global defaults every project's
+ * manager may see.
  */
 export const ContextCapsuleScope = {
+  User: 'user',
   Project: 'project',
   Task: 'task',
   Session: 'session',
