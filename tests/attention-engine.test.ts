@@ -1154,7 +1154,7 @@ describe('AttentionEngine — Edge cases', () => {
     expect(result.action).toBe('batch');
   });
 
-  it('classifies all 13 event types without throwing', () => {
+  it('classifies all 21 event types without throwing', () => {
     const events: SupervisorEvent[] = [
       { ...base, type: 'AgentStarted', objective: 'Test', workingDir: '/repo' },
       { ...base, type: 'AgentProgress', message: 'Working' },
@@ -1192,6 +1192,34 @@ describe('AttentionEngine — Edge cases', () => {
       { ...base, type: 'AgentCompleted', summary: 'Done', deliverables: [] },
       { ...base, type: 'AgentFailed', error: 'Crash', recoverable: true },
       { ...base, type: 'AgentStopped', reason: 'user' },
+      { ...base, type: 'UsageReported', provider: 'codex', totalTokens: 100 },
+      {
+        ...base,
+        type: 'QuotaObserved',
+        provider: 'codex',
+        window: 'five_hour',
+        usedPct: 0.5,
+        status: 'allowed',
+        source: 'polled',
+      },
+      {
+        ...base,
+        type: 'TaskFailedOver',
+        fromProvider: 'codex',
+        toProvider: 'gemini',
+        reason: 'quota_exhausted',
+      },
+      { ...base, type: 'TaskParked', reason: 'fleet dry' },
+      { ...base, type: 'TaskResumed', provider: 'gemini' },
+      {
+        ...base,
+        type: 'ContextCondensed',
+        summary: 's',
+        forgottenEventIds: ['e1'],
+        keptEventCount: 2,
+      },
+      { ...base, type: 'ContextHealthChanged', status: 'ok' },
+      { ...base, type: 'VerificationObserved', kind: 'test', success: true },
     ];
 
     for (const event of events) {

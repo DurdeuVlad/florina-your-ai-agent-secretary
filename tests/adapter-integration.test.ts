@@ -183,7 +183,7 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
 
     // Subscribe to the EventBus to collect events piped from the adapter.
     const bus = daemon.eventBus!;
-    const eventsPromise = collectEvents(bus, 14); // 1 from CommandApi + 13 from stub
+    const eventsPromise = collectEvents(bus, 22); // 1 from CommandApi + 21 from stub
 
     // Send start-task with agentId "stub".
     const res = await sendCommand(client, {
@@ -200,7 +200,7 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
 
     // Wait for the stub adapter's events to flow through the EventBus.
     const events = await eventsPromise;
-    expect(events.length).toBeGreaterThanOrEqual(13);
+    expect(events.length).toBeGreaterThanOrEqual(21);
     // The first event is the AgentStarted from the CommandApi; the stub's
     // events follow. Verify we received stub-originated events.
     const types = events.map((e) => e.type);
@@ -454,7 +454,7 @@ describe('SessionManager (direct)', () => {
     expect(manager.hasSession('task-1')).toBe(true);
 
     // Wait for the background event piping to complete and auto-cleanup
-    // to run. The stub emits 13 events with no delay, so the stream ends
+    // to run. The stub emits 21 events with no delay, so the stream ends
     // almost immediately. We poll until the session is removed.
     await waitFor(() => !manager.hasSession('task-1'), 3000);
     expect(manager.activeCount).toBe(0);

@@ -7,7 +7,7 @@
  * journal, or any human-facing surface.
  *
  * Design rules enforced by this module:
- * - The `type` field is the discriminant for the 13-variant union.
+ * - The `type` field is the discriminant for the 21-variant union.
  * - Every variant carries the common envelope: `timestamp`, `taskId`,
  *   `sessionId`, `agentId`, and `adapterFidelityTier`.
  * - `ApprovalRequested` and `HumanInputRequested` carry structured capability
@@ -356,6 +356,154 @@ export interface AgentStoppedEvent extends SupervisorEventBase {
 }
 
 /**
+ * Emitted when token/cost usage is observed for a run or model call
+ * (DEC-029). Flows into the QuotaLedger and the fleet/quota view.
+ *
+ * @example
+ * { type: "UsageReported", provider: "codex", model: "gpt-5", promptTokens: 1200, completionTokens: 300, totalTokens: 1500 }
+ */
+export interface UsageReportedEvent extends SupervisorEventBase {
+  type: 'UsageReported';
+  /** Provider the usage was consumed on. */
+  provider: string;
+  /** Model identifier, when known. */
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  /** Reported cost in USD, when the provider surfaces it. */
+  costUsd?: number;
+}
+
+/** How a quota observation was obtained (mirrors `QuotaSource`). */
+export type QuotaObservationSource = 'polled' | 'event' | 'reactive';
+
+/** Status of a quota window (mirrors `QuotaWindowStatus`). */
+export type QuotaObservationStatus = 'allowed' | 'warning' | 'exhausted';
+
+/**
+ * Emitted when a provider quota window is observed (polled, reported inline,
+ * or learned reactively from an exhaustion error — DEC-029, issue #71).
+ * Normalizes into {@link QuotaLedger}'s `QuotaWindow`.
+ *
+ * @example
+ * { type: "QuotaObserved", provider: "codex", window: "five_hour", usedPct: 0.92, resetsAt: "2026-08-19T17:00:00Z", status: "warning", source: "polled" }
+ */
+export interface QuotaObservedEvent extends SupervisorEventBase {
+  type: 'QuotaObserved';
+  /** Provider identifier, matching the adapter id. */
+  provider: string;
+  /** Provider-specific window label (e.g. `five_hour`, `seven_day`). */
+  window: string;
+  /** Fraction of the window consumed, 0..1. */
+  usedPct: number;
+  /** When the window resets, null/omitted when the provider does not report it. */
+  resetsAt?: string | null;
+  status: QuotaObservationStatus;
+  source: QuotaObservationSource;
+}
+
+/** Why a task moved between providers. */
+export type FailoverReason = 'quota_exhausted' | 'error' | 'preference' | 'manual';
+
+/**
+ * Emitted when a task is handed from one provider/model to another
+ * mid-flight (DEC-029 failover, issue #64).
+ */
+export interface TaskFailedOverEvent extends SupervisorEventBase {
+  type: 'TaskFailedOver';
+  fromProvider: string;
+  toProvider: string;
+  fromModel?: string;
+  toModel?: string;
+  reason: FailoverReason;
+}
+
+/**
+ * Emitted when no provider has capacity for a task and it parks until a
+ * quota reset (DEC-029). Parking is silently resumable, not a decision
+ * (DEC-031).
+ */
+export interface TaskParkedEvent extends SupervisorEventBase {
+  type: 'TaskParked';
+  /** Why the task parked (e.g. "all candidate providers exhausted"). */
+  reason: string;
+  /** Earliest known resume time, null/omitted when unknown. */
+  resumeAt?: string | null;
+}
+
+/** Emitted when a parked task regains capacity and is re-routed. */
+export interface TaskResumedEvent extends SupervisorEventBase {
+  type: 'TaskResumed';
+  /** Provider the task resumed on. */
+  provider: string;
+  model?: string;
+}
+
+/**
+ * Emitted when a context condenser compacts part of an event/message
+ * history (DEC-035, issue #75). Compression is itself journaled so the
+ * summary is auditable and re-expandable: `forgottenEventIds` names the
+ * source events the summary replaces in the active context — the events
+ * themselves remain in the journal (DEC-012).
+ */
+export interface ContextCondensedEvent extends SupervisorEventBase {
+  type: 'ContextCondensed';
+  /** The compaction summary that replaced the forgotten events. */
+  summary: string;
+  /** Journal ids of the events rolled up into `summary`. */
+  forgottenEventIds: string[];
+  /** How many events/messages were kept verbatim (head + tail). */
+  keptEventCount: number;
+}
+
+/** Context health classification for a continuous agent (issue #77). */
+export type ContextHealthStatus = 'ok' | 'degraded' | 'critical';
+
+/**
+ * Emitted when a continuous agent's context quality changes class —
+ * the attention engine elevates degrading context before the agent's
+ * decisions suffer (DEC-031/#77).
+ */
+export interface ContextHealthChangedEvent extends SupervisorEventBase {
+  type: 'ContextHealthChanged';
+  status: ContextHealthStatus;
+  /** Context-window fill fraction 0..1, when measurable. */
+  windowFillPct?: number;
+  /** When the last condensation ran, if ever. */
+  lastCondensationAt?: string;
+  details?: string;
+}
+
+/** Kinds of verification evidence (DEC-032 — done means proven). */
+export type VerificationKind =
+  | 'test'
+  | 'build'
+  | 'lint'
+  | 'typecheck'
+  | 'behavioral'
+  | 'other';
+
+/**
+ * Emitted when a verification step runs against a task's work — an
+ * *observed fact* (command, exit status, counts), not an agent's claim
+ * (DEC-032, issue #68). Completion digests only count evidence recorded
+ * through this event.
+ */
+export interface VerificationObservedEvent extends SupervisorEventBase {
+  type: 'VerificationObserved';
+  kind: VerificationKind;
+  /** Whether the verification passed. */
+  success: boolean;
+  /** The command or probe that produced the evidence. */
+  command?: string;
+  /** Short deterministic summary (e.g. "1623 passed, 0 failed"). */
+  summary?: string;
+  /** Structured evidence (output refs, counts, artifact paths). */
+  evidence?: Record<string, unknown>;
+}
+
+/**
  * The canonical discriminated union of all supervisor event variants (DEC-019).
  */
 export type SupervisorEvent =
@@ -371,7 +519,15 @@ export type SupervisorEvent =
   | AgentBlockedEvent
   | AgentCompletedEvent
   | AgentFailedEvent
-  | AgentStoppedEvent;
+  | AgentStoppedEvent
+  | UsageReportedEvent
+  | QuotaObservedEvent
+  | TaskFailedOverEvent
+  | TaskParkedEvent
+  | TaskResumedEvent
+  | ContextCondensedEvent
+  | ContextHealthChangedEvent
+  | VerificationObservedEvent;
 
 /** Ordered list of all valid event type discriminants. */
 export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
@@ -388,6 +544,14 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
   'AgentCompleted',
   'AgentFailed',
   'AgentStopped',
+  'UsageReported',
+  'QuotaObserved',
+  'TaskFailedOver',
+  'TaskParked',
+  'TaskResumed',
+  'ContextCondensed',
+  'ContextHealthChanged',
+  'VerificationObserved',
 ] as const;
 
 const ADAPTER_FIDELITY_TIERS: readonly AdapterFidelityTier[] = ['A', 'B', 'C', 'D', 'E'] as const;
@@ -411,6 +575,40 @@ const BLOCKER_TYPES: readonly BlockerType[] = [
 ] as const;
 
 const STOP_REASONS: readonly StopReason[] = ['user', 'timeout', 'cancelled', 'system'] as const;
+
+const QUOTA_OBSERVATION_SOURCES: readonly QuotaObservationSource[] = [
+  'polled',
+  'event',
+  'reactive',
+] as const;
+
+const QUOTA_OBSERVATION_STATUSES: readonly QuotaObservationStatus[] = [
+  'allowed',
+  'warning',
+  'exhausted',
+] as const;
+
+const FAILOVER_REASONS: readonly FailoverReason[] = [
+  'quota_exhausted',
+  'error',
+  'preference',
+  'manual',
+] as const;
+
+const CONTEXT_HEALTH_STATUSES: readonly ContextHealthStatus[] = [
+  'ok',
+  'degraded',
+  'critical',
+] as const;
+
+const VERIFICATION_KINDS: readonly VerificationKind[] = [
+  'test',
+  'build',
+  'lint',
+  'typecheck',
+  'behavioral',
+  'other',
+] as const;
 
 /**
  * Error thrown when an event fails validation. Carries a list of human-readable
@@ -542,6 +740,30 @@ export function validateEvent(value: unknown): SupervisorEvent {
       break;
     case 'AgentStopped':
       validateAgentStopped(value, problems);
+      break;
+    case 'UsageReported':
+      validateUsageReported(value, problems);
+      break;
+    case 'QuotaObserved':
+      validateQuotaObserved(value, problems);
+      break;
+    case 'TaskFailedOver':
+      validateTaskFailedOver(value, problems);
+      break;
+    case 'TaskParked':
+      validateTaskParked(value, problems);
+      break;
+    case 'TaskResumed':
+      validateTaskResumed(value, problems);
+      break;
+    case 'ContextCondensed':
+      validateContextCondensed(value, problems);
+      break;
+    case 'ContextHealthChanged':
+      validateContextHealthChanged(value, problems);
+      break;
+    case 'VerificationObserved':
+      validateVerificationObserved(value, problems);
       break;
     // Unknown types are already reported via the envelope check above.
     default:
@@ -815,6 +1037,131 @@ function validateAgentStopped(value: Record<string, unknown>, problems: string[]
   }
   if (value['details'] !== undefined && !isString(value['details'])) {
     problems.push('AgentStopped: optional field "details" must be a string.');
+  }
+}
+
+function validateUsageReported(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['provider']) || value['provider'].length === 0) {
+    problems.push('UsageReported: missing or empty required field "provider".');
+  }
+  if (value['model'] !== undefined && !isString(value['model'])) {
+    problems.push('UsageReported: optional field "model" must be a string.');
+  }
+  for (const key of ['promptTokens', 'completionTokens', 'totalTokens', 'costUsd']) {
+    if (value[key] !== undefined && !isNumber(value[key])) {
+      problems.push(`UsageReported: optional field "${key}" must be a number.`);
+    }
+  }
+}
+
+function validateQuotaObserved(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['provider']) || value['provider'].length === 0) {
+    problems.push('QuotaObserved: missing or empty required field "provider".');
+  }
+  if (!isString(value['window']) || value['window'].length === 0) {
+    problems.push('QuotaObserved: missing or empty required field "window".');
+  }
+  if (!isNumber(value['usedPct'])) {
+    problems.push('QuotaObserved: missing or non-number required field "usedPct".');
+  }
+  if (value['resetsAt'] !== undefined && value['resetsAt'] !== null && !isString(value['resetsAt'])) {
+    problems.push('QuotaObserved: optional field "resetsAt" must be a string or null.');
+  }
+  if (!isOneOf(value['status'], QUOTA_OBSERVATION_STATUSES)) {
+    problems.push(
+      `QuotaObserved: field "status" must be one of ${QUOTA_OBSERVATION_STATUSES.join(', ')}.`,
+    );
+  }
+  if (!isOneOf(value['source'], QUOTA_OBSERVATION_SOURCES)) {
+    problems.push(
+      `QuotaObserved: field "source" must be one of ${QUOTA_OBSERVATION_SOURCES.join(', ')}.`,
+    );
+  }
+}
+
+function validateTaskFailedOver(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['fromProvider']) || value['fromProvider'].length === 0) {
+    problems.push('TaskFailedOver: missing or empty required field "fromProvider".');
+  }
+  if (!isString(value['toProvider']) || value['toProvider'].length === 0) {
+    problems.push('TaskFailedOver: missing or empty required field "toProvider".');
+  }
+  if (!isOneOf(value['reason'], FAILOVER_REASONS)) {
+    problems.push(
+      `TaskFailedOver: field "reason" must be one of ${FAILOVER_REASONS.join(', ')}.`,
+    );
+  }
+  for (const key of ['fromModel', 'toModel']) {
+    if (value[key] !== undefined && !isString(value[key])) {
+      problems.push(`TaskFailedOver: optional field "${key}" must be a string.`);
+    }
+  }
+}
+
+function validateTaskParked(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['reason']) || value['reason'].length === 0) {
+    problems.push('TaskParked: missing or empty required field "reason".');
+  }
+  if (value['resumeAt'] !== undefined && value['resumeAt'] !== null && !isString(value['resumeAt'])) {
+    problems.push('TaskParked: optional field "resumeAt" must be a string or null.');
+  }
+}
+
+function validateTaskResumed(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['provider']) || value['provider'].length === 0) {
+    problems.push('TaskResumed: missing or empty required field "provider".');
+  }
+  if (value['model'] !== undefined && !isString(value['model'])) {
+    problems.push('TaskResumed: optional field "model" must be a string.');
+  }
+}
+
+function validateContextCondensed(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['summary'])) {
+    problems.push('ContextCondensed: missing or non-string required field "summary".');
+  }
+  if (!Array.isArray(value['forgottenEventIds']) || !value['forgottenEventIds'].every(isString)) {
+    problems.push('ContextCondensed: required field "forgottenEventIds" must be an array of strings.');
+  }
+  if (!isNumber(value['keptEventCount'])) {
+    problems.push('ContextCondensed: missing or non-number required field "keptEventCount".');
+  }
+}
+
+function validateContextHealthChanged(value: Record<string, unknown>, problems: string[]): void {
+  if (!isOneOf(value['status'], CONTEXT_HEALTH_STATUSES)) {
+    problems.push(
+      `ContextHealthChanged: field "status" must be one of ${CONTEXT_HEALTH_STATUSES.join(', ')}.`,
+    );
+  }
+  if (value['windowFillPct'] !== undefined && !isNumber(value['windowFillPct'])) {
+    problems.push('ContextHealthChanged: optional field "windowFillPct" must be a number.');
+  }
+  if (value['lastCondensationAt'] !== undefined && !isString(value['lastCondensationAt'])) {
+    problems.push('ContextHealthChanged: optional field "lastCondensationAt" must be a string.');
+  }
+  if (value['details'] !== undefined && !isString(value['details'])) {
+    problems.push('ContextHealthChanged: optional field "details" must be a string.');
+  }
+}
+
+function validateVerificationObserved(value: Record<string, unknown>, problems: string[]): void {
+  if (!isOneOf(value['kind'], VERIFICATION_KINDS)) {
+    problems.push(
+      `VerificationObserved: field "kind" must be one of ${VERIFICATION_KINDS.join(', ')}.`,
+    );
+  }
+  if (!isBoolean(value['success'])) {
+    problems.push('VerificationObserved: missing or non-boolean required field "success".');
+  }
+  if (value['command'] !== undefined && !isString(value['command'])) {
+    problems.push('VerificationObserved: optional field "command" must be a string.');
+  }
+  if (value['summary'] !== undefined && !isString(value['summary'])) {
+    problems.push('VerificationObserved: optional field "summary" must be a string.');
+  }
+  if (value['evidence'] !== undefined && !isUnknownRecord(value['evidence'])) {
+    problems.push('VerificationObserved: optional field "evidence" must be an object.');
   }
 }
 

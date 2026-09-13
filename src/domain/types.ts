@@ -232,7 +232,15 @@ export type SupervisorEventKind =
   | 'AgentBlocked'
   | 'AgentCompleted'
   | 'AgentFailed'
-  | 'AgentStopped';
+  | 'AgentStopped'
+  | 'UsageReported'
+  | 'QuotaObserved'
+  | 'TaskFailedOver'
+  | 'TaskParked'
+  | 'TaskResumed'
+  | 'ContextCondensed'
+  | 'ContextHealthChanged'
+  | 'VerificationObserved';
 
 /* ------------------------------------------------------------------ *
  * 7. AttentionItem
