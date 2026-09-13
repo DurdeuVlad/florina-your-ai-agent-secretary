@@ -426,32 +426,34 @@ describe('DesktopApp', () => {
       { id: 'i1', taskId: 't1', kind: 'approval', priority: 'critical', status: 'pending', createdAt: 'now', payload: {} },
     ];
     server.push({ type: 'inbox:update', items });
-    await tick();
+    await waitFor(() => app.getState().inboxItems.length === items.length);
     expect(app.getState().inboxItems).toEqual(items);
     expect(transport.toRenderer.some((m) => m.channel === 'inbox:update')).toBe(true);
 
     const task = { id: 't1', projectId: 'p1', objective: 'do thing', state: 'Running', agentIds: [], sessionIds: [], createdAt: '', updatedAt: '', eventCount: 0 };
     server.push({ type: 'task:update', task });
-    await tick();
+    await waitFor(() => app.getState().activeTask !== null);
     expect(app.getState().activeTask).toEqual(task);
     expect(transport.toRenderer.some((m) => m.channel === 'task:update')).toBe(true);
 
     const metrics = { timestamp: 'now', counters: { eventsEmitted: {}, tasksStarted: 0, tasksCompleted: 0, tasksFailed: 0, approvalsRequested: 0, approvalsGranted: 0, approvalsDenied: 0, toolsInvoked: {} }, gauges: { activeSessions: 0, pendingApprovals: 0, inboxSize: 0, attentionItemsPending: 0 }, histograms: { taskDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} }, approvalResponseTime: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} }, toolDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} } } };
     server.push({ type: 'metrics:update', snapshot: metrics });
-    await tick();
+    await waitFor(() => app.getState().metrics !== null);
     expect(app.getState().metrics).toEqual(metrics);
     expect(transport.toRenderer.some((m) => m.channel === 'metrics:update')).toBe(true);
 
     // approval:request and digest:update are forwarded but not stored.
     server.push({ type: 'approval:request', approvalId: 'a1' });
     server.push({ type: 'digest:update', summary: 'done' });
-    await tick();
-    expect(transport.toRenderer.some((m) => m.channel === 'approval:request')).toBe(true);
-    expect(transport.toRenderer.some((m) => m.channel === 'digest:update')).toBe(true);
+    await waitFor(
+      () =>
+        transport.toRenderer.some((m) => m.channel === 'approval:request') &&
+        transport.toRenderer.some((m) => m.channel === 'digest:update'),
+    );
 
     // voice:state is forwarded AND mirrored into renderer state.
     server.push({ type: 'voice:state', listening: true, speaking: false, muted: false, mode: 'wake-word' });
-    await tick();
+    await waitFor(() => app.getState().voiceState.listening === true);
     expect(transport.toRenderer.some((m) => m.channel === 'voice:state')).toBe(true);
     expect(app.getState().voiceState).toEqual({
       listening: true,
@@ -460,9 +462,13 @@ describe('DesktopApp', () => {
       mode: 'wake-word',
     });
 
-    // Unknown push type is ignored.
+    // Unknown push type is ignored. ws frames are ordered, so once a
+    // subsequent known push is processed the unknown one was handled already.
     server.push({ type: 'unknown-type' });
-    await tick();
+    server.push({ type: 'digest:update', summary: 'again' });
+    await waitFor(
+      () => transport.toRenderer.filter((m) => m.channel === 'digest:update').length === 2,
+    );
     // No new renderer messages beyond what we already checked.
     expect(transport.toRenderer.filter((m) => m.channel === 'inbox:update')).toHaveLength(1);
   });
@@ -664,9 +670,15 @@ describe('DesktopApp', () => {
  * Helpers
  * ------------------------------------------------------------------ */
 
-/** Wait one macrotask so async socket messages flush. */
-function tick(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
+/** Poll until the predicate holds (or timeout). */
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 /** Resolve once the app state satisfies the predicate (or timeout). */
