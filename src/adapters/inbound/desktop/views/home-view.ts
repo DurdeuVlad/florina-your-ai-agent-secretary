@@ -11,8 +11,8 @@
  * Everything stays a {@link RenderTree}: string command identifiers, no
  * closures, JSON-serializable across the IPC boundary.
  */
-import type { TaskSnapshot } from '../../../core/application/use-cases/tasks/command-api.js';
-import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
+import type { TaskSnapshot } from '../../../../core/application/use-cases/tasks/command-api.js';
+import type { AttentionItem } from '../../../../core/application/use-cases/attention/attention-item.js';
 import type { RenderTree } from './view-types.js';
 import { InboxViewModel } from './inbox-view.js';
 import { renderInboxItem } from './inbox-templates.js';
@@ -50,15 +50,11 @@ function renderTaskRow(task: TaskSnapshot): RenderTree {
   const word = statusWord(task);
   const done = DONE_STATES.has(task.state);
   const provider = task.agentIds[0] ?? '';
-  return el(
-    'TaskRow',
-    { taskId: task.id, state: task.state, command: `inspect-task:${task.id}` },
-    [
-      el('TaskObjective', {}, [task.objective]),
-      ...(provider !== '' ? [el('ProviderChip', {}, [provider])] : []),
-      el('StatusWord', { done }, [word]),
-    ],
-  );
+  return el('TaskRow', { taskId: task.id, state: task.state, command: `inspect-task:${task.id}` }, [
+    el('TaskObjective', {}, [task.objective]),
+    ...(provider !== '' ? [el('ProviderChip', {}, [provider])] : []),
+    el('StatusWord', { done }, [word]),
+  ]);
 }
 
 /**
