@@ -52,8 +52,23 @@ Guidance for coding agents (and humans) working in this repository.
 
 ## Project Layout
 
+The repository follows a hexagonal (ports & adapters) architecture
+(DEC-037, issue #90): `src/core` owns the domain model and all port
+contracts, adapters depend inward on those ports, and a bootstrap layer is
+the only place concrete implementations are composed. Dependency rule:
+`domain <- application ports/use-cases <- inbound/outbound adapters`,
+enforced by `tests/architecture-boundaries.test.ts`.
+
 ```
 src/
+  core/
+    domain/                    # canonical domain model (DEC-004/019)
+    application/
+      ports/outbound/          # core-owned port contracts (ClockPort,
+                               #   IdGeneratorPort, EventBusPort,
+                               #   AgentRuntimePort, WorktreePort)
+      use-cases/               # application services (emerge in #91/#92)
+  bootstrap/                   # composition root — wires adapters to ports
   daemon/      # local control plane (IPC/WebSocket), quota ledger + capacity router (DEC-029)
   adapters/    # Codex / Claude Code / ACP bridges -> SupervisorEvent (DEC-013/030)
   attention/   # deterministic attention engine (DEC-014)
@@ -62,10 +77,15 @@ src/
   voice/       # Realtime + whisper.cpp pipeline (DEC-021)
   desktop/     # Electron/Tauri client skeleton (DEC-028; not yet packaged)
   storage/     # SQLite event journal + Context Capsules (DEC-012/020)
-  domain/      # core domain objects (DEC-004)
+  domain/      # COMPATIBILITY facades -> src/core/domain (temporary)
 tests/         # vitest specs
 dist/          # build output (gitignored)
 ```
+
+**New production code** goes under `src/core` (domain, ports, use-cases),
+`src/adapters`/other adapter surfaces, or `src/bootstrap` — never in the
+legacy `src/domain/` path, which exists only as a compatibility/migration
+surface re-exporting `src/core/domain`.
 
 The locked multi-provider architecture lives in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (DEC-029–034, milestone M6).
@@ -73,6 +93,9 @@ The locked multi-provider architecture lives in
 ## Conventions
 
 - ESM (`"type": "module"`). Use `.js` extensions in relative imports.
+- Hexagonal layering (DEC-037): adapters and surfaces import inward from
+  `src/core`; `src/core` never imports outward (no adapters, daemon,
+  storage, node builtins, or external packages).
 - Strict TypeScript (`strict: true`, `noUnusedLocals`, etc.).
 - Lint must pass (`npm run lint`). Format with Prettier (`npm run format`).
 - Every meaningful state transition is recorded in the immutable event journal

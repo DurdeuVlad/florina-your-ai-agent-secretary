@@ -17,6 +17,7 @@ import { EventEmitter } from 'node:events';
 import type { WebSocket } from 'ws';
 
 import type { SupervisorEvent } from '../domain/events.js';
+import type { EventBusPort } from '../core/application/ports/outbound/event-stream.js';
 
 /**
  * Event names emitted by the internal {@link EventBus}.
@@ -50,7 +51,7 @@ export type EventStreamControlMessage =
  * This is a thin wrapper around `EventEmitter` so the daemon owns a single
  * fan-out point; adapters never touch WebSocket connections directly.
  */
-export class EventBus extends EventEmitter {
+export class EventBus extends EventEmitter implements EventBusPort {
   private sequence = 0;
 
   constructor() {

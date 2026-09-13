@@ -20,113 +20,35 @@
  * an {@link EventBus}. Concrete adapters extend it and implement the
  * provider-specific streaming logic.
  */
-import type { AdapterFidelityTier } from '../domain/enums.js';
-import type { SupervisorEvent } from '../domain/events.js';
-import type { EventBus } from '../daemon/event-stream.js';
+import type { AdapterFidelityTier } from '../core/domain/enums.js';
+import type { SupervisorEvent } from '../core/domain/events.js';
+import type { EventPublisherPort } from '../core/application/ports/outbound/event-stream.js';
+import type {
+  AdapterConnectionState,
+  AgentRuntimePort,
+  SessionConfig,
+  StartRunResult,
+} from '../core/application/ports/outbound/agent-runtime.js';
 
 /**
  * Re-export the fidelity tier enum so adapter consumers can import the
  * canonical definition from a single adapter-facing module. The source of
- * truth remains `src/domain/enums.ts` (DEC-013).
+ * truth remains `src/core/domain/enums.ts` (DEC-013).
  */
-export type { AdapterFidelityTier } from '../domain/enums.js';
-
-/** Connection state tracked by every adapter. */
-export type AdapterConnectionState = 'disconnected' | 'connecting' | 'connected';
+export type { AdapterFidelityTier } from '../core/domain/enums.js';
 
 /**
- * Configuration for a single agent run (session).
- *
- * Passed to {@link AgentAdapter.startRun} when a task is delegated to an
- * adapter. Carries the identifiers and runtime context the adapter needs to
- * normalize events with the correct envelope fields.
+ * Re-export the core-owned agent runtime contract so adapter consumers can
+ * keep importing it from this adapter-facing module. The source of truth is
+ * `src/core/application/ports/outbound/agent-runtime.ts` (DEC-037).
  */
-export interface SessionConfig {
-  /** Identifier of the Task this run belongs to (DEC-004). */
-  readonly taskId: string;
-  /** Identifier of the Session (run) being started. */
-  readonly sessionId: string;
-  /** Identifier of the agent that will execute the run. */
-  readonly agentId: string;
-  /** Working directory (worktree) the agent runs in. */
-  readonly workingDir: string;
-  /** The objective delegated to the agent. */
-  readonly objective: string;
-  /** Optional model identifier the agent should use. */
-  readonly model?: string;
-  /** Optional autonomy/approval policy in effect. */
-  readonly autonomyLevel?: string;
-}
-
-/** Result of starting a run: the session id and whether the run began. */
-export interface StartRunResult {
-  /** The session id of the started run. */
-  readonly sessionId: string;
-  /** Whether the run was successfully started. */
-  readonly started: boolean;
-}
-
-/**
- * The contract every agent adapter implements.
- *
- * Adapters normalize heterogeneous agent observations into the canonical
- * {@link SupervisorEvent} schema and stream them to the daemon. The daemon
- * owns the event journal and the live fan-out; adapters never touch storage
- * or WebSocket connections directly.
- *
- * Lifecycle:
- * 1. `connect()` — establish the provider connection (app-server, CLI
- *    subprocess, PTY, ...).
- * 2. `startRun(taskId, sessionConfig)` — begin a delegated run.
- * 3. `streamEvents()` — async iterable of normalized `SupervisorEvent`s.
- * 4. `cancel(sessionId)` — stop a running session.
- * 5. `disconnect()` — tear down the provider connection.
- */
-export interface AgentAdapter {
-  /** Stable identifier for this adapter (e.g. `codex`, `claude-code`, `stub`). */
-  readonly id: string;
-
-  /**
-   * The fidelity tier (A–E) this adapter declares. The attention engine
-   * uses this to decide auto-approve eligibility (DEC-013).
-   */
-  readonly fidelityTier: AdapterFidelityTier;
-
-  /** Current connection state of the adapter. */
-  readonly connectionState: AdapterConnectionState;
-
-  /**
-   * Establish the provider connection (app-server handshake, CLI spawn, PTY
-   * open, ...). Must be called before `startRun`.
-   */
-  connect(): Promise<void>;
-
-  /**
-   * Begin a delegated run for a task. Returns the session id and whether the
-   * run was successfully started.
-   *
-   * @param taskId - Identifier of the Task being delegated.
-   * @param sessionConfig - Runtime context for the run.
-   */
-  startRun(taskId: string, sessionConfig: SessionConfig): Promise<StartRunResult>;
-
-  /**
-   * Stream normalized `SupervisorEvent`s for active runs. The async iterable
-   * completes when all active runs finish (or the adapter disconnects).
-   */
-  streamEvents(): AsyncIterable<SupervisorEvent>;
-
-  /**
-   * Cancel a running session. The adapter should stop the underlying agent
-   * process and emit a terminal `AgentStopped` event.
-   *
-   * @param sessionId - The session to cancel.
-   */
-  cancel(sessionId: string): Promise<void>;
-
-  /** Tear down the provider connection and release all resources. */
-  disconnect(): Promise<void>;
-}
+export type {
+  AdapterConnectionState,
+  SessionConfig,
+  StartRunResult,
+  AgentRuntimePort,
+  AgentAdapter,
+} from '../core/application/ports/outbound/agent-runtime.js';
 
 /**
  * Abstract base class implementing common adapter functionality.
@@ -142,7 +64,7 @@ export interface AgentAdapter {
  * - A guarded `requireConnected` helper that throws if the adapter is not
  *   connected before a run-dependent operation.
  */
-export abstract class BaseAdapter implements AgentAdapter {
+export abstract class BaseAdapter implements AgentRuntimePort {
   /** Stable identifier for this adapter. */
   readonly id: string;
 
@@ -150,7 +72,7 @@ export abstract class BaseAdapter implements AgentAdapter {
   readonly fidelityTier: AdapterFidelityTier;
 
   private state: AdapterConnectionState = 'disconnected';
-  private readonly bus: EventBus | null;
+  private readonly bus: EventPublisherPort | null;
 
   /**
    * @param id - Stable adapter identifier.
@@ -160,7 +82,7 @@ export abstract class BaseAdapter implements AgentAdapter {
    *   subscribers; when omitted, the adapter is usable standalone (events are
    *   only available via `streamEvents`).
    */
-  constructor(id: string, fidelityTier: AdapterFidelityTier, bus?: EventBus | null) {
+  constructor(id: string, fidelityTier: AdapterFidelityTier, bus?: EventPublisherPort | null) {
     this.id = id;
     this.fidelityTier = fidelityTier;
     this.bus = bus ?? null;
@@ -172,7 +94,7 @@ export abstract class BaseAdapter implements AgentAdapter {
   }
 
   /** The event bus events are emitted to, if any. */
-  protected get eventBus(): EventBus | null {
+  protected get eventBus(): EventPublisherPort | null {
     return this.bus;
   }
 

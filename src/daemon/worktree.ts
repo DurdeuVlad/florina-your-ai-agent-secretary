@@ -34,6 +34,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type { EntityId } from '../domain/types.js';
+import type {
+  WorktreeInfo,
+  WorktreePort,
+  WorktreeStatus,
+} from '../core/application/ports/outbound/worktree.js';
 import type { TaskRepository } from '../storage/repositories/task.js';
 
 /**
@@ -52,30 +57,14 @@ export const SECRETARY_BRANCH_PREFIX = 'secretary';
 export const SECRETARY_WORKTREE_DIR = '.secretary-worktrees';
 
 /**
- * Status snapshot for a single worktree.
+ * Re-export the core-owned worktree contract types so daemon consumers can
+ * keep importing them here. The source of truth is
+ * `src/core/application/ports/outbound/worktree.ts` (DEC-037).
  */
-export interface WorktreeStatus {
-  /** `true` when there are no uncommitted changes. */
-  readonly clean: boolean;
-  /** `true` when there are uncommitted (staged or unstaged) changes. */
-  readonly dirty: boolean;
-  /** Current checked-out branch name (e.g. `secretary/add-pagination`). */
-  readonly branch: string;
-  /** SHA of the commit the worktree HEAD points at. */
-  readonly baseCommit: string;
-}
-
-/**
- * A single entry from `git worktree list`.
- */
-export interface WorktreeInfo {
-  /** Absolute filesystem path of the worktree. */
-  readonly path: string;
-  /** HEAD commit SHA of the worktree. */
-  readonly head: string;
-  /** Branch name when the worktree is on a branch, otherwise empty. */
-  readonly branch: string;
-}
+export type {
+  WorktreeInfo,
+  WorktreeStatus,
+} from '../core/application/ports/outbound/worktree.js';
 
 /**
  * Error thrown when an operation is attempted on a dirty worktree that
@@ -117,7 +106,7 @@ export interface WorktreeManagerOptions {
  * prerequisite for task delegation and must complete before the daemon
  * proceeds.
  */
-export class WorktreeManager {
+export class WorktreeManager implements WorktreePort {
   private readonly taskRepository?: TaskRepository;
 
   constructor(options: WorktreeManagerOptions = {}) {

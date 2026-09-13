@@ -6,6 +6,67 @@ The directed graph of how Agent Secretary works. See DECISION_LEDGER.md for the
 rulings (DEC-011/012/013/018/020/021/024/029–034) and milestone
 `M6-Multi-Provider-Orchestration` (issues #60–#71) for the work breakdown.
 
+## Hexagonal Architecture
+
+The repository is migrating to a ports-and-adapters layout (DEC-037, issue
+#90). The **core** owns the domain model and every port contract; concrete
+technology (git, SQLite, WebSocket, provider CLIs, LLM endpoints) lives in
+adapters that depend inward on the ports — never the reverse.
+
+### Target tree
+
+```
+src/
+  core/
+    domain/                      # canonical domain model (DEC-004/019)
+      enums.ts types.ts factories.ts capabilities.ts
+      policy.ts approval.ts events.ts index.ts
+    application/
+      ports/
+        outbound/                # contracts the core needs implemented
+          clock.ts id-generator.ts event-stream.ts
+          agent-runtime.ts worktree.ts index.ts
+        index.ts
+      use-cases/                 # application services (emerge in #91/#92)
+      index.ts
+    index.ts
+  adapters/                      # outbound adapters: agent runtimes, git, sqlite
+  daemon/                        # inbound adapters: IPC/WS API, daemon services
+  cli/  desktop/  voice/         # inbound adapters: human-facing surfaces
+  bootstrap/                     # the ONLY place concrete adapters are wired
+  domain/                        # COMPAT: facades -> src/core/domain (temporary)
+tests/                           # vitest specs + architecture-boundaries test
+```
+
+### Dependency rule
+
+```
+        src/core/domain                (centre — depends on nothing)
+              ▲
+              │   src/core/application   ports/, use-cases/
+              ▲
+              │   inbound + outbound     adapters/, daemon/, cli/, desktop/,
+              │   adapters               voice/, storage/, attention/, secretary/
+              ▲
+              │   src/bootstrap          composition root — wires concrete
+                                     adapters into the ports, nothing else
+```
+
+Every arrow points **inward**: adapters `import` the port interfaces from
+`src/core/application/ports/`; the core never imports an adapter, a node
+builtin, or an external package. `tests/architecture-boundaries.test.ts`
+scans every core module specifier and fails the build on an outward edge.
+
+The legacy `src/domain/` path remains as thin `export *` facades into
+`src/core/domain` so existing consumers migrate incrementally; they are
+temporary compatibility surfaces, not the public API.
+
+> **Note:** the product graph below ("The Graph") describes *runtime
+> topology* — which running components talk to which — not dependency
+> direction. A daemon WebSocket is an inbound adapter even though events
+> flow outward through it, and an agent adapter is an outbound port
+> implementation even though `SupervisorEvent`s stream inward through it.
+
 ## The Graph
 
 ```
