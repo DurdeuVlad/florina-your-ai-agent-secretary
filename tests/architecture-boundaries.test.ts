@@ -127,7 +127,11 @@ function collectSpecifiersFromSource(text: string, fileName = 'source.ts'): stri
       const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword;
       const isRequire = ts.isIdentifier(callee) && callee.text === 'require';
       const firstArg = node.arguments[0];
-      if ((isDynamicImport || isRequire) && firstArg !== undefined && ts.isStringLiteral(firstArg)) {
+      if (
+        (isDynamicImport || isRequire) &&
+        firstArg !== undefined &&
+        ts.isStringLiteral(firstArg)
+      ) {
         specifiers.push(firstArg.text);
       }
     }
@@ -199,10 +203,7 @@ function isNameOnlyPosition(node: ts.Identifier): boolean {
   if (ts.isLabeledStatement(parent) && parent.label === node) {
     return true;
   }
-  if (
-    (ts.isBreakStatement(parent) || ts.isContinueStatement(parent)) &&
-    parent.label === node
-  ) {
+  if ((ts.isBreakStatement(parent) || ts.isContinueStatement(parent)) && parent.label === node) {
     return true;
   }
   return false;
@@ -273,9 +274,7 @@ function coreEdgeViolation(edge: ImportEdge): string | null {
     return null;
   }
   if (!isRelativeSpecifier(edge.specifier)) {
-    const kind = edge.specifier.startsWith('node:')
-      ? 'node builtin'
-      : 'external package';
+    const kind = edge.specifier.startsWith('node:') ? 'node builtin' : 'external package';
     return `${edge.source} -> ${edge.specifier} (${kind} imports are forbidden under src/core)`;
   }
   if (edge.target === null) {
@@ -298,10 +297,7 @@ function coreEdgeViolation(edge: ImportEdge): string | null {
  */
 function barrelViolation(relPath: string): string | null {
   const layer = coreLayerOf(relPath);
-  if (
-    (layer === 'application' || layer === 'core-root') &&
-    !relPath.endsWith('/index.ts')
-  ) {
+  if ((layer === 'application' || layer === 'core-root') && !relPath.endsWith('/index.ts')) {
     return `${relPath} (${layer} roots may contain only index.ts barrels)`;
   }
   return null;
@@ -633,9 +629,7 @@ describe('src/core boundary conformance', () => {
       'index',
     ]) {
       expect(
-        fs.existsSync(
-          path.join(CORE_DIR, 'application', 'ports', 'outbound', `${name}.ts`),
-        ),
+        fs.existsSync(path.join(CORE_DIR, 'application', 'ports', 'outbound', `${name}.ts`)),
         `missing src/core/application/ports/outbound/${name}.ts`,
       ).toBe(true);
     }
@@ -958,9 +952,7 @@ describe('migrated use-case compatibility facades', () => {
       ],
       // The CLI adapter family speaks the typed command API and renders
       // core snapshots — never daemon/storage facades.
-      'src/adapters/inbound/cli/client.ts': [
-        'src/core/application/use-cases/tasks/command-api.ts',
-      ],
+      'src/adapters/inbound/cli/client.ts': ['src/core/application/use-cases/tasks/command-api.ts'],
       'src/adapters/inbound/cli/formatters.ts': [
         'src/core/application/use-cases/tasks/command-api.ts',
         'src/core/application/use-cases/metrics.ts',
@@ -1024,9 +1016,7 @@ describe('migrated use-case compatibility facades', () => {
   });
 
   it('adapter registry imports neither the daemon EventBus nor the event-stream port', () => {
-    const edges = collectEdges(
-      path.join(SRC_DIR, 'adapters', 'outbound', 'agents', 'registry.ts'),
-    );
+    const edges = collectEdges(path.join(SRC_DIR, 'adapters', 'outbound', 'agents', 'registry.ts'));
     expect(
       edges.every(
         (e) =>
@@ -1791,13 +1781,75 @@ describe('src/bootstrap composition root', () => {
   });
 });
 
+describe('no orphan implementations outside the hexagonal zones', () => {
+  /**
+   * Every TypeScript file outside `src/core`, `src/adapters/inbound`,
+   * `src/adapters/outbound`, and `src/bootstrap` must be a compatibility
+   * facade or barrel — a module whose top-level statements are only
+   * import/export declarations. The only exceptions are the sanctioned
+   * wrappers below, each restricted to the listed statement kinds.
+   *
+   * This is the catch-all that makes "all of it" mechanically true: a new
+   * implementation file outside the hexagonal zones fails CI unless it is
+   * deliberately sanctioned here.
+   */
+  const SANCTIONED: Readonly<Record<string, readonly string[]>> = {
+    // CLI bin entrypoint shim: re-exports plus one run-as-main guard.
+    'src/cli/index.ts': ['IfStatement'],
+    // Compatibility factory whose parameter type is the legacy storage
+    // repository — cannot move into core.
+    'src/daemon/context-router.ts': ['FunctionDeclaration'],
+    // Compatibility wrapper combining the canonical git worktree adapter
+    // with the legacy TaskRepository seam.
+    'src/daemon/worktree.ts': ['InterfaceDeclaration', 'ClassDeclaration'],
+    // Package VERSION stamp on the public root barrel — `FirstStatement` is
+    // the SyntaxKind enum's first-member name for VariableStatement.
+    'src/index.ts': ['FirstStatement'],
+  };
+
+  it('every legacy-zone file is a facade/barrel or a sanctioned exception', () => {
+    const violations: string[] = [];
+    const legacyFiles = listTsFiles(SRC_DIR).filter(
+      (abs) =>
+        !toRelPosix(abs).startsWith('src/core/') &&
+        !toRelPosix(abs).startsWith(INBOUND_PREFIX) &&
+        !toRelPosix(abs).startsWith(OUTBOUND_PREFIX) &&
+        !toRelPosix(abs).startsWith(BOOTSTRAP_PREFIX),
+    );
+    expect(legacyFiles.length).toBeGreaterThan(0);
+
+    for (const fileAbs of legacyFiles) {
+      const rel = toRelPosix(fileAbs);
+      const sanctioned = SANCTIONED[rel];
+      const text = fs.readFileSync(fileAbs, 'utf8');
+      const sourceFile = ts.createSourceFile(fileAbs, text, ts.ScriptTarget.Latest, true);
+      for (const statement of sourceFile.statements) {
+        if (
+          ts.isImportDeclaration(statement) ||
+          ts.isExportDeclaration(statement) ||
+          ts.isImportEqualsDeclaration(statement)
+        ) {
+          continue;
+        }
+        const kind = ts.SyntaxKind[statement.kind];
+        if (sanctioned !== undefined && sanctioned.includes(kind)) {
+          continue;
+        }
+        violations.push(
+          `${rel}: unexpected ${kind} — implementation code outside the ` +
+            'hexagonal zones must live in src/core, src/adapters, or ' +
+            'src/bootstrap (or be a sanctioned exception)',
+        );
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});
+
 describe('legacy CLI surfaces (issue #93)', () => {
   it('src/cli/daemon-runner.ts is a facade into the bootstrap composition root', () => {
     expect(
-      facadeViolations(
-        path.join(REPO_ROOT, 'src', 'cli', 'daemon-runner.ts'),
-        'src/bootstrap/',
-      ),
+      facadeViolations(path.join(REPO_ROOT, 'src', 'cli', 'daemon-runner.ts'), 'src/bootstrap/'),
     ).toEqual([]);
   });
 
@@ -1842,8 +1894,7 @@ describe('legacy CLI surfaces (issue #93)', () => {
         continue;
       }
       violations.push(
-        `${toRelPosix(fileAbs)}: expected an entrypoint shim but found a ` +
-          'disallowed statement',
+        `${toRelPosix(fileAbs)}: expected an entrypoint shim but found a ` + 'disallowed statement',
       );
     }
     if (ifCount !== 1) {
@@ -1865,10 +1916,7 @@ describe('legacy CLI surfaces (issue #93)', () => {
 describe('legacy daemon facades (issue #93)', () => {
   it('src/daemon/daemon.ts is a facade into the bootstrap composition root', () => {
     expect(
-      facadeViolations(
-        path.join(REPO_ROOT, 'src/daemon/daemon.ts'),
-        'src/bootstrap/',
-      ),
+      facadeViolations(path.join(REPO_ROOT, 'src/daemon/daemon.ts'), 'src/bootstrap/'),
     ).toEqual([]);
   });
 
@@ -1879,10 +1927,7 @@ describe('legacy daemon facades (issue #93)', () => {
     expect(
       wrapperViolations(path.join(SRC_DIR, 'daemon', 'event-stream.ts'), {
         allowedImportPrefixes: [],
-        allowedExportPrefixes: [
-          'src/adapters/inbound/websocket/',
-          'src/adapters/outbound/events/',
-        ],
+        allowedExportPrefixes: ['src/adapters/inbound/websocket/', 'src/adapters/outbound/events/'],
       }),
     ).toEqual([]);
   });
