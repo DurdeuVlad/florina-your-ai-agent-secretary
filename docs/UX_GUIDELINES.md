@@ -2,19 +2,19 @@
 
 Design language for the desktop app (DEC-028, issue #43) and every visual
 surface that follows. Complements `docs/DESKTOP_UI.md` (view inventory) —
-that doc says *what* the screens are; this one says *how they look, feel,
-and behave*. Companion mockups: `docs/mockups/` (open `index.html`).
+that doc says _what_ the screens are; this one says _how they look, feel,
+and behave_. Companion mockups: `docs/mockups/` (open `index.html`).
 
 ## 0. First principles (from PRODUCT_DESIGN.md)
 
-| Principle | Design consequence |
-|---|---|
-| Attention over activity | The home screen is an **inbox**, never a dashboard. Idle state is a quiet empty inbox, not a wall of telemetry. |
-| Energy conservation | No decorative motion, no ambient badges, no counts that don't demand action. If it doesn't need a decision, it whispers or stays out of view. |
-| Done means proven | Completion cards always lead with *verification evidence*, not the agent's claim. "23/23 tests" is the headline; the diff is a drill-down. |
-| Progressive disclosure | Every screen is one summary layer deep by default; drilling is cheap (click / `Enter` / `j`), coming back is cheaper (`Esc` / `h`). |
-| Inspectability | Anything the Florina summarized is visibly labeled **inferred**; anything from the journal is **observed**. The two never share a text style. |
-| Voice-first | The window is a companion to voice, not a container for it. The PTT HUD works with the main window closed. |
+| Principle               | Design consequence                                                                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Attention over activity | The home screen is an **inbox**, never a dashboard. Idle state is a quiet empty inbox, not a wall of telemetry.                               |
+| Energy conservation     | No decorative motion, no ambient badges, no counts that don't demand action. If it doesn't need a decision, it whispers or stays out of view. |
+| Done means proven       | Completion cards always lead with _verification evidence_, not the agent's claim. "23/23 tests" is the headline; the diff is a drill-down.    |
+| Progressive disclosure  | Every screen is one summary layer deep by default; drilling is cheap (click / `Enter` / `j`), coming back is cheaper (`Esc` / `h`).           |
+| Inspectability          | Anything the Florina summarized is visibly labeled **inferred**; anything from the journal is **observed**. The two never share a text style. |
+| Voice-first             | The window is a companion to voice, not a container for it. The PTT HUD works with the main window closed.                                    |
 
 ## 1. Design tokens
 
@@ -24,40 +24,41 @@ canonical mapping. Tokens, not hex values, are the API.
 
 ### 1.1 Color
 
-| Token | Hex | Use |
-|---|---|---|
-| `bg` | `#0f1115` | app background |
-| `surface` | `#14171d` | sidebar, chrome |
-| `panel` | `#1a1e27` | cards |
-| `panel-raised` | `#20252f` | hovered/active card, popovers |
-| `border` | `#2a3040` | hairlines only — never decorative boxes |
-| `text` | `#e8ebf0` | primary copy |
-| `muted` | `#8a93a6` | metadata, timestamps, secondary copy |
-| `accent` | `#6e9eff` | links, focused items, primary buttons |
-| `green` | `#4cc38a` | verified, connected, completed-ok |
-| `amber` | `#e0a84f` | approval required, parked, elevated risk |
-| `red` | `#f06060` | critical, failed, sandbox violation |
-| `orange` | `#e07a4f` | degraded context, dirty worktree |
-| `purple` | `#b08cff` | digests, reviewed/accepted |
-| `slate` | `#8a93a6` | idle/stale — intentionally quiet |
+| Token          | Hex       | Use                                      |
+| -------------- | --------- | ---------------------------------------- |
+| `bg`           | `#0f1115` | app background                           |
+| `surface`      | `#14171d` | sidebar, chrome                          |
+| `panel`        | `#1a1e27` | cards                                    |
+| `panel-raised` | `#20252f` | hovered/active card, popovers            |
+| `border`       | `#2a3040` | hairlines only — never decorative boxes  |
+| `text`         | `#e8ebf0` | primary copy                             |
+| `muted`        | `#8a93a6` | metadata, timestamps, secondary copy     |
+| `accent`       | `#6e9eff` | links, focused items, primary buttons    |
+| `green`        | `#4cc38a` | verified, connected, completed-ok        |
+| `amber`        | `#e0a84f` | approval required, parked, elevated risk |
+| `red`          | `#f06060` | critical, failed, sandbox violation      |
+| `orange`       | `#e07a4f` | degraded context, dirty worktree         |
+| `purple`       | `#b08cff` | digests, reviewed/accepted               |
+| `slate`        | `#8a93a6` | idle/stale — intentionally quiet         |
 
 Rules:
+
 - **Color is reserved for attention semantics.** Priority colors appear only
   on the item's left edge (3px) and its chip — never as fills.
-- A surface gets *lighter* as it rises: `bg` → `surface` → `panel` →
+- A surface gets _lighter_ as it rises: `bg` → `surface` → `panel` →
   `panel-raised`. Never invert.
 - Observed vs inferred: observed text is `text`; inferred/summarized text
   is `muted` + italic.
 
 ### 1.2 Type
 
-| Token | Spec | Use |
-|---|---|---|
-| `display` | 20px / 650 | view titles ("Attention Inbox") |
-| `title` | 15px / 600 | card titles, task objectives |
-| `body` | 14px / 400 | summaries, digest prose |
-| `meta` | 12px / 400 `muted` | ids, timestamps, provenance |
-| `mono` | 12.5px ui-monospace | rules, diffs, event payloads, paths |
+| Token     | Spec                | Use                                 |
+| --------- | ------------------- | ----------------------------------- |
+| `display` | 20px / 650          | view titles ("Attention Inbox")     |
+| `title`   | 15px / 600          | card titles, task objectives        |
+| `body`    | 14px / 400          | summaries, digest prose             |
+| `meta`    | 12px / 400 `muted`  | ids, timestamps, provenance         |
+| `mono`    | 12.5px ui-monospace | rules, diffs, event payloads, paths |
 
 System font stack only (`-apple-system, "Segoe UI", Roboto`). No custom
 fonts — the app must feel instant and native.
@@ -72,7 +73,7 @@ fonts — the app must feel instant and native.
 
 ### 1.4 Iconography
 
-Icon props are glyph *names* (`shield`, `alert`, `branch`, `pause`,
+Icon props are glyph _names_ (`shield`, `alert`, `branch`, `pause`,
 `clock`, `document`, `gauge`, `info`, `check`, `play`, `stop`, `mic`).
 Renderer maps names to its icon set. Icons are 14–16px, `muted` by
 default, tinted only when carrying priority meaning.
@@ -93,8 +94,8 @@ default, tinted only when carrying priority meaning.
   Secretary) + daemon status footer (dot + one word). Never shows project
   pickers or filters — the inbox decides what matters.
 - **Header**: view title + one-line qualifier ("what needs you right now")
-  + at most two actions. No breadcrumbs — depth is ≤2.
-- **Content**: single column of cards. Three-column layouts exist *only*
+  - at most two actions. No breadcrumbs — depth is ≤2.
+- **Content**: single column of cards. Three-column layouts exist _only_
   inside the Session Inspector drill-down.
 
 ## 3. Components
@@ -109,7 +110,7 @@ default, tinted only when carrying priority meaning.
 ┃ [Allow once]  [Deny]  [Inspect]
 ```
 
-- Left 3px border carries the priority color. Title is the *decision*, not
+- Left 3px border carries the priority color. Title is the _decision_, not
   the event type.
 - Structured fields (task, capability, destination, scope) render as
   **observed** — this is what voice readback and the visual card share
@@ -141,7 +142,7 @@ Tier D–E sessions render verified output only; no permission UI.
 ### 3.5 Fleet/quota panel
 
 Per-provider utilization bar + reset countdown + `denied`/`parked`
-markers. This is the *only* screen where capacity is visualized — it stays
+markers. This is the _only_ screen where capacity is visualized — it stays
 out of the inbox.
 
 ### 3.6 Preferences
@@ -156,13 +157,13 @@ inline; changes journal through `update-preference`.
 Always-on-top, ~360×72px, radius 10, `panel-raised`, the only shadowed
 surface. States:
 
-| State | Glyph | Ring |
-|---|---|---|
-| idle | `mic` | none — `muted` text "Hold Space to talk" |
-| listening | animated bars | `accent` pulsing ring |
-| processing | `…` | `amber` ring |
-| responding | `▶` | `green` ring + response preview line |
-| offline | `mic-off` | `slate` |
+| State      | Glyph         | Ring                                     |
+| ---------- | ------------- | ---------------------------------------- |
+| idle       | `mic`         | none — `muted` text "Hold Space to talk" |
+| listening  | animated bars | `accent` pulsing ring                    |
+| processing | `…`           | `amber` ring                             |
+| responding | `▶`           | `green` ring + response preview line     |
+| offline    | `mic-off`     | `slate`                                  |
 
 Transcript streams inline (max 2 lines, `meta` for partials). The HUD is
 the only surface allowed to interrupt — and only while held/active.
@@ -190,7 +191,7 @@ Status word + 5 actions max (`Start/Stop daemon`, `Open inbox`,
 
 - Anything approvable by voice must be confirmable visually with the same
   structured fields (DEC-010) — the approval card is the shared contract.
-- Above low-risk scope, voice *stages* the approval: the card appears in
+- Above low-risk scope, voice _stages_ the approval: the card appears in
   the inbox and waits for visual confirm.
 - Spoken replies never exceed what fits on two HUD lines; longer answers
   end with "— in the inbox."

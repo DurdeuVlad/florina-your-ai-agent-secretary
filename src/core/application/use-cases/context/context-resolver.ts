@@ -425,9 +425,7 @@ export class ContextResolver {
     events: readonly PrioritizedEvent[],
     digests: readonly CompletionDigest[],
   ): ContextCapsule {
-    const rolledUpEventSummaries = events.map(
-      (pe) => `${pe.event.kind} @ ${pe.event.timestamp}`,
-    );
+    const rolledUpEventSummaries = events.map((pe) => `${pe.event.kind} @ ${pe.event.timestamp}`);
 
     const runHistory = digests.map((d) => ({
       sessionId: d.sessionId,

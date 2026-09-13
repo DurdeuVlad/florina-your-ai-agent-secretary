@@ -86,8 +86,7 @@ export const VoiceSessionState = {
   Error: 'error',
 } as const;
 
-export type VoiceSessionState =
-  (typeof VoiceSessionState)[keyof typeof VoiceSessionState];
+export type VoiceSessionState = (typeof VoiceSessionState)[keyof typeof VoiceSessionState];
 
 /* ================================================================== *
  * Voice events
@@ -286,9 +285,7 @@ export interface RealtimeSessionPort extends RealtimeVoicePort {
  * only need the provider-neutral contract default to
  * {@link TranscriptResult}.
  */
-export interface TranscriptionPort<
-  TResult extends TranscriptResult = TranscriptResult,
-> {
+export interface TranscriptionPort<TResult extends TranscriptResult = TranscriptResult> {
   /** Whether the engine has been initialized. */
   readonly isInitialized: boolean;
   /** Transcribe a batch of audio chunks into a final result. */

@@ -108,7 +108,17 @@ describe('RendererState', () => {
 
   it('snapshot returns a deep copy', () => {
     const rs = new RendererState();
-    const items = [{ id: 'a', taskId: 't', kind: 'k', priority: 'low', status: 'pending', createdAt: '', payload: {} }];
+    const items = [
+      {
+        id: 'a',
+        taskId: 't',
+        kind: 'k',
+        priority: 'low',
+        status: 'pending',
+        createdAt: '',
+        payload: {},
+      },
+    ];
     rs.update({ inboxItems: items });
     const snap = rs.snapshot();
     snap.inboxItems[0]!.id = 'mutated';
@@ -423,20 +433,56 @@ describe('DesktopApp', () => {
     await conn;
 
     const items = [
-      { id: 'i1', taskId: 't1', kind: 'approval', priority: 'critical', status: 'pending', createdAt: 'now', payload: {} },
+      {
+        id: 'i1',
+        taskId: 't1',
+        kind: 'approval',
+        priority: 'critical',
+        status: 'pending',
+        createdAt: 'now',
+        payload: {},
+      },
     ];
     server.push({ type: 'inbox:update', items });
     await waitFor(() => app.getState().inboxItems.length === items.length);
     expect(app.getState().inboxItems).toEqual(items);
     expect(transport.toRenderer.some((m) => m.channel === 'inbox:update')).toBe(true);
 
-    const task = { id: 't1', projectId: 'p1', objective: 'do thing', state: 'Running', agentIds: [], sessionIds: [], createdAt: '', updatedAt: '', eventCount: 0 };
+    const task = {
+      id: 't1',
+      projectId: 'p1',
+      objective: 'do thing',
+      state: 'Running',
+      agentIds: [],
+      sessionIds: [],
+      createdAt: '',
+      updatedAt: '',
+      eventCount: 0,
+    };
     server.push({ type: 'task:update', task });
     await waitFor(() => app.getState().activeTask !== null);
     expect(app.getState().activeTask).toEqual(task);
     expect(transport.toRenderer.some((m) => m.channel === 'task:update')).toBe(true);
 
-    const metrics = { timestamp: 'now', counters: { eventsEmitted: {}, tasksStarted: 0, tasksCompleted: 0, tasksFailed: 0, approvalsRequested: 0, approvalsGranted: 0, approvalsDenied: 0, toolsInvoked: {} }, gauges: { activeSessions: 0, pendingApprovals: 0, inboxSize: 0, attentionItemsPending: 0 }, histograms: { taskDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} }, approvalResponseTime: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} }, toolDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} } } };
+    const metrics = {
+      timestamp: 'now',
+      counters: {
+        eventsEmitted: {},
+        tasksStarted: 0,
+        tasksCompleted: 0,
+        tasksFailed: 0,
+        approvalsRequested: 0,
+        approvalsGranted: 0,
+        approvalsDenied: 0,
+        toolsInvoked: {},
+      },
+      gauges: { activeSessions: 0, pendingApprovals: 0, inboxSize: 0, attentionItemsPending: 0 },
+      histograms: {
+        taskDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
+        approvalResponseTime: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
+        toolDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
+      },
+    };
     server.push({ type: 'metrics:update', snapshot: metrics });
     await waitFor(() => app.getState().metrics !== null);
     expect(app.getState().metrics).toEqual(metrics);
@@ -452,7 +498,13 @@ describe('DesktopApp', () => {
     );
 
     // voice:state is forwarded AND mirrored into renderer state.
-    server.push({ type: 'voice:state', listening: true, speaking: false, muted: false, mode: 'wake-word' });
+    server.push({
+      type: 'voice:state',
+      listening: true,
+      speaking: false,
+      muted: false,
+      mode: 'wake-word',
+    });
     await waitFor(() => app.getState().voiceState.listening === true);
     expect(transport.toRenderer.some((m) => m.channel === 'voice:state')).toBe(true);
     expect(app.getState().voiceState).toEqual({
@@ -581,7 +633,11 @@ describe('DesktopApp', () => {
   it('windowOptions are passed through to createWindow', () => {
     const window = new MockWindowBackend();
     const opts: WindowOptions = { width: 400, height: 300, title: 'Mini', alwaysOnTop: true };
-    const app = new DesktopApp({ window, ipcTransport: new MockIpcTransport(), windowOptions: opts });
+    const app = new DesktopApp({
+      window,
+      ipcTransport: new MockIpcTransport(),
+      windowOptions: opts,
+    });
     app.start();
     expect(window.windowOptions.width).toBe(400);
     expect(window.windowOptions.title).toBe('Mini');

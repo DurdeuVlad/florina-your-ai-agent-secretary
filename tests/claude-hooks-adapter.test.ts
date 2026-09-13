@@ -52,7 +52,8 @@ import {
  */
 class MockCliProcess implements ClaudeCliProcess {
   readonly pid: number;
-  private exitHandler: ((exitCode: number | null, signal?: NodeJS.Signals | null) => void) | null = null;
+  private exitHandler: ((exitCode: number | null, signal?: NodeJS.Signals | null) => void) | null =
+    null;
   private killed = false;
   readonly killSignals: string[] = [];
 
@@ -192,7 +193,9 @@ describe('Claude Code hooks mapper', () => {
 
   describe('inferDestinationFromTool', () => {
     it('extracts file_path from file tools', () => {
-      expect(inferDestinationFromTool('Write', { file_path: '/src/index.ts' })).toBe('/src/index.ts');
+      expect(inferDestinationFromTool('Write', { file_path: '/src/index.ts' })).toBe(
+        '/src/index.ts',
+      );
     });
 
     it('extracts command from Bash', () => {
@@ -248,13 +251,15 @@ describe('Claude Code hooks mapper', () => {
     });
 
     it('rates git push as critical', () => {
-      expect(inferRiskLevel(CapabilityType.Shell, 'Bash', { command: 'git push origin main' })).toBe(
-        CapabilityRiskLevel.Critical,
-      );
+      expect(
+        inferRiskLevel(CapabilityType.Shell, 'Bash', { command: 'git push origin main' }),
+      ).toBe(CapabilityRiskLevel.Critical);
     });
 
     it('rates Other as critical (DEC-011)', () => {
-      expect(inferRiskLevel(CapabilityType.Other, 'UnknownTool')).toBe(CapabilityRiskLevel.Critical);
+      expect(inferRiskLevel(CapabilityType.Other, 'UnknownTool')).toBe(
+        CapabilityRiskLevel.Critical,
+      );
     });
   });
 
@@ -297,7 +302,10 @@ describe('Claude Code hooks mapper', () => {
 
     it('maps a Write tool call to ToolStarted + FileChanged', () => {
       const event: PreToolUseHookEvent = {
-        ...hookBase({ tool_name: 'Write', tool_input: { file_path: '/src/new.ts', content: '...' } }),
+        ...hookBase({
+          tool_name: 'Write',
+          tool_input: { file_path: '/src/new.ts', content: '...' },
+        }),
         hook_event_name: 'PreToolUse',
         tool_name: 'Write',
         tool_input: { file_path: '/src/new.ts', content: '...' },
@@ -475,7 +483,10 @@ describe('Claude Code hooks mapper', () => {
   describe('mapNotification', () => {
     it('maps permission_prompt to ApprovalRequested with conservative defaults', () => {
       const event: NotificationHookEvent = {
-        ...hookBase({ message: 'Claude needs your permission', notification_type: 'permission_prompt' }),
+        ...hookBase({
+          message: 'Claude needs your permission',
+          notification_type: 'permission_prompt',
+        }),
         hook_event_name: 'Notification',
         message: 'Claude needs your permission',
         notification_type: 'permission_prompt',
@@ -594,11 +605,42 @@ describe('Claude Code hooks mapper', () => {
 
     it('produces events that pass validateEvent', () => {
       const events: ClaudeHookEvent[] = [
-        { ...hookBase({ source: 'startup', model: 'm1' }), hook_event_name: 'SessionStart', source: 'startup', model: 'm1' } as ClaudeHookEvent,
-        { ...hookBase({ tool_name: 'Bash', tool_input: { command: 'ls' } }), hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } } as ClaudeHookEvent,
-        { ...hookBase({ tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {}, duration_ms: 10 }), hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {}, duration_ms: 10 } as ClaudeHookEvent,
-        { ...hookBase({ tool_name: 'Bash', tool_input: { command: 'npm i' } }), hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'npm i' } } as ClaudeHookEvent,
-        { ...hookBase({ last_assistant_message: 'done' }), hook_event_name: 'Stop', last_assistant_message: 'done' } as ClaudeHookEvent,
+        {
+          ...hookBase({ source: 'startup', model: 'm1' }),
+          hook_event_name: 'SessionStart',
+          source: 'startup',
+          model: 'm1',
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({ tool_name: 'Bash', tool_input: { command: 'ls' } }),
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'ls' },
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({
+            tool_name: 'Bash',
+            tool_input: { command: 'ls' },
+            tool_response: {},
+            duration_ms: 10,
+          }),
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'ls' },
+          tool_response: {},
+          duration_ms: 10,
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({ tool_name: 'Bash', tool_input: { command: 'npm i' } }),
+          hook_event_name: 'PermissionRequest',
+          tool_name: 'Bash',
+          tool_input: { command: 'npm i' },
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({ last_assistant_message: 'done' }),
+          hook_event_name: 'Stop',
+          last_assistant_message: 'done',
+        } as ClaudeHookEvent,
       ];
       for (const event of events) {
         for (const mapped of mapHookEvent(event, ctx)) {
@@ -672,10 +714,7 @@ describe('Claude Code hooks mapper', () => {
  * 2. ClaudeHooksAdapter unit tests (mock CLI + in-memory sink)
  * ------------------------------------------------------------------ */
 describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
-  function makeAdapter(
-    spawner: MockCliSpawner,
-    sink: InMemoryHookEventSink,
-  ): ClaudeHooksAdapter {
+  function makeAdapter(spawner: MockCliSpawner, sink: InMemoryHookEventSink): ClaudeHooksAdapter {
     return new ClaudeHooksAdapter(null, { spawner, eventSink: sink });
   }
 

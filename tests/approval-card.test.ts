@@ -19,10 +19,7 @@ import {
   renderApprovalActions,
   renderRiskFactors,
 } from '../src/desktop/views/approval-templates.js';
-import type {
-  ApprovalCardData,
-  RenderTree,
-} from '../src/desktop/views/approval-types.js';
+import type { ApprovalCardData, RenderTree } from '../src/desktop/views/approval-types.js';
 import type { RenderTree as ViewRenderTree } from '../src/desktop/views/view-types.js';
 
 /* ------------------------------------------------------------------ *
@@ -144,9 +141,7 @@ describe('ApprovalCardViewModel.buildCard', () => {
     const request = req({
       capability: CapabilityType.Network,
       destination: 'npmjs.org',
-      scope: [
-        { type: CapabilityType.Network, targets: ['npmjs.org', 'github.com'] },
-      ],
+      scope: [{ type: CapabilityType.Network, targets: ['npmjs.org', 'github.com'] }],
       riskLevel: CapabilityRiskLevel.Medium,
     });
     const card = viewModel.buildCard(request);
@@ -335,9 +330,7 @@ describe('risk factors', () => {
       destination: 'npmjs.org',
     });
     const card = viewModel.buildCard(request);
-    expect(card.riskAssessment.factors).toContain(
-      'Network access to npmjs.org',
-    );
+    expect(card.riskAssessment.factors).toContain('Network access to npmjs.org');
   });
 
   it('surfaces shell command as a factor', () => {
@@ -356,18 +349,14 @@ describe('risk factors', () => {
       command: 'git push',
     });
     const card = viewModel.buildCard(request);
-    expect(
-      card.riskAssessment.factors.some((f) => f.includes('higher authority')),
-    ).toBe(true);
+    expect(card.riskAssessment.factors.some((f) => f.includes('higher authority'))).toBe(true);
   });
 
   it('surfaces scope target count as a factor', () => {
     const request = req({
       capability: CapabilityType.Network,
       destination: 'npmjs.org',
-      scope: [
-        { type: CapabilityType.Network, targets: ['npmjs.org', 'github.com'] },
-      ],
+      scope: [{ type: CapabilityType.Network, targets: ['npmjs.org', 'github.com'] }],
     });
     const card = viewModel.buildCard(request);
     expect(card.riskAssessment.factors).toContain('Scope covers 2 targets');
@@ -509,22 +498,16 @@ describe('action button command identifiers', () => {
     );
     const actions = renderApprovalActions(card);
     const buttons = actions.children as ViewRenderTree[];
-    const grant = buttons.find((b) =>
-      (b.props!.command as string).startsWith('approval:grant:'),
-    );
+    const grant = buttons.find((b) => (b.props!.command as string).startsWith('approval:grant:'));
     expect(grant).toBeDefined();
     expect(grant!.props!.command).toBe('approval:grant:network:npmjs.org');
   });
 
   it('deny command follows approval:deny:<capability>:<destination>', () => {
-    const card = viewModel.buildCard(
-      req({ capability: CapabilityType.Shell, destination: '' }),
-    );
+    const card = viewModel.buildCard(req({ capability: CapabilityType.Shell, destination: '' }));
     const actions = renderApprovalActions(card);
     const buttons = actions.children as ViewRenderTree[];
-    const deny = buttons.find((b) =>
-      (b.props!.command as string).startsWith('approval:deny:'),
-    );
+    const deny = buttons.find((b) => (b.props!.command as string).startsWith('approval:deny:'));
     expect(deny).toBeDefined();
     expect(deny!.props!.command).toBe('approval:deny:shell:');
   });

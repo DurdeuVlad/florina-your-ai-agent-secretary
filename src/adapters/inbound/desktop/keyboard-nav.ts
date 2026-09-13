@@ -104,8 +104,7 @@ export class KeyboardNavigator {
       return;
     }
     // Preserve selection by id when possible.
-    const matchIndex =
-      prevId !== null ? this.items.indexOf(prevId) : -1;
+    const matchIndex = prevId !== null ? this.items.indexOf(prevId) : -1;
     this.cursor = matchIndex >= 0 ? matchIndex : 0;
     // Only emit when the selection actually changed.
     if (this.currentId !== prevId && this.currentId !== null) {
@@ -217,9 +216,7 @@ export class KeyboardNavigator {
    * Emit an action targeting the currently-selected item. Returns `false`
    * (event not consumed) if the list is empty.
    */
-  private actOnSelected(
-    build: (id: string, index: number) => NavAction,
-  ): boolean {
+  private actOnSelected(build: (id: string, index: number) => NavAction): boolean {
     const id = this.currentId;
     if (id === null) return false;
     this.emit(build(id, this.cursor));

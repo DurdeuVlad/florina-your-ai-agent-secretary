@@ -32,9 +32,7 @@ export class ScopeAccessError extends Error {
     activeOwnerId: EntityId | null,
   ) {
     const active =
-      activeScope === null
-        ? 'no active context'
-        : `active scope ${activeScope}/${activeOwnerId}`;
+      activeScope === null ? 'no active context' : `active scope ${activeScope}/${activeOwnerId}`;
     super(
       `Context isolation violation: requested ${requestedScope}/${requestedOwnerId} ` +
         `but ${active} is loaded. Switch scope explicitly before querying.`,

@@ -25,7 +25,10 @@ interface AttentionItemRow {
   created_at: string;
 }
 
-export class AttentionItemRepository extends BaseRepository implements AttentionRecordRepositoryPort {
+export class AttentionItemRepository
+  extends BaseRepository
+  implements AttentionRecordRepositoryPort
+{
   private readonly insertStmt: Database.Statement;
   private readonly getByIdStmt: Database.Statement;
   private readonly listByTaskStmt: Database.Statement;

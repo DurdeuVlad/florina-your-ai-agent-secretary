@@ -46,15 +46,7 @@ export interface WindowOptions {
 
 /** Window lifecycle / interaction events emitted by a {@link WindowBackend}. */
 export type WindowEvent =
-  | 'ready-to-show'
-  | 'close'
-  | 'closed'
-  | 'show'
-  | 'hide'
-  | 'focus'
-  | 'blur'
-  | 'resize'
-  | 'move';
+  'ready-to-show' | 'close' | 'closed' | 'show' | 'hide' | 'focus' | 'blur' | 'resize' | 'move';
 
 /** Callback invoked when a window event fires. */
 export type WindowEventHandler = (...args: unknown[]) => void;

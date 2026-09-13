@@ -280,9 +280,7 @@ export class HotkeyManager {
    *   supplied actions are registered.
    * @returns the set of actions that were successfully registered.
    */
-  registerDefaults(
-    callbacks: Partial<Record<HotkeyAction, () => void>>,
-  ): Set<HotkeyAction> {
+  registerDefaults(callbacks: Partial<Record<HotkeyAction, () => void>>): Set<HotkeyAction> {
     const registered = new Set<HotkeyAction>();
     for (const action of Object.keys(DEFAULT_HOTKEYS) as HotkeyAction[]) {
       const cb = callbacks[action];

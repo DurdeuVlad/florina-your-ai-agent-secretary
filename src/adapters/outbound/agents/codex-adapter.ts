@@ -157,7 +157,9 @@ export class CodexAdapter extends BaseAdapter {
   async startRun(taskId: string, sessionConfig: SessionConfig): Promise<StartRunResult> {
     this.requireConnected();
     if (this.activeSession !== null) {
-      throw new Error(`Codex adapter already has an active session: ${this.activeSession.sessionId}`);
+      throw new Error(
+        `Codex adapter already has an active session: ${this.activeSession.sessionId}`,
+      );
     }
     this.activeSession = sessionConfig;
     this.streamComplete = false;
@@ -297,10 +299,7 @@ export class CodexAdapter extends BaseAdapter {
    * Send a JSON-RPC request and await the response. Returns the `result`
    * field, or `null` if the server returns an empty result.
    */
-  private sendRequest(
-    method: string,
-    params?: Record<string, unknown>,
-  ): Promise<unknown> {
+  private sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown> {
     if (!this.transport) {
       return Promise.reject(new Error('Codex adapter has no transport'));
     }

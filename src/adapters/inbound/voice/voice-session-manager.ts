@@ -81,10 +81,7 @@ export interface VoiceSessionManagerOptions {
  * Runs a long-lived voice tool outside the speech turn (issue #73).
  * The returned string is spoken to the user when the work finishes.
  */
-export type AsyncVoiceToolRunner = (
-  name: string,
-  args: Record<string, unknown>,
-) => Promise<string>;
+export type AsyncVoiceToolRunner = (name: string, args: Record<string, unknown>) => Promise<string>;
 
 /**
  * Manages the voice session lifecycle within the host process.
@@ -274,7 +271,9 @@ export class VoiceSessionManager {
 
     try {
       const response = await this.options.commandApi.execute(command);
-      const result = response.ok ? response : { ok: false, error: (response as { error?: string }).error ?? 'Unknown error' };
+      const result = response.ok
+        ? response
+        : { ok: false, error: (response as { error?: string }).error ?? 'Unknown error' };
       this.options.bridge.sendToolCallOutput(callId, JSON.stringify(result));
       this.notifyToolCall(name, response.ok, result);
     } catch (e) {
@@ -290,11 +289,7 @@ export class VoiceSessionManager {
    * injected as a user message so the Florina speaks again when the
    * work is ready — never blocking a turn on a slow tool.
    */
-  private handleAsyncToolCall(
-    callId: string,
-    name: string,
-    args: Record<string, unknown>,
-  ): void {
+  private handleAsyncToolCall(callId: string, name: string, args: Record<string, unknown>): void {
     const runner = this.options.asyncToolRunner;
     if (runner === undefined) {
       const errorMsg = `async tool "${name}" is not wired into this session`;
@@ -318,9 +313,7 @@ export class VoiceSessionManager {
       .catch((err: unknown) => {
         if (this.options.bridge.isConnected) {
           const message = err instanceof Error ? err.message : String(err);
-          this.options.bridge.sendUserMessage(
-            `The ${name} task hit an error: ${message}`,
-          );
+          this.options.bridge.sendUserMessage(`The ${name} task hit an error: ${message}`);
         }
       });
   }

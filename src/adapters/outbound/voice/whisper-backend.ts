@@ -55,10 +55,7 @@ export const DEFAULT_WHISPER_CLI_OPTIONS: WhisperCliOptions = {
  * The audio file path is appended separately by the backend at transcribe
  * time. Output is always JSON (`-oj`) so the result can be parsed.
  */
-export function buildWhisperArgs(
-  opts: WhisperCliOptions,
-  audioPath: string,
-): string[] {
+export function buildWhisperArgs(opts: WhisperCliOptions, audioPath: string): string[] {
   const args = ['-m', opts.model, '-l', opts.language, '-bs', String(opts.beamSize)];
   if (opts.speedUp) {
     args.push('-su');
@@ -168,10 +165,8 @@ export function parseWhisperJsonOutput(raw: string): WhisperResult {
       tokens: Array.isArray(seg.tokens) ? (seg.tokens as number[]) : [],
       temperature: typeof seg.temperature === 'number' ? seg.temperature : 0,
       avg_logprob: typeof seg.avg_logprob === 'number' ? seg.avg_logprob : 0,
-      compression_ratio:
-        typeof seg.compression_ratio === 'number' ? seg.compression_ratio : 0,
-      no_speech_prob:
-        typeof seg.no_speech_prob === 'number' ? seg.no_speech_prob : 0,
+      compression_ratio: typeof seg.compression_ratio === 'number' ? seg.compression_ratio : 0,
+      no_speech_prob: typeof seg.no_speech_prob === 'number' ? seg.no_speech_prob : 0,
     };
   });
   return { language: r.language, text: r.text, segments };
@@ -394,16 +389,9 @@ export class WhisperCppBackend implements WhisperBackend {
     await writeFile(audioPath, audioData);
     try {
       const args = buildWhisperArgs(this.options, audioPath);
-      const result = await this.runner.run(
-        this.binary,
-        args,
-        undefined,
-        this.timeoutMs,
-      );
+      const result = await this.runner.run(this.binary, args, undefined, this.timeoutMs);
       if (result.exitCode !== 0) {
-        throw new Error(
-          `whisper.cpp exited with code ${result.exitCode}: ${result.stderr.trim()}`,
-        );
+        throw new Error(`whisper.cpp exited with code ${result.exitCode}: ${result.stderr.trim()}`);
       }
       return parseWhisperJsonOutput(result.stdout);
     } finally {

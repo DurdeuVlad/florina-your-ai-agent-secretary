@@ -21,11 +21,7 @@
 import type { ContextCapsule, Event } from '../../../domain/types.js';
 // Type-only import: erased at compile time, so no runtime circular dependency
 // with ./context-resolver.js (which imports this module's functions at runtime).
-import type {
-  AssembledContextCapsule,
-  Priority,
-  PrioritizedEvent,
-} from './context-resolver.js';
+import type { AssembledContextCapsule, Priority, PrioritizedEvent } from './context-resolver.js';
 
 /* ------------------------------------------------------------------ *
  * Constants
@@ -212,9 +208,7 @@ export function truncateToBudget(
     if (currentTokens <= budget) break;
     current = {
       ...current,
-      recentEvents: current.recentEvents.filter(
-        (pe) => pe.priority !== dropPriority,
-      ),
+      recentEvents: current.recentEvents.filter((pe) => pe.priority !== dropPriority),
     };
     currentTokens = estimateAssembledTokens(current, charsPerToken);
   }

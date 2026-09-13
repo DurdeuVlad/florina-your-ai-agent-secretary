@@ -12,11 +12,14 @@ import {
   AgentRepository,
   SessionRepository,
 } from '../src/storage/index.js';
-import { buildEvent, buildProject, buildTask, buildAgent, buildSession } from '../src/domain/index.js';
 import {
-  DiffAnalyzer,
-  collectTestResults,
-} from '../src/attention/diff-analyzer.js';
+  buildEvent,
+  buildProject,
+  buildTask,
+  buildAgent,
+  buildSession,
+} from '../src/domain/index.js';
+import { DiffAnalyzer, collectTestResults } from '../src/attention/diff-analyzer.js';
 import type { DiffDigest, PathCategory } from '../src/attention/diff-digest.js';
 
 /* ------------------------------------------------------------------ *

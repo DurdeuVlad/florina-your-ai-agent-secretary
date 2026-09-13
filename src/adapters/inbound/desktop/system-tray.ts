@@ -49,12 +49,7 @@ export interface TrayMenuItem {
 }
 
 /** Logical quick-action identifiers raised by the tray menu. */
-export type TrayAction =
-  | 'start-daemon'
-  | 'stop-daemon'
-  | 'open-inbox'
-  | 'show-window'
-  | 'quit';
+export type TrayAction = 'start-daemon' | 'stop-daemon' | 'open-inbox' | 'show-window' | 'quit';
 
 /** Callback invoked when the user selects a quick action from the tray. */
 export type TrayActionCallback = (action: TrayAction) => void;

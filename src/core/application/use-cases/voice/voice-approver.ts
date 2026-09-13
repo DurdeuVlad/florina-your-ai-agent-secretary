@@ -49,12 +49,7 @@ export interface ApprovalDecision {
 }
 
 /** Why an approval decision was reached. */
-export type ApprovalDecisionReason =
-  | 'granted'
-  | 'confirmed'
-  | 'denied'
-  | 'uncertain'
-  | 'timeout';
+export type ApprovalDecisionReason = 'granted' | 'confirmed' | 'denied' | 'uncertain' | 'timeout';
 
 /* ================================================================== *
  * VoiceInteractionBridge — pluggable voice I/O
@@ -145,10 +140,7 @@ export class VoiceApprover {
    *
    * @returns An {@link ApprovalDecision}.
    */
-  async requestApproval(
-    prompt: string,
-    riskLevel: RiskLevel,
-  ): Promise<ApprovalDecision> {
+  async requestApproval(prompt: string, riskLevel: RiskLevel): Promise<ApprovalDecision> {
     // Critical risk is never voice-approvable (defensive backstop).
     if (riskLevel === CapabilityRiskLevel.Critical) {
       return {

@@ -64,10 +64,7 @@ describe('CapacityRouter', () => {
 
   it('applies model-level deny rules', () => {
     const profile: PreferenceProfile = {
-      rules: [
-        { provider: 'claude-code', model: 'opus' },
-        { provider: 'codex' },
-      ],
+      rules: [{ provider: 'claude-code', model: 'opus' }, { provider: 'codex' }],
       denied: [{ provider: 'claude-code', model: 'opus' }],
     };
     const result = router(profile).route({});

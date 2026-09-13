@@ -248,7 +248,8 @@ export class DiffAnalyzer {
    * use the empty tree so the entire initial commit is diffed.
    */
   private resolveBaseCommit(worktreePath: string, head: string): string {
-    const parents = this.git.run(['rev-list', '--parents', '-n', '1', head], worktreePath)
+    const parents = this.git
+      .run(['rev-list', '--parents', '-n', '1', head], worktreePath)
       .trim()
       .split(/\s+/);
     // Output: "<sha> <parent1> [<parent2> ...]"
@@ -263,11 +264,7 @@ export class DiffAnalyzer {
    * Collect {@link ChangedFile}s by combining `git diff --numstat` (line
    * counts) with `git diff --name-status -M` (status + renames).
    */
-  private collectChangedFiles(
-    worktreePath: string,
-    base: string,
-    head: string,
-  ): ChangedFile[] {
+  private collectChangedFiles(worktreePath: string, base: string, head: string): ChangedFile[] {
     const range = `${base}..${head}`;
     const numstat = this.git.run(['diff', '--numstat', range], worktreePath);
     const nameStatus = this.git.run(['diff', '--name-status', '-M', range], worktreePath);
@@ -344,10 +341,7 @@ export class DiffAnalyzer {
  * @param eventRepository  The event journal source.
  * @returns Aggregated test results, in chronological order.
  */
-export function collectTestResults(
-  taskId: string,
-  eventRepository: EventSourcePort,
-): TestResult[] {
+export function collectTestResults(taskId: string, eventRepository: EventSourcePort): TestResult[] {
   const events = eventRepository.listByTask(taskId);
 
   const results: TestResult[] = [];
@@ -364,8 +358,7 @@ export function collectTestResults(
         failed?: number;
         durationMs?: number;
       };
-      const name =
-        payload.target ?? pendingStart?.target ?? 'unknown';
+      const name = payload.target ?? pendingStart?.target ?? 'unknown';
       const failed = payload.failed ?? 0;
       const passed = payload.passed ?? 0;
       const duration = payload.durationMs;

@@ -122,9 +122,7 @@ describe('SpokenPromptBuilder', () => {
   it('lists multiple scope targets with an Oxford-comma spoken list', () => {
     const prompt = builder.build(
       makeApprovalEvent({
-        scope: [
-          { type: 'network', targets: ['registry.npmjs.org', 'github.com'] },
-        ],
+        scope: [{ type: 'network', targets: ['registry.npmjs.org', 'github.com'] }],
       }),
     );
     expect(prompt).toContain('registry.npmjs.org and github.com');
@@ -133,18 +131,14 @@ describe('SpokenPromptBuilder', () => {
   it('handles three scope targets', () => {
     const prompt = builder.build(
       makeApprovalEvent({
-        scope: [
-          { type: 'network', targets: ['a.com', 'b.com', 'c.com'] },
-        ],
+        scope: [{ type: 'network', targets: ['a.com', 'b.com', 'c.com'] }],
       }),
     );
     expect(prompt).toContain('a.com, b.com, and c.com');
   });
 
   it('omits scope clause when scope targets are empty', () => {
-    const prompt = builder.build(
-      makeApprovalEvent({ scope: [{ type: 'network', targets: [] }] }),
-    );
+    const prompt = builder.build(makeApprovalEvent({ scope: [{ type: 'network', targets: [] }] }));
     expect(prompt).not.toContain('scoped to');
   });
 
@@ -355,9 +349,7 @@ describe('ApprovalRouter risk hierarchy', () => {
   it('routes medium risk through a voice yes/no round', async () => {
     const router = new ApprovalRouter(approver);
     bridge.enqueue('yes');
-    const result = await router.route(
-      makeApprovalEvent({ riskLevel: CapabilityRiskLevel.Medium }),
-    );
+    const result = await router.route(makeApprovalEvent({ riskLevel: CapabilityRiskLevel.Medium }));
     expect(result.mode).toBe('voice');
     expect(result.decision.decision).toBe('grant');
     expect(bridge.prompts).toHaveLength(1);
@@ -367,16 +359,11 @@ describe('ApprovalRouter risk hierarchy', () => {
     const router = new ApprovalRouter(approver);
     bridge.enqueue('yes');
     bridge.enqueue('confirm');
-    const result = await router.route(
-      makeApprovalEvent({ riskLevel: CapabilityRiskLevel.High }),
-    );
+    const result = await router.route(makeApprovalEvent({ riskLevel: CapabilityRiskLevel.High }));
     expect(result.mode).toBe('voice');
     expect(result.decision.decision).toBe('grant');
     expect(result.decision.reason).toBe('confirmed');
-    expect(bridge.prompts).toEqual([
-      expect.stringContaining('Allow?'),
-      'Are you sure?',
-    ]);
+    expect(bridge.prompts).toEqual([expect.stringContaining('Allow?'), 'Are you sure?']);
   });
 
   it('rejects critical risk as not voice-approvable and escalates', async () => {
@@ -398,9 +385,7 @@ describe('ApprovalRouter risk hierarchy', () => {
   it('denies medium risk when voice denies', async () => {
     const router = new ApprovalRouter(approver);
     bridge.enqueue('no');
-    const result = await router.route(
-      makeApprovalEvent({ riskLevel: CapabilityRiskLevel.Medium }),
-    );
+    const result = await router.route(makeApprovalEvent({ riskLevel: CapabilityRiskLevel.Medium }));
     expect(result.decision.decision).toBe('deny');
     expect(result.mode).toBe('voice');
   });
@@ -408,9 +393,7 @@ describe('ApprovalRouter risk hierarchy', () => {
   it('denies medium risk on timeout (fail-safe)', async () => {
     const router = new ApprovalRouter(approver);
     bridge.enqueue(new VoiceInteractionTimeout());
-    const result = await router.route(
-      makeApprovalEvent({ riskLevel: CapabilityRiskLevel.Medium }),
-    );
+    const result = await router.route(makeApprovalEvent({ riskLevel: CapabilityRiskLevel.Medium }));
     expect(result.decision.decision).toBe('deny');
     expect(result.decision.reason).toBe('timeout');
   });

@@ -2,10 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { VoiceSessionState } from '../src/voice/audio-types.js';
 import type { VoicePipelineState } from '../src/voice/voice-pipeline.js';
-import {
-  PttHudViewModel,
-  DEFAULT_PTT_HUD_STATE,
-} from '../src/desktop/views/ptt-hud.js';
+import { PttHudViewModel, DEFAULT_PTT_HUD_STATE } from '../src/desktop/views/ptt-hud.js';
 import type { PttHudState } from '../src/desktop/views/ptt-hud.js';
 import {
   renderPttHud,
@@ -29,9 +26,7 @@ import type { KeyEventLike, ParsedAccelerator } from '../src/desktop/hotkeys.js'
  * ------------------------------------------------------------------ */
 
 /** Build a VoicePipelineState with overrides. */
-function pipelineState(
-  overrides: Partial<VoicePipelineState> = {},
-): VoicePipelineState {
+function pipelineState(overrides: Partial<VoicePipelineState> = {}): VoicePipelineState {
   return {
     mode: 'realtime',
     realtimeState: VoiceSessionState.Idle,
@@ -83,9 +78,7 @@ describe('PttHudViewModel.update', () => {
 
   it('clears all activity flags when offline', () => {
     const vm = new PttHudViewModel();
-    vm.update(
-      pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }),
-    );
+    vm.update(pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }));
     const state = vm.update(pipelineState({ mode: 'offline' }));
     expect(state.isListening).toBe(false);
     expect(state.isProcessing).toBe(false);
@@ -153,24 +146,18 @@ describe('PttHudViewModel.onStateChange', () => {
     const vm = new PttHudViewModel();
     const cb = vi.fn();
     vm.onStateChange(cb);
-    vm.update(
-      pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }),
-    );
+    vm.update(pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }));
     expect(cb).toHaveBeenCalledTimes(1);
     expect(cb.mock.calls[0][0].isListening).toBe(true);
   });
 
   it('does not notify when state is unchanged', () => {
     const vm = new PttHudViewModel();
-    vm.update(
-      pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }),
-    );
+    vm.update(pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }));
     const cb = vi.fn();
     vm.onStateChange(cb);
     // Same state as current — no change.
-    vm.update(
-      pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }),
-    );
+    vm.update(pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }));
     expect(cb).not.toHaveBeenCalled();
   });
 
@@ -231,9 +218,7 @@ describe('PttHudViewModel.onStateChange', () => {
 describe('PttHudViewModel serialization', () => {
   it('getState is JSON-serializable (round-trips cleanly)', () => {
     const vm = new PttHudViewModel();
-    vm.update(
-      pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }),
-    );
+    vm.update(pipelineState({ mode: 'realtime', realtimeState: VoiceSessionState.Listening }));
     vm.setTranscript('hello');
     vm.setResponsePreview('world');
     vm.setHotkeyHint('⌘␣');
@@ -307,9 +292,7 @@ describe('PTT templates', () => {
         ...listeningState,
         responsePreview: 'three tasks',
       });
-      const tags = (tree.children ?? []).map((c) =>
-        typeof c === 'string' ? c : c.tag,
-      );
+      const tags = (tree.children ?? []).map((c) => (typeof c === 'string' ? c : c.tag));
       expect(tags).toContain('PttButton');
       expect(tags).toContain('VoiceModeIndicator');
       expect(tags).toContain('TranscriptPreview');
@@ -319,9 +302,7 @@ describe('PTT templates', () => {
 
     it('omits transcript / response / hint children when empty', () => {
       const tree = renderPttHud(DEFAULT_PTT_HUD_STATE);
-      const tags = (tree.children ?? []).map((c) =>
-        typeof c === 'string' ? c : c.tag,
-      );
+      const tags = (tree.children ?? []).map((c) => (typeof c === 'string' ? c : c.tag));
       expect(tags).not.toContain('TranscriptPreview');
       expect(tags).not.toContain('ResponsePreview');
       expect(tags).not.toContain('HotkeyHint');

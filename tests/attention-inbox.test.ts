@@ -434,9 +434,7 @@ describe('AttentionInbox', () => {
       const restored = AttentionInbox.restore(snap1);
       const snap2 = restored.snapshot();
       expect(snap2.items.length).toBe(2);
-      expect(
-        snap2.items.sort(compareAttentionItems).map((i) => i.id),
-      ).toEqual(['1', '2']);
+      expect(snap2.items.sort(compareAttentionItems).map((i) => i.id)).toEqual(['1', '2']);
     });
   });
 });

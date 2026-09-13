@@ -10,10 +10,7 @@
  * (persistence probe), {@link ConnectionStatsPort} (connection surface), and
  * {@link EventSubscriberPort} (event sequence) — never concrete adapters.
  */
-import type {
-  ConnectionStatsPort,
-  StorageHealthPort,
-} from '../ports/outbound/health.js';
+import type { ConnectionStatsPort, StorageHealthPort } from '../ports/outbound/health.js';
 import type { EventSubscriberPort } from '../ports/outbound/event-stream.js';
 
 /** Health check response payload. */

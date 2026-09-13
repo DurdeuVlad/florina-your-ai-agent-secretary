@@ -1,57 +1,98 @@
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Florina — Session Inspector (mockup)</title>
-<link rel="stylesheet" href="mockup.css"></head>
-<body>
-<div class="shell">
-  <nav>
-    <div class="logo">Flor<em>ina</em></div>
-    <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
-    <div class="navitem active">◧ Tasks<span class="navbadge zero">5</span></div>
-    <div class="navitem">◔ Fleet</div>
-    <div class="navitem">◇ Ideas</div>
-    <div class="navitem">◍ Preferences</div>
-    <div class="navitem">☰ Secretary</div>
-    <div class="sidefoot"><div class="statusline"><span class="dot on"></span>daemon connected</div></div>
-  </nav>
-  <main>
-    <header>
-      <h1>Session Inspector</h1><span class="sub">invoice-pagination · codex · tier A</span>
-      <span class="spacer"></span><button class="ghost">Esc — back</button>
-    </header>
-    <div class="content"><div class="cols">
-
-      <div class="col">
-        <div class="colhead">Tasks</div>
-        <div class="row sel"><b>invoice-pagination</b><div class="t">running · codex</div></div>
-        <div class="row"><b>oauth-migration</b><div class="t">running · claude-code</div></div>
-        <div class="row"><b>image-pipeline</b><div class="t">parked · gemini</div></div>
-        <div class="row"><b>password-reset</b><div class="t">completed</div></div>
-      </div>
-
-      <div class="col">
-        <div class="colhead">Event timeline</div>
-        <div class="row"><b>task.started</b><div class="t">13:58:02 · capsule loaded</div></div>
-        <div class="row"><b>tool.file_edit</b><div class="t">13:59:14 · InvoiceList.tsx</div></div>
-        <div class="row"><b>tool.file_edit</b><div class="t">13:59:41 · api/invoices.ts</div></div>
-        <div class="row muted"><b>▸ 14 events condensed</b><div class="t">expand — nothing discarded</div></div>
-        <div class="row sel"><b>tool.test_run</b><div class="t">14:02:10 · vitest run</div></div>
-        <div class="row"><b>tool.test_run</b><div class="t">14:04:33 · vitest run (retry)</div></div>
-      </div>
-
-      <div class="col">
-        <div class="colhead">Detail — tool.test_run</div>
-        <div class="row mono">
-<span class="muted">$ vitest run --reporter=verbose</span><br><br>
-<span style="color:var(--red)">✗ invoices/cursor › returns next cursor</span><br>
-<span style="color:var(--green)">✓ invoices/cursor › stable ordering</span><br>
-<span style="color:var(--green)">✓ invoices/cursor › empty page</span><br><br>
-<span class="muted">observed · from event journal · 14:02:10</span><br>
-<span class="inferred">likely off-by-one in cursor encode — agent retrying</span>
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Florina — Session Inspector (mockup)</title>
+    <link rel="stylesheet" href="mockup.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="logo">Flor<em>ina</em></div>
+        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
+        <div class="navitem active">◧ Tasks<span class="navbadge zero">5</span></div>
+        <div class="navitem">◔ Fleet</div>
+        <div class="navitem">◇ Ideas</div>
+        <div class="navitem">◍ Preferences</div>
+        <div class="navitem">☰ Secretary</div>
+        <div class="sidefoot">
+          <div class="statusline"><span class="dot on"></span>daemon connected</div>
         </div>
-        <div class="row"><button class="ghost">Full transcript</button> <button class="ghost">View diff</button></div>
-      </div>
+      </nav>
+      <main>
+        <header>
+          <h1>Session Inspector</h1>
+          <span class="sub">invoice-pagination · codex · tier A</span> <span class="spacer"></span
+          ><button class="ghost">Esc — back</button>
+        </header>
+        <div class="content">
+          <div class="cols">
+            <div class="col">
+              <div class="colhead">Tasks</div>
+              <div class="row sel">
+                <b>invoice-pagination</b>
+                <div class="t">running · codex</div>
+              </div>
+              <div class="row">
+                <b>oauth-migration</b>
+                <div class="t">running · claude-code</div>
+              </div>
+              <div class="row">
+                <b>image-pipeline</b>
+                <div class="t">parked · gemini</div>
+              </div>
+              <div class="row">
+                <b>password-reset</b>
+                <div class="t">completed</div>
+              </div>
+            </div>
 
-    </div></div>
-  </main>
-</div>
-</body></html>
+            <div class="col">
+              <div class="colhead">Event timeline</div>
+              <div class="row">
+                <b>task.started</b>
+                <div class="t">13:58:02 · capsule loaded</div>
+              </div>
+              <div class="row">
+                <b>tool.file_edit</b>
+                <div class="t">13:59:14 · InvoiceList.tsx</div>
+              </div>
+              <div class="row">
+                <b>tool.file_edit</b>
+                <div class="t">13:59:41 · api/invoices.ts</div>
+              </div>
+              <div class="row muted">
+                <b>▸ 14 events condensed</b>
+                <div class="t">expand — nothing discarded</div>
+              </div>
+              <div class="row sel">
+                <b>tool.test_run</b>
+                <div class="t">14:02:10 · vitest run</div>
+              </div>
+              <div class="row">
+                <b>tool.test_run</b>
+                <div class="t">14:04:33 · vitest run (retry)</div>
+              </div>
+            </div>
+
+            <div class="col">
+              <div class="colhead">Detail — tool.test_run</div>
+              <div class="row mono">
+                <span class="muted">$ vitest run --reporter=verbose</span><br /><br />
+                <span style="color: var(--red)">✗ invoices/cursor › returns next cursor</span><br />
+                <span style="color: var(--green)">✓ invoices/cursor › stable ordering</span><br />
+                <span style="color: var(--green)">✓ invoices/cursor › empty page</span><br /><br />
+                <span class="muted">observed · from event journal · 14:02:10</span><br />
+                <span class="inferred">likely off-by-one in cursor encode — agent retrying</span>
+              </div>
+              <div class="row">
+                <button class="ghost">Full transcript</button>
+                <button class="ghost">View diff</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

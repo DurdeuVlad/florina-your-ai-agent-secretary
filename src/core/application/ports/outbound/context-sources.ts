@@ -5,13 +5,7 @@
  * Each port is a minimal, mockable projection over a concrete repository or
  * manager; use cases never depend on storage implementations directly.
  */
-import type {
-  ContextCapsule,
-  Decision,
-  EntityId,
-  Event,
-  Task,
-} from '../../../domain/types.js';
+import type { ContextCapsule, Decision, EntityId, Event, Task } from '../../../domain/types.js';
 import type { ContextCapsuleScope } from '../../../domain/enums.js';
 import type { WorktreeStatus } from './worktree.js';
 

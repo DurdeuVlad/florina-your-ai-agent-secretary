@@ -64,7 +64,9 @@ function agentFailed(overrides: Partial<AgentFailedEvent> = {}): AgentFailedEven
   };
 }
 
-function approvalRequested(overrides: Partial<ApprovalRequestedEvent> = {}): ApprovalRequestedEvent {
+function approvalRequested(
+  overrides: Partial<ApprovalRequestedEvent> = {},
+): ApprovalRequestedEvent {
   return {
     ...base,
     type: 'ApprovalRequested',
@@ -481,14 +483,19 @@ describe('AdaptivePolicy', () => {
 
     it('never raises escalationDelayMs above the maximum', () => {
       const policy = new AdaptivePolicy({
-        config: { ...DEFAULT_TUNING_CONFIG, escalationDelayMs: MAX_TUNING_BOUNDS.escalationDelayMs },
+        config: {
+          ...DEFAULT_TUNING_CONFIG,
+          escalationDelayMs: MAX_TUNING_BOUNDS.escalationDelayMs,
+        },
       });
       // Many slow approvals to keep triggering the rule.
       for (let i = 0; i < 10; i++) {
         policy.trackEvent(approvalRequested({ timestamp: ts(0), taskId: `t-${i}` }));
         policy.trackEvent(progressEvent({ timestamp: ts(120_000), taskId: `t-${i}` }));
       }
-      expect(policy.getAdjustedConfig().escalationDelayMs).toBe(MAX_TUNING_BOUNDS.escalationDelayMs);
+      expect(policy.getAdjustedConfig().escalationDelayMs).toBe(
+        MAX_TUNING_BOUNDS.escalationDelayMs,
+      );
     });
 
     it('never lowers maxInboxSize below the minimum', () => {

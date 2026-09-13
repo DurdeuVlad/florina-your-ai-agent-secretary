@@ -167,7 +167,12 @@ export { SessionManager } from './session-manager.js';
 export type { SessionInfo, StartSessionResult, StopSessionResult } from './session-manager.js';
 
 /* Voice session management (DEC-021, DEC-002, issue #41) */
-export { VoiceSessionManager, buildDefaultVoiceTools, mapToolCallToCommand, DEFAULT_VOICE_INSTRUCTIONS } from './voice-session-manager.js';
+export {
+  VoiceSessionManager,
+  buildDefaultVoiceTools,
+  mapToolCallToCommand,
+  DEFAULT_VOICE_INSTRUCTIONS,
+} from './voice-session-manager.js';
 export type {
   VoiceSessionManagerOptions,
   CommandExecutor,
@@ -178,4 +183,8 @@ export type {
 } from './voice-session-manager.js';
 
 /* Durable preference profile store (DEC-020/029, issue #65) */
-export { PreferenceProfileStore, PreferenceProfileError, validatePreferenceProfile } from './preference-profile.js';
+export {
+  PreferenceProfileStore,
+  PreferenceProfileError,
+  validatePreferenceProfile,
+} from './preference-profile.js';

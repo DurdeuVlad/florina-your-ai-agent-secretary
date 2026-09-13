@@ -67,9 +67,7 @@ describe('QuotaLedger', () => {
 
   it('ignores stale observations so out-of-order writes cannot regress state', () => {
     const ledger = ledgerAt(T0);
-    ledger.recordWindow(
-      window({ status: 'exhausted', usedPct: 1, observedAt: T0.toISOString() }),
-    );
+    ledger.recordWindow(window({ status: 'exhausted', usedPct: 1, observedAt: T0.toISOString() }));
     ledger.recordWindow(
       window({ usedPct: 0.1, observedAt: new Date(T0.getTime() - HOUR).toISOString() }),
     );

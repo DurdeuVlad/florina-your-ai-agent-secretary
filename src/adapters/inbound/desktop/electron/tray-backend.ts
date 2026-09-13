@@ -14,8 +14,7 @@ import type { MenuItemConstructorOptions, Tray } from 'electron';
 // See window-backend.ts: require('electron') in main resolves to the real
 // API, while named ESM imports may hit the npm shim (issue #114).
 const require = createRequire(import.meta.url);
-const { Menu, Tray: TrayCtor, nativeImage } =
-  require('electron') as typeof import('electron');
+const { Menu, Tray: TrayCtor, nativeImage } = require('electron') as typeof import('electron');
 
 import type { TrayBackend, TrayMenuItem } from '../system-tray.js';
 

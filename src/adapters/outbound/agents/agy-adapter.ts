@@ -46,11 +46,7 @@ export interface AgyProcess {
 }
 
 /** Spawns an `agy -p` headless run. */
-export type AgySpawner = (
-  command: string,
-  args: readonly string[],
-  cwd: string,
-) => AgyProcess;
+export type AgySpawner = (command: string, args: readonly string[], cwd: string) => AgyProcess;
 
 /** Default spawner: plain child_process. Swap for a PTY spawner to work
  * around the non-TTY stdout bug (upstream #76). */

@@ -51,13 +51,9 @@ describe('PreferenceProfileStore', () => {
   it('rejects malformed files and mutations', async () => {
     const path = await tempPath();
     await writeFile(path, '{"rules": "nope"}', 'utf8');
-    await expect(PreferenceProfileStore.load(path)).rejects.toBeInstanceOf(
-      PreferenceProfileError,
-    );
+    await expect(PreferenceProfileStore.load(path)).rejects.toBeInstanceOf(PreferenceProfileError);
     await writeFile(path, 'not json', 'utf8');
-    await expect(PreferenceProfileStore.load(path)).rejects.toBeInstanceOf(
-      PreferenceProfileError,
-    );
+    await expect(PreferenceProfileStore.load(path)).rejects.toBeInstanceOf(PreferenceProfileError);
     expect(() => validatePreferenceProfile({ rules: [], denied: [{ provider: '' }] })).toThrow(
       PreferenceProfileError,
     );

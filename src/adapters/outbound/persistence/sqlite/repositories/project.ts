@@ -3,7 +3,12 @@
  */
 import type Database from 'better-sqlite3';
 
-import type { EntityId, Project, ProjectPolicies, RepoMetadata } from '../../../../../core/domain/types.js';
+import type {
+  EntityId,
+  Project,
+  ProjectPolicies,
+  RepoMetadata,
+} from '../../../../../core/domain/types.js';
 import type { ProjectRepositoryPort } from '../../../../../core/application/ports/outbound/repositories.js';
 import { BaseRepository } from './base.js';
 

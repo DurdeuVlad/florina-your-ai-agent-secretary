@@ -14,11 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { StorageDatabase, ContextCapsuleRepository } from '../src/storage/index.js';
-import {
-  buildProjectCapsule,
-  buildTaskCapsule,
-  buildSessionCapsule,
-} from '../src/domain/index.js';
+import { buildProjectCapsule, buildTaskCapsule, buildSessionCapsule } from '../src/domain/index.js';
 import type {
   ContextCapsule,
   ContextCapsuleScope,
@@ -185,15 +181,13 @@ describe('context isolation enforcement', () => {
   });
 
   it('validateScopeAccess throws on scope mismatch (same owner)', () => {
-    expect(() =>
-      validateScopeAccess('task', 'shared', 'project', 'shared'),
-    ).toThrow(ScopeAccessError);
+    expect(() => validateScopeAccess('task', 'shared', 'project', 'shared')).toThrow(
+      ScopeAccessError,
+    );
   });
 
   it('validateScopeAccess throws on owner mismatch (same scope)', () => {
-    expect(() => validateScopeAccess('task', 'task_A', 'task', 'task_B')).toThrow(
-      ScopeAccessError,
-    );
+    expect(() => validateScopeAccess('task', 'task_A', 'task', 'task_B')).toThrow(ScopeAccessError);
   });
 
   it('ScopeAccessError carries the mismatch details', () => {
@@ -371,9 +365,7 @@ describe('ContextRouter: switching scopes', () => {
 
     // A query scoped to proj_A must now be rejected — proj_A is no longer
     // the active context.
-    expect(() =>
-      router.queryActive('project', 'proj_A', () => 'leak'),
-    ).toThrow(ScopeAccessError);
+    expect(() => router.queryActive('project', 'proj_A', () => 'leak')).toThrow(ScopeAccessError);
   });
 });
 
@@ -440,9 +432,7 @@ describe('ContextRouter: cross-scope query rejection', () => {
     const active = router.getActiveContext();
     expect(active!.scope).toBe('task');
     // A project-scoped query is rejected outright.
-    expect(() => router.queryActive('project', 'proj_1', () => 'leak')).toThrow(
-      ScopeAccessError,
-    );
+    expect(() => router.queryActive('project', 'proj_1', () => 'leak')).toThrow(ScopeAccessError);
   });
 });
 
@@ -558,18 +548,14 @@ describe('ContextRouter: isolation between two project contexts (rapid switching
       expect(active.ownerId).toBe(first);
       expect(active.content.repoMetadata.path).toBe(`/repo/${firstMarker}`);
       // Cross-scope query to the OTHER project is rejected.
-      expect(() => router.queryActive('project', second, () => 'leak')).toThrow(
-        ScopeAccessError,
-      );
+      expect(() => router.queryActive('project', second, () => 'leak')).toThrow(ScopeAccessError);
 
       router.switchScope('project', second);
       active = router.getActiveContext() as ProjectCapsule;
       expect(active.ownerId).toBe(second);
       expect(active.content.repoMetadata.path).toBe(`/repo/${secondMarker}`);
       // Now the first project is the rejected one.
-      expect(() => router.queryActive('project', first, () => 'leak')).toThrow(
-        ScopeAccessError,
-      );
+      expect(() => router.queryActive('project', first, () => 'leak')).toThrow(ScopeAccessError);
     }
   });
 

@@ -37,7 +37,10 @@ export interface DaemonClientOptions {
  * output.
  */
 export class DaemonConnectionError extends Error {
-  constructor(message: string, readonly cause?: Error) {
+  constructor(
+    message: string,
+    readonly cause?: Error,
+  ) {
     super(message);
     this.name = 'DaemonConnectionError';
   }
@@ -100,10 +103,13 @@ export class DaemonClient {
         resolve(false);
         return;
       }
-      const timer = setTimeout(() => {
-        socket.terminate();
-        resolve(false);
-      }, Math.min(this.timeoutMs, 2000));
+      const timer = setTimeout(
+        () => {
+          socket.terminate();
+          resolve(false);
+        },
+        Math.min(this.timeoutMs, 2000),
+      );
       socket.once('open', () => {
         clearTimeout(timer);
         socket.close();
@@ -146,9 +152,7 @@ export class DaemonClient {
         try {
           parsed = JSON.parse(text);
         } catch (err) {
-          reject(
-            new DaemonConnectionError('Malformed response from daemon', err as Error),
-          );
+          reject(new DaemonConnectionError('Malformed response from daemon', err as Error));
           socket.close();
           return;
         }
@@ -182,5 +186,8 @@ function toConnectionError(err: unknown, url: string): DaemonConnectionError {
       err instanceof Error ? err : undefined,
     );
   }
-  return new DaemonConnectionError(`Daemon connection failed: ${msg}`, err instanceof Error ? err : undefined);
+  return new DaemonConnectionError(
+    `Daemon connection failed: ${msg}`,
+    err instanceof Error ? err : undefined,
+  );
 }
