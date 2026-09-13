@@ -196,9 +196,14 @@ export class WebSocketControlPlaneServer {
         (parsed as { type?: unknown }).type === 'auth'
       ) {
         const token = (parsed as { token?: unknown }).token;
-        if (token === this.options.authToken) {
-          authenticated = true;
-          registerStream();
+        if (!authRequired || token === this.options.authToken) {
+          // Tolerate auth handshakes on an unauthenticated-free server so
+          // token-bearing clients interoperate with older daemons. Only
+          // register the stream once — open connections already registered.
+          if (!authenticated) {
+            authenticated = true;
+            registerStream();
+          }
           if (socket.readyState === socket.OPEN) {
             socket.send(JSON.stringify({ type: 'auth', ok: true }));
           }

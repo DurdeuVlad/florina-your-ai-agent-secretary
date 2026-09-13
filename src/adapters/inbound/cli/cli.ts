@@ -509,9 +509,8 @@ async function cmdVoice(ctx: CommandContext): Promise<CommandResult> {
 
   try {
     // The voice session connects to the daemon's command API via the same
-    // WebSocket client the CLI uses. We create a long-lived client that
-    // stays open for the duration of the voice session.
-    const voiceClient = new DaemonClient();
+    // WebSocket client the CLI uses — including its local auth token (#118).
+    const voiceClient = ctx.deps.client;
 
     // Create a minimal command API proxy that routes execute() calls over
     // the WebSocket client. The voice session calls this for each tool call

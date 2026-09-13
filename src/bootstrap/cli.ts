@@ -10,6 +10,7 @@
 import { DaemonClient } from '../adapters/inbound/cli/client.js';
 import { runCli } from '../adapters/inbound/cli/cli.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
+import { readLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
 import { DaemonRunner } from './daemon-runner.js';
 import { createStdinVoiceSession } from './voice-session.js';
 
@@ -23,7 +24,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   // file before the CLI reads process.env. Real env vars always win.
   loadEnvFile();
   return runCli(argv, {
-    client: new DaemonClient(),
+    // #118: authenticate to the daemon's control plane with the local
+    // token the daemon provisioned at start (~/.florina/auth-token).
+    client: new DaemonClient({ authToken: readLocalAuthToken() }),
     runner: new DaemonRunner(),
     createVoiceSession: createStdinVoiceSession,
   });

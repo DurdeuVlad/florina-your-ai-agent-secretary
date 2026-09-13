@@ -22,6 +22,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { FlorinaDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_MCP_PORT } from './daemon.js';
+import { ensureLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
 
 /** Default PID file location (per-user OS temp dir). */
 export const DEFAULT_PID_FILE = path.join(os.tmpdir(), 'florina.pid');
@@ -44,6 +45,13 @@ export interface DaemonRunnerOptions {
    * `null` to disable the MCP surface, `0` for an OS-assigned port.
    */
   readonly mcpPort?: number | null;
+  /**
+   * Directory holding the local control-plane auth token (issue #118).
+   * Defaults to `dirname(dbPath)` so a test temp database gets an isolated
+   * token. Pass `null` to start the daemon without local auth (not
+   * recommended — the control plane is then open to any local process).
+   */
+  readonly authTokenDir?: string | null;
 }
 
 /** Status snapshot returned by {@link DaemonRunner.status}. */
@@ -69,6 +77,7 @@ export class DaemonRunner {
   private readonly dbPath: string;
   private readonly lockfile: string;
   private readonly mcpPort: number | null;
+  private readonly authTokenDir: string | null;
   private daemon: FlorinaDaemon | null = null;
 
   constructor(options: DaemonRunnerOptions = {}) {
@@ -77,6 +86,8 @@ export class DaemonRunner {
     this.dbPath = options.dbPath ?? DEFAULT_DB_PATH;
     this.lockfile = options.lockfile ?? path.join(os.tmpdir(), 'florina.lock');
     this.mcpPort = options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort;
+    this.authTokenDir =
+      options.authTokenDir === undefined ? path.dirname(this.dbPath) : options.authTokenDir;
   }
 
   /**
@@ -105,6 +116,11 @@ export class DaemonRunner {
       lockfile: this.lockfile,
       mcpPort: this.mcpPort,
       installSignalHandlers: true,
+      // Local control-plane auth (#118): provision a token so the socket
+      // rejects unauthenticated commands. Surfaces read the same file.
+      ...(this.authTokenDir !== null
+        ? { authToken: ensureLocalAuthToken(this.authTokenDir) }
+        : {}),
     });
     await this.daemon.start();
     this.writePid(process.pid);

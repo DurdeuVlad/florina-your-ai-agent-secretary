@@ -25,6 +25,7 @@ import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-t
 import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-backend.js';
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
+import { readLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
 
 // Same `.env` convenience as the CLI (#116) — FLORINA_DAEMON_URL and friends
 // resolve from the project file when the caller didn't export them.
@@ -89,7 +90,7 @@ async function main(): Promise<void> {
   window.loadFile(RENDERER_HTML);
 
   try {
-    await desktopApp.connectToDaemon(DAEMON_URL);
+    await desktopApp.connectToDaemon(DAEMON_URL, readLocalAuthToken());
   } catch {
     // The renderer surfaces the disconnected state and retries on its own.
   }
