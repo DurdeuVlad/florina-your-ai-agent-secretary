@@ -6,3 +6,4 @@ export * from './security/index.js';
 export * from './secretary/index.js';
 export * from './tasks/index.js';
 export * from './capabilities/index.js';
+export * from './voice/index.js';

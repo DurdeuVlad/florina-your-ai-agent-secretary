@@ -588,6 +588,11 @@ describe('src/core boundary conformance', () => {
       'secretary/loop.ts',
       'secretary/preference-tool.ts',
       'secretary/index.ts',
+      'voice/voice-pipeline.ts',
+      'voice/response-parser.ts',
+      'voice/voice-approver.ts',
+      'voice/approval-router.ts',
+      'voice/index.ts',
     ]) {
       expect(
         fs.existsSync(path.join(CORE_DIR, 'application', 'use-cases', rel)),
@@ -666,6 +671,10 @@ describe('migrated use-case compatibility facades', () => {
     'src/storage/context-resolver.ts',
     'src/security/audit-report.ts',
     'src/security/hardening.ts',
+    'src/voice/voice-pipeline.ts',
+    'src/voice/response-parser.ts',
+    'src/voice/voice-approver.ts',
+    'src/voice/approval-router.ts',
   ];
 
   it('each migrated legacy file is a facade into src/core/application/use-cases', () => {
@@ -762,6 +771,17 @@ describe('migrated use-case compatibility facades', () => {
       ],
       'src/adapters/outbound/voice/realtime-bridge.ts': [
         'src/core/application/ports/outbound/voice.ts',
+      ],
+      'src/adapters/outbound/voice/whisper-adapter.ts': [
+        'src/core/application/ports/outbound/voice.ts',
+      ],
+      // The core voice pipeline orchestrates ports only — it must import
+      // the voice port and nothing outside src/core.
+      'src/core/application/use-cases/voice/voice-pipeline.ts': [
+        'src/core/application/ports/outbound/voice.ts',
+      ],
+      'src/core/application/use-cases/voice/approval-router.ts': [
+        'src/core/application/ports/outbound/event-stream.ts',
       ],
       'src/adapters/outbound/security/filesystem-security-auditor.ts': [
         'src/core/application/use-cases/security/audit-report.ts',
@@ -1096,5 +1116,228 @@ describe('migrated outbound compatibility facades', () => {
         allowClasses: true,
       }),
     ).toEqual([]);
+  });
+});
+
+const INBOUND_PREFIX = 'src/adapters/inbound/';
+const INBOUND_ROOT_BARREL = 'src/adapters/inbound/index.ts';
+
+/** The adapter family of a path: first segment after `src/adapters/inbound/`. */
+function inboundFamily(relPath: string): string {
+  return relPath.slice(INBOUND_PREFIX.length).split('/')[0] ?? '';
+}
+
+/**
+ * Evaluate one import edge for a file under `src/adapters/inbound`.
+ * Inbound adapters may import `src/core/**`, siblings inside the same
+ * adapter family, node builtins, and external packages — nothing else (no
+ * outbound adapters, bootstrap composition, legacy paths, or other adapter
+ * families). `src/adapters/inbound/index.ts` is the only root barrel and
+ * may additionally import each family's `index.ts`.
+ */
+function inboundEdgeViolation(edge: ImportEdge): string | null {
+  if (!edge.source.startsWith(INBOUND_PREFIX)) {
+    return null;
+  }
+  if (!isRelativeSpecifier(edge.specifier)) {
+    return null; // node builtin or external package — allowed in adapters
+  }
+  if (edge.target === null) {
+    return `${edge.source} -> ${edge.specifier} (unresolvable module specifier)`;
+  }
+  if (edge.target.startsWith('src/core/')) {
+    return null;
+  }
+  if (!edge.target.startsWith(INBOUND_PREFIX)) {
+    return (
+      `${edge.source} -> ${edge.target} ` +
+      '(inbound adapters may only import src/core or their same adapter family)'
+    );
+  }
+  if (edge.source === INBOUND_ROOT_BARREL) {
+    return edge.target.endsWith('/index.ts')
+      ? null
+      : `${edge.source} -> ${edge.target} (the root barrel may only import family barrels)`;
+  }
+  if (inboundFamily(edge.source) === inboundFamily(edge.target)) {
+    return null;
+  }
+  return (
+    `${edge.source} -> ${edge.target} ` +
+    '(cross-family import: inbound adapters may only import src/core or ' +
+    'their same adapter family)'
+  );
+}
+
+describe('src/adapters/inbound tree', () => {
+  const INBOUND_EXPECTED: readonly string[] = [
+    // Desktop inbound adapter family
+    'desktop/desktop-app.ts',
+    'desktop/hotkeys.ts',
+    'desktop/ipc-bridge.ts',
+    'desktop/keyboard-nav.ts',
+    'desktop/renderer-state.ts',
+    'desktop/system-tray.ts',
+    'desktop/window-backend.ts',
+    'desktop/index.ts',
+    'desktop/views/approval-card.ts',
+    'desktop/views/approval-templates.ts',
+    'desktop/views/approval-types.ts',
+    'desktop/views/diff-view.ts',
+    'desktop/views/digest-diff-templates.ts',
+    'desktop/views/digest-diff-types.ts',
+    'desktop/views/digest-diff-viewer.ts',
+    'desktop/views/digest-templates.ts',
+    'desktop/views/digest-types.ts',
+    'desktop/views/digest-view.ts',
+    'desktop/views/inbox-templates.ts',
+    'desktop/views/inbox-view.ts',
+    'desktop/views/ptt-hud.ts',
+    'desktop/views/ptt-templates.ts',
+    'desktop/views/view-types.ts',
+    // Inbound barrel
+    'index.ts',
+  ];
+
+  it('the expected inbound adapter tree exists', () => {
+    const missing = INBOUND_EXPECTED.filter(
+      (rel) => !fs.existsSync(path.join(SRC_DIR, 'adapters', 'inbound', rel)),
+    );
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('src/adapters/inbound boundary conformance', () => {
+  it('inbound edge classification allows core, same adapter family, node, and packages', () => {
+    const legal: readonly ImportEdge[] = [
+      {
+        source: 'src/adapters/inbound/desktop/desktop-app.ts',
+        specifier: '../../../core/application/use-cases/tasks/command-api.js',
+        target: 'src/core/application/use-cases/tasks/command-api.ts',
+      },
+      {
+        source: 'src/adapters/inbound/desktop/desktop-app.ts',
+        specifier: './renderer-state.js',
+        target: 'src/adapters/inbound/desktop/renderer-state.ts',
+      },
+      {
+        source: 'src/adapters/inbound/desktop/views/inbox-view.ts',
+        specifier: '../desktop-app.js',
+        target: 'src/adapters/inbound/desktop/desktop-app.ts',
+      },
+      {
+        source: 'src/adapters/inbound/desktop/ipc-bridge.ts',
+        specifier: 'node:events',
+        target: null,
+      },
+      {
+        source: 'src/adapters/inbound/desktop/ipc-bridge.ts',
+        specifier: 'ws',
+        target: null,
+      },
+      {
+        source: 'src/adapters/inbound/index.ts',
+        specifier: './desktop/index.js',
+        target: 'src/adapters/inbound/desktop/index.ts',
+      },
+    ];
+    for (const edge of legal) {
+      expect(inboundEdgeViolation(edge)).toBeNull();
+    }
+  });
+
+  it('inbound edge classification rejects outbound, bootstrap, legacy, and cross-family edges', () => {
+    const illegal: readonly ImportEdge[] = [
+      {
+        source: 'src/adapters/inbound/desktop/desktop-app.ts',
+        specifier: '../../outbound/events/in-memory-event-bus.js',
+        target: 'src/adapters/outbound/events/in-memory-event-bus.ts',
+      },
+      {
+        source: 'src/adapters/inbound/desktop/desktop-app.ts',
+        specifier: '../../bootstrap/index.js',
+        target: 'src/bootstrap/index.ts',
+      },
+      {
+        source: 'src/adapters/inbound/desktop/desktop-app.ts',
+        specifier: '../../daemon/command-api.js',
+        target: 'src/daemon/command-api.ts',
+      },
+      {
+        // Cross-family import: desktop must not reach into another inbound
+        // family — concrete combinations happen in bootstrap.
+        source: 'src/adapters/inbound/desktop/ptt-hud.ts',
+        specifier: '../voice/realtime-bridge.js',
+        target: 'src/adapters/inbound/voice/realtime-bridge.ts',
+      },
+      {
+        // The root barrel may only import family barrels.
+        source: 'src/adapters/inbound/index.ts',
+        specifier: './desktop/desktop-app.js',
+        target: 'src/adapters/inbound/desktop/desktop-app.ts',
+      },
+      {
+        source: 'src/adapters/inbound/desktop/desktop-app.ts',
+        specifier: './does-not-exist.js',
+        target: null,
+      },
+    ];
+    for (const edge of illegal) {
+      expect(inboundEdgeViolation(edge)).not.toBeNull();
+    }
+    // Non-inbound sources are never flagged by the inbound rule.
+    expect(
+      inboundEdgeViolation({
+        source: 'src/daemon/daemon.ts',
+        specifier: '../storage/index.js',
+        target: 'src/storage/index.ts',
+      }),
+    ).toBeNull();
+  });
+
+  it('no file under src/adapters/inbound imports outside core or its same adapter family', () => {
+    const inboundDir = path.join(SRC_DIR, 'adapters', 'inbound');
+    const inboundFiles = listTsFiles(inboundDir);
+    expect(inboundFiles.length).toBeGreaterThan(0);
+    const violations = inboundFiles
+      .flatMap((f) => collectEdges(f))
+      .map(inboundEdgeViolation)
+      .filter((v): v is string => v !== null);
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('migrated inbound compatibility facades', () => {
+  const INBOUND_FACADES: readonly string[] = [
+    'src/desktop/desktop-app.ts',
+    'src/desktop/hotkeys.ts',
+    'src/desktop/index.ts',
+    'src/desktop/ipc-bridge.ts',
+    'src/desktop/keyboard-nav.ts',
+    'src/desktop/renderer-state.ts',
+    'src/desktop/system-tray.ts',
+    'src/desktop/window-backend.ts',
+    'src/desktop/views/approval-card.ts',
+    'src/desktop/views/approval-templates.ts',
+    'src/desktop/views/approval-types.ts',
+    'src/desktop/views/diff-view.ts',
+    'src/desktop/views/digest-diff-templates.ts',
+    'src/desktop/views/digest-diff-types.ts',
+    'src/desktop/views/digest-diff-viewer.ts',
+    'src/desktop/views/digest-templates.ts',
+    'src/desktop/views/digest-types.ts',
+    'src/desktop/views/digest-view.ts',
+    'src/desktop/views/inbox-templates.ts',
+    'src/desktop/views/inbox-view.ts',
+    'src/desktop/views/ptt-hud.ts',
+    'src/desktop/views/ptt-templates.ts',
+    'src/desktop/views/view-types.ts',
+  ];
+
+  it('each moved desktop file is a facade into src/adapters/inbound', () => {
+    const violations = INBOUND_FACADES.flatMap((rel) =>
+      facadeViolations(path.join(REPO_ROOT, rel), 'src/adapters/inbound/'),
+    );
+    expect(violations).toEqual([]);
   });
 });

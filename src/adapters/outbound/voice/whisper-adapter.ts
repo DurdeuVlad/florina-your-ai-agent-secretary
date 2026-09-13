@@ -10,7 +10,11 @@
  * This is the local/offline privacy alternative to the OpenAI Realtime API
  * path (#21). Higher latency is accepted; no third-party API keys required.
  */
-import type { AudioChunk } from '../../../core/application/ports/outbound/voice.js';
+import type {
+  AudioChunk,
+  TranscriptionPort,
+  TranscriptResult as CoreTranscriptResult,
+} from '../../../core/application/ports/outbound/voice.js';
 import type {
   WhisperBackend,
   WhisperCliOptions,
@@ -28,7 +32,7 @@ import { DEFAULT_WHISPER_CLI_OPTIONS } from './whisper-backend.js';
  * Unlike the streaming {@link TranscriptEvent} from the Realtime path, this
  * is a single final result — whisper.cpp transcribes a full buffer at once.
  */
-export interface TranscriptResult {
+export interface TranscriptResult extends CoreTranscriptResult {
   /** Full transcribed text (all segments concatenated). */
   readonly text: string;
   /** Overall confidence in [0, 1], derived from segment log-probs. */
@@ -162,7 +166,7 @@ export function concatAudioChunks(chunks: readonly AudioChunk[]): Buffer {
  * model, then {@link WhisperAdapter.transcribe} to convert audio chunks into
  * a {@link TranscriptResult}.
  */
-export class WhisperAdapter {
+export class WhisperAdapter implements TranscriptionPort<TranscriptResult> {
   private readonly backend: WhisperBackend;
   private initialized = false;
   /**

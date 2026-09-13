@@ -154,3 +154,62 @@ export type VoiceEvent =
   | { readonly type: 'response'; readonly response: ResponseEvent }
   | { readonly type: 'error'; readonly error: VoiceErrorEvent }
   | { readonly type: 'state'; readonly state: VoiceStateChangeEvent };
+
+/* ================================================================== *
+ * Voice engine ports (issue #93)
+ * ================================================================== */
+
+/**
+ * A completed speech-to-text transcription. Unlike a streaming
+ * {@link TranscriptEvent}, this is a single final result — an engine
+ * transcribes a full audio buffer at once.
+ */
+export interface TranscriptResult {
+  /** Full transcribed text. */
+  readonly text: string;
+  /** Overall confidence in [0, 1]. */
+  readonly confidence: number;
+  /** Detected / forced language code, when the engine reports one. */
+  readonly language?: string;
+  /** Transcription wall-clock duration, when the engine reports it. */
+  readonly durationMs?: number;
+}
+
+/**
+ * The realtime (streaming) voice engine boundary. The application invokes
+ * the concrete bridge through this port so the pipeline stays
+ * provider-neutral.
+ */
+export interface RealtimeVoicePort {
+  /** Current session state of the realtime engine. */
+  readonly currentState: VoiceSessionState;
+  /** Whether the realtime connection is currently open. */
+  readonly isConnected: boolean;
+  /** Subscribe to transcript events. Returns an unsubscribe function. */
+  onTranscript(callback: (event: TranscriptEvent) => void): () => void;
+  /** Subscribe to session-state changes. Returns an unsubscribe function. */
+  onStateChange(callback: (event: VoiceStateChangeEvent) => void): () => void;
+}
+
+/**
+ * The offline/batch transcription engine boundary (e.g. a local whisper
+ * backend). The application calls {@link TranscriptionPort.transcribe} with
+ * captured {@link AudioChunk}s and receives one final result.
+ *
+ * `TResult` lets a concrete engine expose a richer result type (e.g.
+ * per-segment timings) while still satisfying the port — consumers that
+ * only need the provider-neutral contract default to
+ * {@link TranscriptResult}.
+ */
+export interface TranscriptionPort<
+  TResult extends TranscriptResult = TranscriptResult,
+> {
+  /** Whether the engine has been initialized. */
+  readonly isInitialized: boolean;
+  /** Transcribe a batch of audio chunks into a final result. */
+  transcribe(chunks: readonly AudioChunk[]): Promise<TResult>;
+  /** Whether the engine is usable in this environment. */
+  isAvailable(): Promise<boolean>;
+  /** Release engine resources. */
+  close(): Promise<void>;
+}
