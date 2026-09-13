@@ -104,6 +104,14 @@ nav {
   background: var(--green);
   box-shadow: 0 0 6px var(--green);
 }
+.dot.wait {
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+}
+.dot.err {
+  background: var(--red);
+  box-shadow: 0 0 6px var(--red);
+}
 
 main {
   flex: 1;

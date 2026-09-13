@@ -344,6 +344,8 @@ function statusLabel(status: DaemonStatus): string {
       return 'Daemon: Connected';
     case 'connecting':
       return 'Daemon: Connecting…';
+    case 'reconnecting':
+      return 'Daemon: Reconnecting…';
     case 'error':
       return 'Daemon: Error';
     case 'disconnected':
@@ -358,6 +360,7 @@ function statusIcon(status: DaemonStatus): string {
     case 'connected':
       return 'circle-check';
     case 'connecting':
+    case 'reconnecting':
       return 'circle-dots';
     case 'error':
       return 'circle-x';
@@ -373,6 +376,7 @@ function statusColor(status: DaemonStatus): string {
     case 'connected':
       return 'green';
     case 'connecting':
+    case 'reconnecting':
       return 'amber';
     case 'error':
       return 'red';
