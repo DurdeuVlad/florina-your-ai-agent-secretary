@@ -59,6 +59,8 @@ import { AttentionAggregator } from '../core/application/use-cases/attention/att
 import { collectHealth } from '../core/application/use-cases/health.js';
 import type { HealthStatus } from '../core/application/use-cases/health.js';
 import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
+import { CapacityRouter } from '../core/application/use-cases/routing/capacity-router.js';
+import { FailoverService } from '../core/application/use-cases/tasks/failover.js';
 import { PreferenceProfileStore } from '../adapters/outbound/preferences/json-preference-profile.js';
 import { SecretaryMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
 import { managerServiceFactory } from './mcp-server.js';
@@ -146,6 +148,7 @@ export class SecretaryDaemon extends EventEmitter {
   private sessionManager: SessionManager | null = null;
   private quotaLedger: QuotaLedger | null = null;
   private preferenceStore: PreferenceProfileStore | null = null;
+  private failoverService: FailoverService | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -203,6 +206,15 @@ export class SecretaryDaemon extends EventEmitter {
   /** Exposed for tests to inspect the wired SessionManager. */
   get sessionManager$(): SessionManager | null {
     return this.sessionManager;
+  }
+
+  /**
+   * The wired failover service (issue #64). Quota readers and adapter error
+   * paths call this to freeze a task and re-route it to a provider with
+   * capacity; `resumeParkedTasks` brings parked work back when quota resets.
+   */
+  get failover(): FailoverService | null {
+    return this.failoverService;
   }
 
   /**
@@ -287,6 +299,25 @@ export class SecretaryDaemon extends EventEmitter {
       // (and through it every manager spawn) enforces (DEC-029, issue #63).
       this.quotaLedger = new QuotaLedger();
       this.preferenceStore = await PreferenceProfileStore.load(this.options.preferenceProfilePath);
+
+      // Wire cross-provider failover (issue #64): freezes a task's session,
+      // blocks it, re-routes through a freshly-built CapacityRouter (so
+      // preference-profile edits apply at failover time), and resumes in the
+      // same worktree with a Task-Capsule briefing — or parks until quota
+      // returns.
+      const quotaLedger = this.quotaLedger;
+      const preferenceStore = this.preferenceStore;
+      this.failoverService = new FailoverService({
+        commandApi: this.commandApi,
+        taskStateMachine: this.taskStateMachine,
+        sessionManager: this.sessionManager,
+        router: () =>
+          new CapacityRouter({ ledger: quotaLedger, profile: preferenceStore.toProfile() }),
+        taskStore: repos.tasks,
+        eventBus: this.bus,
+        journal: repos.events,
+        capsuleStore: repos.capsules,
+      });
 
       // Wire the manager MCP surface (DEC-018, issue #63): an HTTP
       // transport on its own localhost port serving the per-project
@@ -527,6 +558,7 @@ export class SecretaryDaemon extends EventEmitter {
     this.adapterRegistry = null;
     this.quotaLedger = null;
     this.preferenceStore = null;
+    this.failoverService = null;
   }
 
   private setState(state: DaemonState): void {

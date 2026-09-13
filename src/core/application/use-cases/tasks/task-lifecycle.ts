@@ -30,10 +30,7 @@ import type {
   Task,
 } from '../../../domain/types.js';
 import { TaskState } from '../../../domain/enums.js';
-import type {
-  EventJournalPort,
-  TaskRepositoryPort,
-} from '../../ports/outbound/repositories.js';
+import type { EventJournalPort, TaskRepositoryPort } from '../../ports/outbound/repositories.js';
 
 /**
  * Error thrown when a requested state transition is not permitted by the
@@ -46,9 +43,7 @@ export class IllegalTransitionError extends Error {
   readonly toState: string;
 
   constructor(taskId: EntityId, fromState: string, toState: string, reason: string) {
-    super(
-      `Illegal task transition for task "${taskId}": ${fromState} -> ${toState}. ${reason}`,
-    );
+    super(`Illegal task transition for task "${taskId}": ${fromState} -> ${toState}. ${reason}`);
     this.name = 'IllegalTransitionError';
     this.taskId = taskId;
     this.fromState = fromState;
@@ -75,13 +70,12 @@ const TERMINAL_STATES: ReadonlySet<TaskState> = new Set<TaskState>([
  * transition to `cancelled` or `failed`).
  */
 const TRANSITION_TABLE: Readonly<Record<TaskState, readonly TaskState[]>> = {
-  [TaskState.Created]: [
-    TaskState.Delegated,
-    TaskState.Cancelled,
-    TaskState.Failed,
-  ],
+  [TaskState.Created]: [TaskState.Delegated, TaskState.Cancelled, TaskState.Failed],
   [TaskState.Delegated]: [
     TaskState.Running,
+    // A delegated task may block before its first progress event — e.g. the
+    // provider died or exhausted quota mid-delegation (issue #64 failover).
+    TaskState.Blocked,
     TaskState.Cancelled,
     TaskState.Failed,
   ],
@@ -98,22 +92,14 @@ const TRANSITION_TABLE: Readonly<Record<TaskState, readonly TaskState[]>> = {
     TaskState.Failed,
     TaskState.Cancelled,
   ],
-  [TaskState.Blocked]: [
-    TaskState.Running,
-    TaskState.Failed,
-    TaskState.Cancelled,
-  ],
+  [TaskState.Blocked]: [TaskState.Running, TaskState.Failed, TaskState.Cancelled],
   [TaskState.Completed]: [
     TaskState.Reviewed,
     TaskState.Accepted,
     TaskState.Failed,
     TaskState.Cancelled,
   ],
-  [TaskState.Reviewed]: [
-    TaskState.Accepted,
-    TaskState.Failed,
-    TaskState.Cancelled,
-  ],
+  [TaskState.Reviewed]: [TaskState.Accepted, TaskState.Failed, TaskState.Cancelled],
   [TaskState.Accepted]: [],
   [TaskState.Failed]: [],
   [TaskState.Cancelled]: [],
@@ -142,6 +128,7 @@ const TRANSITION_EVENT_KIND: Readonly<Record<string, SupervisorEventKind>> = {
   'created->delegated': 'AgentStarted',
   // delegated
   'delegated->running': 'AgentProgress',
+  'delegated->blocked': 'AgentBlocked',
   // running
   'running->attention-needed': 'ApprovalRequested',
   'running->blocked': 'AgentBlocked',

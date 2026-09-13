@@ -80,6 +80,13 @@ export interface SessionConfig {
   readonly autonomyLevel?: string;
   /** Adapter fidelity tier of the agent (defaults to `B`). */
   readonly adapterFidelityTier?: AdapterFidelityTier;
+  /**
+   * Prompt override for the adapter session. When omitted, the task's
+   * `objective` is sent. Failover uses this to prime a new provider with a
+   * Task-Capsule briefing without mutating the task's recorded objective
+   * (issue #64).
+   */
+  readonly prompt?: string;
 }
 
 /**
@@ -646,7 +653,15 @@ export class CommandApi {
     // Validate the state transition is possible before any side effects.
     // This ensures we fail fast without mutating DB state or starting an
     // adapter session that would then need to be rolled back.
-    if (currentState !== TaskState.Created && currentState !== TaskState.Delegated) {
+    // `blocked` and `attention-needed` are resumable states: a parked
+    // (quota-exhausted) or attention-flagged task starts again by
+    // transitioning to `running` (issue #64 failover/park-resume).
+    const startable =
+      currentState === TaskState.Created ||
+      currentState === TaskState.Delegated ||
+      currentState === TaskState.Blocked ||
+      currentState === TaskState.AttentionNeeded;
+    if (!startable) {
       return {
         ok: false,
         taskId: cmd.taskId,
@@ -687,7 +702,7 @@ export class CommandApi {
         sessionId,
         agentId: cmd.agentId,
         workingDir: cmd.sessionConfig.workingDir,
-        objective: task.objective,
+        objective: cmd.sessionConfig.prompt ?? task.objective,
         model: cmd.sessionConfig.model,
         autonomyLevel: cmd.sessionConfig.autonomyLevel,
       };
@@ -763,7 +778,7 @@ export class CommandApi {
       if (currentState === TaskState.Created) {
         this.taskStateMachine.transition(cmd.taskId, TaskState.Created, TaskState.Delegated, ctx);
       } else {
-        this.taskStateMachine.transition(cmd.taskId, TaskState.Delegated, TaskState.Running, ctx);
+        this.taskStateMachine.transition(cmd.taskId, currentState, TaskState.Running, ctx);
       }
     } catch (err) {
       // Revert the task update to remove the phantom sessionId/agentId.
