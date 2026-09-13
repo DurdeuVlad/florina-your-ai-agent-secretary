@@ -72,6 +72,11 @@ export const KIND_METADATA: Readonly<Record<AttentionItemKind, DisplayMetadata>>
     color: 'blue',
     label: 'Digest',
   },
+  UnverifiedCompletion: {
+    icon: 'shield',
+    color: 'amber',
+    label: 'Unverified Completion',
+  },
   Custom: {
     icon: 'info',
     color: 'slate',
@@ -82,9 +87,7 @@ export const KIND_METADATA: Readonly<Record<AttentionItemKind, DisplayMetadata>>
 /**
  * Display metadata for each {@link AttentionItemPriority}: icon, color, label.
  */
-export const PRIORITY_METADATA: Readonly<
-  Record<AttentionItemPriority, DisplayMetadata>
-> = {
+export const PRIORITY_METADATA: Readonly<Record<AttentionItemPriority, DisplayMetadata>> = {
   Critical: {
     icon: 'flame',
     color: 'red',
@@ -142,10 +145,7 @@ export class InboxViewModel {
    * array instead of an {@link AttentionInbox}, useful when rendering from a
    * persisted snapshot or daemon reply.
    */
-  buildViewFromItems(
-    items: readonly AttentionItem[],
-    filter?: ViewFilter,
-  ): InboxViewData {
+  buildViewFromItems(items: readonly AttentionItem[], filter?: ViewFilter): InboxViewData {
     // Apply the view filter (defensive — the source may already be filtered).
     const filtered = items.filter((item) => matchesViewFilter(item, filter));
 
@@ -210,9 +210,7 @@ export class InboxViewModel {
  * ------------------------------------------------------------------ */
 
 /** Convert a {@link ViewFilter} into the inbox's native filter shape. */
-function toInboxFilter(
-  filter?: ViewFilter,
-):
+function toInboxFilter(filter?: ViewFilter):
   | {
       status?: AttentionItemView['status'];
       kind?: AttentionItemKind;
@@ -235,8 +233,7 @@ function matchesViewFilter(item: AttentionItem, filter?: ViewFilter): boolean {
   if (filter.status !== undefined && item.status !== filter.status) return false;
   if (filter.kind !== undefined && item.kind !== filter.kind) return false;
   if (filter.taskId !== undefined && item.taskId !== filter.taskId) return false;
-  if (filter.priority !== undefined && item.priority !== filter.priority)
-    return false;
+  if (filter.priority !== undefined && item.priority !== filter.priority) return false;
   return true;
 }
 
