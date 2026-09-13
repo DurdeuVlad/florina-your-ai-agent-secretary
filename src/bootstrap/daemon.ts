@@ -524,6 +524,9 @@ export class SecretaryDaemon extends EventEmitter {
             quotaLedger: this.quotaLedger,
             preferenceStore: this.preferenceStore,
             projects: repos.projects,
+            // Resolved lazily — the server binds after this factory is
+            // composed, so the URL only exists post-start().
+            mcpUrl: () => this.mcpUrl ?? undefined,
           }),
           onError: (err) => this.emit('error', err),
         });

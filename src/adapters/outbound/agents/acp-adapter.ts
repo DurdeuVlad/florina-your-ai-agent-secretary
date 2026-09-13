@@ -204,7 +204,15 @@ export class AcpAdapter extends BaseAdapter {
 
     const created = (await this.request('session/new', {
       cwd: sessionConfig.workingDir,
-      mcpServers: [],
+      mcpServers: (sessionConfig.mcpServers ?? []).map((spec) => ({
+        type: 'http',
+        name: spec.name,
+        url: spec.url,
+        headers: Object.entries(spec.headers ?? {}).map(([name, value]) => ({
+          name,
+          value,
+        })),
+      })),
     })) as { sessionId?: string } | null;
     this.acpSessionId = created?.sessionId ?? sessionConfig.sessionId;
 
@@ -559,7 +567,9 @@ export class AcpAdapter extends BaseAdapter {
 }
 
 /** Map an ACP tool-call kind onto the DEC-010 capability vocabulary. */
-function acpKindToCapability(kind: string | undefined): 'shell' | 'filesystem' | 'network' | 'other' {
+function acpKindToCapability(
+  kind: string | undefined,
+): 'shell' | 'filesystem' | 'network' | 'other' {
   switch (kind) {
     case 'execute':
       return 'shell';

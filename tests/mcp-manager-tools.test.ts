@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { ManagerToolService } from '../src/core/application/use-cases/managers/manager-tools.js';
+import {
+  ManagerToolService,
+  secretaryMcpSpec,
+} from '../src/core/application/use-cases/managers/manager-tools.js';
 import { CommandApi } from '../src/core/application/use-cases/tasks/command-api.js';
 import type { CommandApiDeps } from '../src/core/application/use-cases/tasks/command-api.js';
 import { CapacityRouter } from '../src/core/application/use-cases/routing/capacity-router.js';
@@ -30,6 +33,7 @@ interface Fixture {
 
 function createFixture(
   rules: { provider: string; model?: string; workTypes?: string[] }[],
+  mcpUrl?: string,
 ): Fixture {
   const db = new StorageDatabase({ path: ':memory:' });
   db.open();
@@ -96,6 +100,7 @@ function createFixture(
     worktreeManager: { createWorktree },
     repoPath: '/repo',
     projectId: project.id,
+    ...(mcpUrl !== undefined ? { mcpUrl } : {}),
   });
   return {
     service,
@@ -192,5 +197,62 @@ describe('ManagerToolService', () => {
     const cancelled = await fx.service.listTasks({ status: TaskState.Cancelled });
     expect(cancelled).toHaveLength(0);
     expect(running.length + cancelled.length).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('manager launch config (issue #63)', () => {
+  const MCP_URL = 'http://127.0.0.1:9090/mcp';
+
+  it('secretaryMcpSpec carries the project-scoping header', () => {
+    expect(secretaryMcpSpec(MCP_URL, 'proj-1')).toEqual({
+      name: 'secretary',
+      url: MCP_URL,
+      headers: { 'x-secretary-project': 'proj-1' },
+    });
+  });
+
+  it('spawnManagerTask registers the Secretary MCP server in the launch config', async () => {
+    const fx = createFixture([{ provider: 'codex' }], MCP_URL);
+    const execute = vi.spyOn(fx.api, 'execute');
+    const res = await fx.service.spawnManagerTask({ objective: 'manage project alpha' });
+    expect(res.status).toBe('spawned');
+    const startCall = execute.mock.calls.map(([cmd]) => cmd).find((c) => c.kind === 'start-task');
+    expect(startCall).toBeDefined();
+    if (startCall?.kind === 'start-task') {
+      expect(startCall.sessionConfig.mcpServers).toEqual([
+        {
+          name: 'secretary',
+          url: MCP_URL,
+          headers: { 'x-secretary-project': fx.projectId },
+        },
+      ]);
+    }
+  });
+
+  it('spawnManagerTask routes under the manage work type', async () => {
+    const fx = createFixture([{ provider: 'codex', workTypes: ['manage'] }], MCP_URL);
+    const res = await fx.service.spawnManagerTask({ objective: 'manage it' });
+    expect(res).toMatchObject({ status: 'spawned', provider: 'codex' });
+  });
+
+  it('spawnManagerTask errors when the MCP server is not listening', async () => {
+    const fx = createFixture([{ provider: 'codex' }]); // no mcpUrl
+    const res = await fx.service.spawnManagerTask({ objective: 'manage it' });
+    expect(res.status).toBe('error');
+    if (res.status === 'error') {
+      expect(res.error).toContain('MCP');
+    }
+    expect(fx.taskStore.listAll()).toHaveLength(0);
+    expect(fx.createWorktree).not.toHaveBeenCalled();
+  });
+
+  it('spawnTask workers do NOT get the MCP registration', async () => {
+    const fx = createFixture([{ provider: 'codex' }], MCP_URL);
+    const execute = vi.spyOn(fx.api, 'execute');
+    await fx.service.spawnTask({ objective: 'worker task' });
+    const startCall = execute.mock.calls.map(([cmd]) => cmd).find((c) => c.kind === 'start-task');
+    if (startCall?.kind === 'start-task') {
+      expect(startCall.sessionConfig.mcpServers).toBeUndefined();
+    }
   });
 });

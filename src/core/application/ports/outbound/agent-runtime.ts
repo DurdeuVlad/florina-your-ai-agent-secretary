@@ -35,6 +35,29 @@ export interface SessionConfig {
   readonly model?: string;
   /** Optional autonomy/approval policy in effect. */
   readonly autonomyLevel?: string;
+  /**
+   * MCP servers the agent session should register at launch (DEC-018,
+   * issue #63) — e.g. the Secretary's manager tool server for
+   * manager-role tasks. Provider-agnostic: adapters that support MCP
+   * registration (ACP `session/new`) translate the spec into their
+   * wire format; adapters that cannot register MCP servers ignore it.
+   */
+  readonly mcpServers?: readonly McpServerSpec[];
+}
+
+/**
+ * Provider-agnostic MCP server registration carried in
+ * {@link SessionConfig.mcpServers}. The Secretary's own server is always
+ * streamable HTTP; `headers` carry scoping context such as the
+ * `x-secretary-project` project id.
+ */
+export interface McpServerSpec {
+  /** Registration name the agent sees (e.g. `secretary`). */
+  readonly name: string;
+  /** HTTP(S) URL the agent connects to. */
+  readonly url: string;
+  /** Optional HTTP headers sent with each MCP request. */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** Result of starting a run: the session id and whether the run began. */

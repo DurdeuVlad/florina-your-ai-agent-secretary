@@ -34,6 +34,12 @@ export interface ManagerServiceFactoryDeps {
   readonly preferenceStore: PreferenceProfilePort;
   /** Project lookup for scoping the manager service (DEC-003). */
   readonly projects: Pick<ProjectRepositoryPort, 'getById'>;
+  /**
+   * Resolves the daemon's MCP HTTP URL lazily (the server binds after the
+   * factory is composed). Manager-role spawns register this URL in their
+   * launch config (issue #63); worker spawns don't need it.
+   */
+  readonly mcpUrl?: () => string | undefined;
 }
 
 /**
@@ -61,6 +67,7 @@ export function managerServiceFactory(deps: ManagerServiceFactoryDeps): ManagerS
       ledger: deps.quotaLedger,
       profile: deps.preferenceStore.toProfile(),
     });
+    const mcpUrl = deps.mcpUrl?.();
     return new ManagerToolService({
       commandApi: deps.commandApi,
       router,
@@ -68,6 +75,7 @@ export function managerServiceFactory(deps: ManagerServiceFactoryDeps): ManagerS
       worktreeManager: deps.worktreeManager,
       repoPath: project.repo.path,
       projectId,
+      ...(mcpUrl !== undefined ? { mcpUrl } : {}),
     });
   };
 }
