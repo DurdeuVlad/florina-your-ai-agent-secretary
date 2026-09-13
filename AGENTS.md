@@ -53,39 +53,42 @@ Guidance for coding agents (and humans) working in this repository.
 ## Project Layout
 
 The repository follows a hexagonal (ports & adapters) architecture
-(DEC-037, issue #90): `src/core` owns the domain model and all port
-contracts, adapters depend inward on those ports, and a bootstrap layer is
-the only place concrete implementations are composed. Dependency rule:
+(DEC-037, issues #90–#93): `src/core` owns the domain model, port contracts,
+and application use cases; adapters depend inward on those ports; and
+`src/bootstrap` is the only place concrete inbound + outbound adapters are
+composed. Dependency rule:
 `domain <- application ports/use-cases <- inbound/outbound adapters`,
-enforced by `tests/architecture-boundaries.test.ts`.
+enforced by `tests/architecture-boundaries.test.ts` (44 checks — static,
+dynamic, and CommonJS import scanning, Node-global detection in core,
+adapter-family isolation, facade verification, and a catch-all that rejects
+any implementation file outside the hexagonal zones).
 
 ```
 src/
   core/
     domain/                    # canonical domain model (DEC-004/019)
     application/
-      ports/outbound/          # core-owned port contracts (ClockPort,
-                               #   IdGeneratorPort, EventBusPort,
-                               #   AgentRuntimePort, WorktreePort)
-      use-cases/               # application services (emerge in #91/#92)
-  bootstrap/                   # composition root — wires adapters to ports
-  daemon/      # local control plane (IPC/WebSocket), quota ledger + capacity router (DEC-029)
-  adapters/    # Codex / Claude Code / ACP bridges -> SupervisorEvent (DEC-013/030)
-  attention/   # deterministic attention engine (DEC-014)
-  secretary/   # the self-owned agent loop + LiteLLM connector (DEC-034)
-  cli/         # `secretary` / `asec` binary (DEC-026)
-  voice/       # Realtime + whisper.cpp pipeline (DEC-021)
-  desktop/     # Electron/Tauri client skeleton (DEC-028; not yet packaged)
-  storage/     # SQLite event journal + Context Capsules (DEC-012/020)
-  domain/      # COMPATIBILITY facades -> src/core/domain (temporary)
+      ports/outbound/          # core-owned outbound port contracts
+      use-cases/               # application services (attention, tasks,
+                               #   sessions, voice orchestration, …)
+  adapters/
+    inbound/                   # driving surfaces: websocket, desktop, cli, voice
+    outbound/                  # driven tech: agents, sqlite, git, voice
+                               #   engines, files, security, platform
+  bootstrap/                   # composition roots: daemon, cli, voice sessions
+  domain/ attention/ storage/ daemon/ cli/ voice/ desktop/ adapters/*.ts
+                               # COMPATIBILITY facades only — re-exports into
+                               #   the canonical locations (temporary)
 tests/         # vitest specs
 dist/          # build output (gitignored)
 ```
 
 **New production code** goes under `src/core` (domain, ports, use-cases),
-`src/adapters`/other adapter surfaces, or `src/bootstrap` — never in the
-legacy `src/domain/` path, which exists only as a compatibility/migration
-surface re-exporting `src/core/domain`.
+`src/adapters/inbound|outbound/<family>`, or `src/bootstrap` — never in the
+legacy roots (`src/domain`, `src/daemon`, `src/storage`, `src/attention`,
+`src/secretary`, `src/cli`, `src/voice`, `src/desktop`, `src/security`),
+which exist only as compatibility facades re-exporting the canonical
+implementations.
 
 The locked multi-provider architecture lives in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (DEC-029–034, milestone M6).
