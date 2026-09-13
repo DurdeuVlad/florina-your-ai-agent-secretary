@@ -154,3 +154,140 @@ export type VoiceEvent =
   | { readonly type: 'response'; readonly response: ResponseEvent }
   | { readonly type: 'error'; readonly error: VoiceErrorEvent }
   | { readonly type: 'state'; readonly state: VoiceStateChangeEvent };
+
+/* ================================================================== *
+ * Voice engine ports (issue #93)
+ * ================================================================== */
+
+/**
+ * A completed speech-to-text transcription. Unlike a streaming
+ * {@link TranscriptEvent}, this is a single final result — an engine
+ * transcribes a full audio buffer at once.
+ */
+export interface TranscriptResult {
+  /** Full transcribed text. */
+  readonly text: string;
+  /** Overall confidence in [0, 1]. */
+  readonly confidence: number;
+  /** Detected / forced language code, when the engine reports one. */
+  readonly language?: string;
+  /** Transcription wall-clock duration, when the engine reports it. */
+  readonly durationMs?: number;
+}
+
+/**
+ * The realtime (streaming) voice engine boundary. The application invokes
+ * the concrete bridge through this port so the pipeline stays
+ * provider-neutral.
+ */
+export interface RealtimeVoicePort {
+  /** Current session state of the realtime engine. */
+  readonly currentState: VoiceSessionState;
+  /** Whether the realtime connection is currently open. */
+  readonly isConnected: boolean;
+  /** Subscribe to transcript events. Returns an unsubscribe function. */
+  onTranscript(callback: (event: TranscriptEvent) => void): () => void;
+  /** Subscribe to session-state changes. Returns an unsubscribe function. */
+  onStateChange(callback: (event: VoiceStateChangeEvent) => void): () => void;
+}
+
+/* ================================================================== *
+ * Realtime session port — lifecycle + tool calls (issue #93)
+ * ================================================================== */
+
+/**
+ * A typed tool definition exposed to the voice model. This is the
+ * provider-neutral shape of a function-calling tool: a name, a
+ * description, and a JSON-Schema-ish parameters object. The concrete
+ * engine adapter maps it onto its own wire schema (e.g. a Realtime API
+ * session `tools` entry).
+ */
+export interface VoiceToolDefinition {
+  /** Tool kind discriminator — voice surfaces expose function tools only. */
+  readonly type: 'function';
+  /** The name the model calls the tool by (e.g. `list_tasks`). */
+  readonly name: string;
+  /** Human- and model-readable description of what the tool does. */
+  readonly description?: string;
+  /** JSON-Schema-ish parameters object for the tool's arguments. */
+  readonly parameters?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Provider-neutral realtime session configuration passed to
+ * {@link RealtimeSessionPort.connect}. The engine adapter maps these onto
+ * its own session-update message; fields that have no provider analogue
+ * are ignored by that adapter.
+ */
+export interface RealtimeSessionOptions {
+  /** Engine model id. */
+  readonly model?: string;
+  /** Voice selection for synthesized responses. */
+  readonly voice?: string;
+  /** System prompt / persona instructions. */
+  readonly instructions?: string;
+  /** Typed tool definitions the model may invoke. */
+  readonly tools?: readonly VoiceToolDefinition[];
+  /** Audio sample rate in Hz. */
+  readonly sampleRate?: number;
+  /** Audio channel count (1 = mono). */
+  readonly channels?: number;
+  /** Provider endpoint override (primarily for testing). */
+  readonly baseUrl?: string;
+  /** Auto-reconnect on unexpected close. */
+  readonly autoReconnect?: boolean;
+  /** Max reconnection attempts before giving up. */
+  readonly maxReconnectAttempts?: number;
+  /** Reconnect backoff base delay in ms. */
+  readonly reconnectBaseDelayMs?: number;
+}
+
+/**
+ * The full realtime voice session boundary: connection lifecycle,
+ * push-to-talk capture control, and the tool-call channel — in addition
+ * to the streaming surface of {@link RealtimeVoicePort}.
+ *
+ * Inbound voice adapters (the voice session manager) drive the engine
+ * through this port; the narrower {@link RealtimeVoicePort} remains the
+ * boundary the voice pipeline needs.
+ */
+export interface RealtimeSessionPort extends RealtimeVoicePort {
+  /**
+   * Open the realtime session. Resolves once the session is established
+   * and configured; rejects on connection failure.
+   */
+  connect(apiKey: string, options?: RealtimeSessionOptions): Promise<void>;
+  /** Close the session and release connection resources. */
+  disconnect(): Promise<void>;
+  /** Begin capturing audio (push-to-talk). */
+  startListening(): void;
+  /** Stop capturing and commit the input buffer. */
+  stopListening(): void;
+  /** Return a tool call result to the model (JSON-encoded payload). */
+  sendToolCallOutput(callId: string, output: string): void;
+  /** Subscribe to tool calls requested by the model. */
+  onToolCall(callback: (event: ToolCallEvent) => void): () => void;
+}
+
+/**
+ * The offline/batch transcription engine boundary (e.g. a local whisper
+ * backend). The application calls {@link TranscriptionPort.transcribe} with
+ * captured {@link AudioChunk}s and receives one final result.
+ *
+ * `TResult` lets a concrete engine expose a richer result type (e.g.
+ * per-segment timings) while still satisfying the port — consumers that
+ * only need the provider-neutral contract default to
+ * {@link TranscriptResult}.
+ */
+export interface TranscriptionPort<
+  TResult extends TranscriptResult = TranscriptResult,
+> {
+  /** Whether the engine has been initialized. */
+  readonly isInitialized: boolean;
+  /** Transcribe a batch of audio chunks into a final result. */
+  transcribe(chunks: readonly AudioChunk[]): Promise<TResult>;
+  /** Whether the engine is usable in this environment. */
+  isAvailable(): Promise<boolean>;
+  /** Release engine resources. */
+  close(): Promise<void>;
+}

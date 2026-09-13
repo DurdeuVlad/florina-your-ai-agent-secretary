@@ -12,3 +12,4 @@ export * from './preference-profile.js';
 export * from './quota-reader.js';
 export * from './git-client.js';
 export * from './voice.js';
+export * from './health.js';

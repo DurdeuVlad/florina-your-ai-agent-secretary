@@ -10,6 +10,7 @@
  */
 import Database from 'better-sqlite3';
 
+import type { StorageHealthPort } from '../../../../core/application/ports/outbound/health.js';
 import { runMigrations } from './migrations.js';
 
 /**
@@ -47,7 +48,7 @@ export interface OpenResult {
  * db.close();       // releases the connection
  * ```
  */
-export class StorageDatabase {
+export class StorageDatabase implements StorageHealthPort {
   private db: Database.Database | null = null;
   private readonly options: DatabaseOptions;
 

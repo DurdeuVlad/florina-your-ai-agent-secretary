@@ -7,3 +7,4 @@ export * from './realtime-message.js';
 export * from './realtime-bridge.js';
 export * from './whisper-backend.js';
 export * from './whisper-adapter.js';
+export * from './stdin-audio-transport.js';

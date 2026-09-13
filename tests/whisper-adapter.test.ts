@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +25,8 @@ import {
   overallConfidence,
   concatAudioChunks,
   type WhisperAdapterOptions,
+  type TranscriptResult,
+  type TranscriptSegment,
 } from '../src/voice/whisper-adapter.js';
 import {
   VoicePipeline,
@@ -881,6 +883,20 @@ describe('VoicePipeline', () => {
     expect(events[0].text).toBe('hello world');
     expect(events[0].partial).toBe(false);
     expect(events[0].confidence).toBeGreaterThan(0);
+  });
+
+  it('preserves the WhisperAdapter result type through the generic pipeline', async () => {
+    await whisperAdapter.initialize('/models/base.bin');
+    const inferred = new VoicePipeline(bridge, whisperAdapter);
+    // Compile-time proof: constructing the pipeline with WhisperAdapter infers
+    // its richer TranscriptResult — required `segments` and `language`.
+    expectTypeOf(inferred.transcribeWithWhisper).returns.resolves
+      .toEqualTypeOf<TranscriptResult>();
+    const result = await inferred.transcribeWithWhisper([makeChunk()]);
+    expect(result.segments[0].text).toBe('hello world');
+    expect(result.language).toBe('en');
+    const segment: TranscriptSegment = result.segments[0];
+    expect(segment.confidence).toBeGreaterThan(0);
   });
 
   it('switchToWhisper forces whisper mode', async () => {
