@@ -42,6 +42,14 @@ export interface RouteRequest {
   readonly workType?: string;
   /** Providers already tried for this task — excluded from failover picks. */
   readonly excludeProviders?: readonly string[];
+  /**
+   * A caller's preferred provider (e.g. a manager's pick). Honored first
+   * when it survives deny rules, exclusions, and capacity; otherwise normal
+   * preference-rule order applies (issue #63).
+   */
+  readonly preferProvider?: string;
+  /** Model pin to use with {@link preferProvider}. */
+  readonly preferModel?: string;
 }
 
 /** The router's verdict. */
@@ -86,11 +94,15 @@ export class CapacityRouter {
     const candidates = this.candidates(request);
     for (const rule of candidates) {
       if (this.ledger.hasCapacity(rule.provider)) {
+        const preferred =
+          request.preferProvider !== undefined && rule.provider === request.preferProvider;
         return {
           kind: 'routed',
           provider: rule.provider,
           model: rule.model,
-          reason: `rule: ${describeRule(rule)}`,
+          reason: preferred
+            ? `preferred provider: ${rule.provider}`
+            : `rule: ${describeRule(rule)}`,
         };
       }
     }
@@ -124,8 +136,16 @@ export class CapacityRouter {
         rule.workTypes.includes(request.workType),
     );
     const catchAll = eligible.filter((rule) => rule.workTypes === undefined);
+    // A preferred provider is tried first — but still passes deny rules and
+    // exclusions (it may also duplicate a rule; the first pick wins either way).
+    const preferred: RoutingRule[] =
+      request.preferProvider !== undefined && !excluded.has(request.preferProvider)
+        ? [{ provider: request.preferProvider, model: request.preferModel }].filter(
+            (rule) => !this.isDenied(rule),
+          )
+        : [];
     // Typed matches take precedence over catch-alls (profile order within each).
-    return [...typed, ...catchAll];
+    return [...preferred, ...typed, ...catchAll];
   }
 
   private isDenied(rule: RoutingRule): boolean {

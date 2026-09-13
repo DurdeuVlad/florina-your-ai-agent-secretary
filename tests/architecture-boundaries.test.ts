@@ -1398,6 +1398,9 @@ describe('src/adapters/inbound tree', () => {
     'voice/voice-tools.ts',
     'voice/voice-session-manager.ts',
     'voice/index.ts',
+    // MCP inbound adapter family (manager tool server, DEC-018, issue #63)
+    'mcp/secretary-mcp-server.ts',
+    'mcp/index.ts',
     // Inbound barrel
     'index.ts',
   ];

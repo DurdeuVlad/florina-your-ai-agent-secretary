@@ -9,3 +9,4 @@ export * from './desktop/index.js';
 export * from './websocket/index.js';
 export * from './cli/index.js';
 export * from './voice/index.js';
+export * from './mcp/index.js';

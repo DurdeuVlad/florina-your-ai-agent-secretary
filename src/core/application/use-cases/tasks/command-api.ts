@@ -22,8 +22,21 @@ import type { AdapterFidelityTier } from '../../../domain/enums.js';
 import { TaskState } from '../../../domain/enums.js';
 import type { TaskState as TaskStateType } from '../../../domain/enums.js';
 import type { Approval, Session, Task } from '../../../domain/types.js';
-import type { AgentStartedEvent, AgentStoppedEvent, SupervisorEvent } from '../../../domain/events.js';
-import type { AttentionItem } from '../attention/attention-item.js';
+import type {
+  AgentStartedEvent,
+  AgentStoppedEvent,
+  SupervisorEvent,
+} from '../../../domain/events.js';
+import type {
+  AttentionItem,
+  AttentionItemKind,
+  AttentionItemPriority,
+} from '../attention/attention-item.js';
+import {
+  createAttentionItem,
+  ATTENTION_ITEM_KINDS,
+  PRIORITY_ORDER,
+} from '../attention/attention-item.js';
 import type { AttentionInbox, AttentionInboxFilter } from '../attention/attention-inbox.js';
 import type { CompletionDigest } from '../attention/completion-digest.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
@@ -39,10 +52,7 @@ import type {
   SessionRepositoryPort,
   TaskRepositoryPort,
 } from '../../ports/outbound/repositories.js';
-import {
-  DirtyWorktreeError,
-  type WorktreePort,
-} from '../../ports/outbound/worktree.js';
+import { DirtyWorktreeError, type WorktreePort } from '../../ports/outbound/worktree.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
 import type {
@@ -147,6 +157,26 @@ export interface QueryInboxCommand {
   readonly filter?: InboxFilter;
 }
 
+/**
+ * Raise a new attention item — how managers and daemon subsystems ask the
+ * human a question (DEC-006/014, issue #63). The item lands in the inbox as
+ * `Pending`; the deterministic attention engine owns escalation from there.
+ */
+export interface RaiseAttentionCommand {
+  readonly kind: 'raise-attention';
+  readonly taskId: string;
+  /** What the human needs to decide or answer. */
+  readonly summary: string;
+  /** Optional longer context for the item payload. */
+  readonly details?: string;
+  /** Item kind (defaults to `Custom`). */
+  readonly itemKind?: AttentionItemKind;
+  /** Initial priority (defaults to `Medium`). */
+  readonly priority?: AttentionItemPriority;
+  /** Who raised it — recorded in the payload for audit (e.g. `manager`). */
+  readonly source?: string;
+}
+
 /** Acknowledge an attention item (mark as seen). */
 export interface AcknowledgeItemCommand {
   readonly kind: 'ack-item';
@@ -235,6 +265,7 @@ export type Command =
   | StopTaskCommand
   | ApproveCommand
   | QueryInboxCommand
+  | RaiseAttentionCommand
   | AcknowledgeItemCommand
   | ResolveItemCommand
   | EscalateItemCommand
@@ -252,6 +283,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'stop-task',
   'approve',
   'query-inbox',
+  'raise-attention',
   'ack-item',
   'resolve-item',
   'escalate-item',
@@ -297,6 +329,9 @@ export interface ItemMutationResponse {
   readonly itemId: string;
   readonly error?: string;
 }
+
+/** Response to `raise-attention` — carries the created item id. */
+export type RaiseAttentionResponse = ItemMutationResponse;
 
 export interface MetricsResponse {
   readonly ok: boolean;
@@ -368,6 +403,7 @@ export type Response =
   | ApproveResponse
   | InboxResponse
   | ItemMutationResponse
+  | RaiseAttentionResponse
   | MetricsResponse
   | TaskResponse
   | TaskListResponse
@@ -533,6 +569,8 @@ export class CommandApi {
         return this.handleApprove(command);
       case 'query-inbox':
         return this.handleQueryInbox(command);
+      case 'raise-attention':
+        return this.handleRaiseAttention(command);
       case 'ack-item':
         return this.handleAcknowledgeItem(command);
       case 'resolve-item':
@@ -931,6 +969,42 @@ export class CommandApi {
     return { ok: true, itemId: cmd.itemId };
   }
 
+  /**
+   * raise-attention: surface a question or decision to the human.
+   *
+   * Used by manager agents (`secretary_request_human_input`) and daemon
+   * subsystems to create inbox items through the typed command path rather
+   * than a side channel (DEC-002/014, issue #63).
+   */
+  private async handleRaiseAttention(cmd: RaiseAttentionCommand): Promise<RaiseAttentionResponse> {
+    if (!cmd.taskId) {
+      return { ok: false, itemId: '', error: 'taskId is required' };
+    }
+    if (!cmd.summary || cmd.summary.trim().length === 0) {
+      return { ok: false, itemId: '', error: 'summary is required' };
+    }
+    const itemKind = cmd.itemKind ?? 'Custom';
+    if (!ATTENTION_ITEM_KINDS.includes(itemKind)) {
+      return { ok: false, itemId: '', error: `unknown attention item kind: ${itemKind}` };
+    }
+    const priority = cmd.priority ?? 'Medium';
+    if (!PRIORITY_ORDER.includes(priority)) {
+      return { ok: false, itemId: '', error: `unknown attention priority: ${priority}` };
+    }
+    const item = createAttentionItem({
+      taskId: cmd.taskId,
+      kind: itemKind,
+      priority,
+      payload: {
+        summary: cmd.summary,
+        details: cmd.details ?? null,
+        ...(cmd.source !== undefined ? { source: cmd.source } : {}),
+      },
+    });
+    this.attentionInbox.add(item);
+    return { ok: true, itemId: item.id };
+  }
+
   /** resolve-item: resolve an attention item. */
   private async handleResolveItem(cmd: ResolveItemCommand): Promise<ItemMutationResponse> {
     if (!cmd.itemId) {
@@ -1183,27 +1257,29 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
       ? ApproveResponse
       : C extends QueryInboxCommand
         ? InboxResponse
-        : C extends AcknowledgeItemCommand
-          ? ItemMutationResponse
-          : C extends ResolveItemCommand
+        : C extends RaiseAttentionCommand
+          ? RaiseAttentionResponse
+          : C extends AcknowledgeItemCommand
             ? ItemMutationResponse
-            : C extends EscalateItemCommand
+            : C extends ResolveItemCommand
               ? ItemMutationResponse
-              : C extends QueryMetricsCommand
-                ? MetricsResponse
-                : C extends QueryTaskCommand
-                  ? TaskResponse
-                  : C extends ListTasksCommand
-                    ? TaskListResponse
-                    : C extends PruneWorktreeCommand
-                      ? PruneResponse
-                      : C extends ShutdownCommand
-                        ? ShutdownResponse
-                        : C extends GetDigestCommand
-                          ? DigestResponse
-                          : C extends CreatePrCommand
-                            ? CreatePrResponse
-                            : Response;
+              : C extends EscalateItemCommand
+                ? ItemMutationResponse
+                : C extends QueryMetricsCommand
+                  ? MetricsResponse
+                  : C extends QueryTaskCommand
+                    ? TaskResponse
+                    : C extends ListTasksCommand
+                      ? TaskListResponse
+                      : C extends PruneWorktreeCommand
+                        ? PruneResponse
+                        : C extends ShutdownCommand
+                          ? ShutdownResponse
+                          : C extends GetDigestCommand
+                            ? DigestResponse
+                            : C extends CreatePrCommand
+                              ? CreatePrResponse
+                              : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the
