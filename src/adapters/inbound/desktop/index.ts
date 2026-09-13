@@ -161,19 +161,19 @@ export type {
 } from './views/preferences-view.js';
 
 export {
-  buildSecretaryView,
-  renderSecretaryView,
+  buildFlorinaView,
+  renderFlorinaView,
   renderTodoRow,
   renderResearchJob,
   renderPendingMemory,
   TODO_STATUS_METADATA,
-} from './views/secretary-view.js';
+} from './views/florina-view.js';
 export type {
-  SecretarySnapshot,
-  SecretaryViewData,
+  FlorinaSnapshot,
+  FlorinaViewData,
   ResearchJobView,
   PendingMemoryView,
-} from './views/secretary-view.js';
+} from './views/florina-view.js';
 
 export {
   buildContextHealthView,

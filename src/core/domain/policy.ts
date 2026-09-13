@@ -6,10 +6,10 @@
  *
  * Security hierarchy enforcement (DEC-011):
  *
- *   OS/container -> agent sandbox -> capability broker -> secretary policy
+ *   OS/container -> agent sandbox -> capability broker -> Florina policy
  *   -> human approval -> LLM recommendations
  *
- * This module implements the "secretary policy" rung and the rule that an LLM
+ * This module implements the "Florina policy" rung and the rule that an LLM
  * recommendation can never defeat a lower-level restriction. Concretely:
  * - If policy **denies**, no higher-level override (including an LLM "safe"
  *   verdict) can change the outcome to `allow` or `escalate`. The deny is
@@ -17,7 +17,7 @@
  * - Escalation only goes **UP** (to a human). An LLM "safe" verdict can never
  *   turn an `escalate` into an `allow` (auto-approve). The LLM may only raise
  *   the required authority (narrow), never lower it (widen).
- * - The Secretary narrows permissions, never silently widens them.
+ * - The Florina narrows permissions, never silently widens them.
  *
  * Per DEC-007, autonomy is user-configurable per project and per task. Task
  * rules override project rules for the same capability (tasks can narrow, but
@@ -181,7 +181,7 @@ function findMatchingRule(
  *    it), the decision is `allow`.
  * 3. Otherwise the rule's `decision` is used.
  * 4. If no rule matches, the default is `escalate` (never silently allow) —
- *    the Secretary narrows permissions, never silently widens them.
+ *    the Florina narrows permissions, never silently widens them.
  *
  * @param request - The structured capability request.
  * @param policy - The per-project/per-task policy to evaluate against.
@@ -288,7 +288,7 @@ export function evaluateWithLlm(
 
 /**
  * Build an empty (deny-by-escalation) policy for a project. Auto-approval is
- * off by default — the Secretary narrows permissions, never silently widens
+ * off by default — the Florina narrows permissions, never silently widens
  * them (DEC-011).
  */
 export function buildPolicy(projectId: string, taskId?: string): Policy {

@@ -3,7 +3,7 @@
  *
  * {@link PttHudViewModel} mirrors the voice pipeline's state into a compact,
  * display-ready {@link PttHudState} suitable for an always-on-top overlay HUD.
- * The HUD shows whether the secretary is listening / processing / responding,
+ * The HUD shows whether Florina is listening / processing / responding,
  * the active voice mode (realtime / whisper / offline), a live transcript
  * preview, a response preview, and the current hotkey hint.
  *

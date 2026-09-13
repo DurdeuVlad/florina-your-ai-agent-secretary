@@ -1,5 +1,5 @@
 /**
- * Chat message helpers for the Secretary's agentic loop (DEC-034, issue #70).
+ * Chat message helpers for the Florina's agentic loop (DEC-034, issue #70).
  *
  * The `ChatMessage`/`ToolCall` wire types are owned by the model port
  * (`src/core/application/ports/outbound/model.ts`) and re-exported here.
@@ -22,10 +22,6 @@ export function assistantToolCalls(
 }
 
 /** Construct a tool result message answering `call`. */
-export function toolResult(
-  call: ToolCall,
-  content: string,
-  isError = false,
-): ChatMessage {
+export function toolResult(call: ToolCall, content: string, isError = false): ChatMessage {
   return { role: 'tool', toolCallId: call.id, name: call.name, content, isError };
 }

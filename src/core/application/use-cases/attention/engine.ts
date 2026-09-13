@@ -15,7 +15,7 @@
  *
  * Adapter fidelity (DEC-013) influences behaviour: Tier D–E events with a
  * permission-like shape are always elevated to human confirmation because the
- * secretary cannot reliably distinguish actual permission requests from other
+ * Florina cannot reliably distinguish actual permission requests from other
  * output at those fidelity levels.
  */
 import type { SupervisorEvent } from '../../../domain/events.js';
@@ -51,7 +51,7 @@ export type AttentionAction = 'always-surface' | 'batch' | 'elevate';
  * produces the same {@link AttentionClassification}.
  */
 export interface AttentionClassification {
-  /** The action the secretary should take for this event. */
+  /** The action Florina should take for this event. */
   readonly action: AttentionAction;
   /** Attention category (PRODUCT_DESIGN.md "Attention Model"). */
   readonly category: AttentionCategory;

@@ -1,6 +1,6 @@
 /**
  * Context-health view (issue #74, DEC-035): per continuous agent —
- * Secretary, managers — window fill, last condensation, and event
+ * Florina, managers — window fill, last condensation, and event
  * pressure. Drill-down from the inbox's DegradedContext items.
  *
  * Pure view model + {@link RenderTree} template over

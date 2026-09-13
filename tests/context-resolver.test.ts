@@ -489,7 +489,7 @@ describe('context-resolver: assembly from event journal', () => {
     const status: WorktreeStatus = {
       clean: false,
       dirty: true,
-      branch: 'secretary/add-pagination',
+      branch: 'florina/add-pagination',
       baseCommit: 'abc123',
     };
     const resolver = new ContextResolver({
@@ -503,7 +503,7 @@ describe('context-resolver: assembly from event journal', () => {
 
     expect(result.worktreeStatus).not.toBeNull();
     expect(result.worktreeStatus?.dirty).toBe(true);
-    expect(result.worktreeStatus?.branch).toBe('secretary/add-pagination');
+    expect(result.worktreeStatus?.branch).toBe('florina/add-pagination');
   });
 
   it('worktree status is null when no source is provided', async () => {
@@ -734,7 +734,7 @@ describe('context-resolver: mock sources', () => {
       worktreeStatus: worktreeStub({
         clean: true,
         dirty: false,
-        branch: 'secretary/mock',
+        branch: 'florina/mock',
         baseCommit: 'sha1',
       }),
     });
@@ -744,7 +744,7 @@ describe('context-resolver: mock sources', () => {
     expect(result.taskId).toBe('t1');
     expect(result.recentEvents).toHaveLength(2);
     expect(result.recentDecisions).toHaveLength(1);
-    expect(result.worktreeStatus?.branch).toBe('secretary/mock');
+    expect(result.worktreeStatus?.branch).toBe('florina/mock');
     expect(result.taskSummary.agentIds).toEqual(['codex']);
     // AgentFailed is critical.
     const failed = result.recentEvents.find((pe) => pe.event.kind === 'AgentFailed');

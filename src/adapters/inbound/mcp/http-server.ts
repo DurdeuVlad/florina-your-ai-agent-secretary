@@ -1,5 +1,5 @@
 /**
- * Secretary MCP HTTP server — the localhost HTTP transport manager agents
+ * Florina MCP HTTP server — the localhost HTTP transport manager agents
  * connect to (DEC-018, DEC-037, issue #63).
  *
  * The daemon owns this server: it lives in the same process so the
@@ -15,7 +15,7 @@
  *
  * Project scoping: managers are per-project (DEC-003 isolation). The
  * caller supplies a {@link ManagerServiceFactory} that resolves the
- * project from the request (`x-secretary-project` header or `?project=`
+ * project from the request (`x-florina-project` header or `?project=`
  * query param) — the server itself is project-agnostic.
  */
 import * as http from 'node:http';
@@ -24,21 +24,21 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 import type { ManagerToolService } from '../../../core/application/use-cases/managers/manager-tools.js';
-import { createSecretaryMcpServer } from './secretary-mcp-server.js';
+import { createFlorinaMcpServer } from './florina-mcp-server.js';
 
 /** The URL path the MCP transport is mounted on. */
 export const MCP_HTTP_PATH = '/mcp';
 
 /**
  * Resolves the {@link ManagerToolService} for an incoming request —
- * typically by reading the `x-secretary-project` header or `?project=`
+ * typically by reading the `x-florina-project` header or `?project=`
  * query param and composing a service scoped to that project. May throw;
  * the server answers 404 for unknown projects.
  */
 export type ManagerServiceFactory = (request: IncomingMessage) => ManagerToolService;
 
-/** Options for {@link SecretaryMcpHttpServer}. */
-export interface SecretaryMcpHttpServerOptions {
+/** Options for {@link FlorinaMcpHttpServer}. */
+export interface FlorinaMcpHttpServerOptions {
   /** Localhost port to bind. Pass `0` to let the OS assign a port. */
   readonly port: number;
   /** Resolves the per-request (per-project) manager service. */
@@ -49,10 +49,10 @@ export interface SecretaryMcpHttpServerOptions {
 
 /**
  * Extract the project identifier a manager tagged its connection with:
- * the `x-secretary-project` header wins, then the `?project=` query param.
+ * the `x-florina-project` header wins, then the `?project=` query param.
  */
 export function mcpProjectId(request: IncomingMessage): string | null {
-  const header = request.headers['x-secretary-project'];
+  const header = request.headers['x-florina-project'];
   if (typeof header === 'string' && header.length > 0) {
     return header;
   }
@@ -65,12 +65,12 @@ export function mcpProjectId(request: IncomingMessage): string | null {
  * Localhost HTTP server exposing the manager tool surface over MCP
  * Streamable HTTP (stateless).
  */
-export class SecretaryMcpHttpServer {
-  private readonly options: SecretaryMcpHttpServerOptions;
+export class FlorinaMcpHttpServer {
+  private readonly options: FlorinaMcpHttpServerOptions;
   private server: Server | null = null;
   private boundPort: number;
 
-  constructor(options: SecretaryMcpHttpServerOptions) {
+  constructor(options: FlorinaMcpHttpServerOptions) {
     this.options = options;
     this.boundPort = options.port;
   }
@@ -158,7 +158,7 @@ export class SecretaryMcpHttpServer {
       return;
     }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = createSecretaryMcpServer(service);
+    const server = createFlorinaMcpServer(service);
     res.on('close', () => {
       void transport.close();
       void server.close();

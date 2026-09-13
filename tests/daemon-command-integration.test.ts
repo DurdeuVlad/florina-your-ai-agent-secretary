@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { WebSocket } from 'ws';
 
 import {
-  SecretaryDaemon,
+  FlorinaDaemon,
   type ApiRequest,
   type ApiResponse,
   type Command,
@@ -32,7 +32,7 @@ import { buildProject, buildTask } from '../src/domain/index.js';
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -121,12 +121,12 @@ function requestApi(
 
 describe('daemon: CommandApi integration (#33)', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: WebSocket;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
       mcpPort: 0,
       lockfile,

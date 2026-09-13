@@ -31,7 +31,7 @@ export async function createStdinVoiceSession(options: {
   /**
    * LiteLLM proxy config (DEC-034). When present, this composes a
    * {@link LiteLLMConnector} + `research` runner so the voice session's
-   * heavyweight work runs in the Secretary loop. Research findings
+   * heavyweight work runs in the Florina loop. Research findings
    * route back through `commandApi` as `idea-append` commands, so the
    * daemon's ledger stays the single source of truth.
    */
@@ -80,7 +80,7 @@ export async function createStdinVoiceSession(options: {
 
 /**
  * Build the `research` async tool runner (issue #73): heavyweight
- * ideation work runs in the Secretary loop on the injected model
+ * ideation work runs in the Florina loop on the injected model
  * connector (LiteLLM-backed, DEC-034) — the voice turn that triggered
  * it was never blocked, and the result is spoken when ready.
  *
@@ -98,10 +98,10 @@ export function createResearchRunner(
     if (name !== 'research' || typeof args['query'] !== 'string') {
       return `unsupported async tool call: ${name}`;
     }
-    const { SecretaryLoop } = await import('../core/application/use-cases/secretary/loop.js');
+    const { FlorinaLoop } = await import('../core/application/use-cases/florina/loop.js');
     const { ToolRegistry } =
-      await import('../core/application/use-cases/secretary/tool-registry.js');
-    const loop = new SecretaryLoop({
+      await import('../core/application/use-cases/florina/tool-registry.js');
+    const loop = new FlorinaLoop({
       connector,
       tools: new ToolRegistry(),
       maxIterations: options?.maxIterations ?? 4,

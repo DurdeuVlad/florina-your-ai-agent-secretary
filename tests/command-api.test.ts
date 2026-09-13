@@ -1050,7 +1050,7 @@ describe('CommandApi', () => {
   describe('prune-worktree', () => {
     it('prunes a clean worktree', async () => {
       const { task } = createTaskWithSession(fixture, {
-        worktreePath: '/repo/.secretary-worktrees/test-task',
+        worktreePath: '/repo/.florina-worktrees/test-task',
       });
       fixture.worktreeManager.simulateClean();
 
@@ -1067,9 +1067,9 @@ describe('CommandApi', () => {
 
     it('fails when the worktree is dirty', async () => {
       const { task } = createTaskWithSession(fixture, {
-        worktreePath: '/repo/.secretary-worktrees/dirty-task',
+        worktreePath: '/repo/.florina-worktrees/dirty-task',
       });
-      fixture.worktreeManager.simulateDirty('/repo/.secretary-worktrees/dirty-task');
+      fixture.worktreeManager.simulateDirty('/repo/.florina-worktrees/dirty-task');
 
       const res = await fixture.api.execute({
         kind: 'prune-worktree',

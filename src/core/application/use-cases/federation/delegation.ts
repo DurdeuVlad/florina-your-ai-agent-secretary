@@ -2,7 +2,7 @@
  * Federated delegation service (DEC-036, issue #78) — the child-side
  * entry point for remote delegations.
  *
- * A parent Secretary sends `delegate-task` to a child daemon; this
+ * A parent Florina sends `delegate-task` to a child daemon; this
  * service resolves the named project (the repo must exist on this
  * machine — the Task Capsule crosses the wire, worktrees stay local),
  * then dispatches through the same route → create → worktree → start
@@ -98,13 +98,9 @@ export class DelegationService {
     return service.spawnTask({
       objective: input.objective,
       ...(input.workType !== undefined ? { workType: input.workType } : {}),
-      ...(input.preferProvider !== undefined
-        ? { preferProvider: input.preferProvider }
-        : {}),
+      ...(input.preferProvider !== undefined ? { preferProvider: input.preferProvider } : {}),
       ...(input.preferModel !== undefined ? { preferModel: input.preferModel } : {}),
-      ...(input.excludeProviders !== undefined
-        ? { excludeProviders: input.excludeProviders }
-        : {}),
+      ...(input.excludeProviders !== undefined ? { excludeProviders: input.excludeProviders } : {}),
     });
   }
 }

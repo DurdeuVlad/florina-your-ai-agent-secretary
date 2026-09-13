@@ -74,7 +74,7 @@ export type ApprovalEscalationCallback = (event: ApprovalRequestedEvent) => void
 export interface ApprovalRouterOptions {
   /**
    * Whether low-risk requests are auto-approved without a voice round.
-   * Default **false** — the Secretary narrows permissions, never silently
+   * Default **false** — the Florina narrows permissions, never silently
    * widens them (DEC-011).
    */
   readonly autoApproveLowRisk?: boolean;

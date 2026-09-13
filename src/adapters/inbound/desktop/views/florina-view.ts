@@ -1,19 +1,19 @@
 /**
- * Secretary view (issue #74): the Secretary's own working state —
+ * Florina view (issue #74): the Florina's own working state —
  * her plan/todo list, in-flight research, and pending memory writes.
  * A transparency panel, not a control surface.
  *
  * Pure view model + {@link RenderTree} template over a serializable
- * {@link SecretarySnapshot} (the daemon projects live loop state into
+ * {@link FlorinaSnapshot} (the daemon projects live loop state into
  * this shape for the wire).
  */
 import type {
   TodoItem,
   TodoStatus,
-} from '../../../../core/application/use-cases/secretary/todo-tool.js';
+} from '../../../../core/application/use-cases/florina/todo-tool.js';
 import type { RenderTree } from './view-types.js';
 
-/** A research pass the Secretary is running in the background. */
+/** A research pass the Florina is running in the background. */
 export interface ResearchJobView {
   readonly id: string;
   readonly query: string;
@@ -22,7 +22,7 @@ export interface ResearchJobView {
   readonly ideaId?: string;
 }
 
-/** A durable fact the Secretary intends to persist (e.g. a preference). */
+/** A durable fact the Florina intends to persist (e.g. a preference). */
 export interface PendingMemoryView {
   readonly id: string;
   readonly summary: string;
@@ -31,14 +31,14 @@ export interface PendingMemoryView {
 }
 
 /** The wire shape the daemon produces for this view. */
-export interface SecretarySnapshot {
+export interface FlorinaSnapshot {
   readonly todos: readonly TodoItem[];
   readonly research: readonly ResearchJobView[];
   readonly pendingMemories: readonly PendingMemoryView[];
 }
 
-/** Full Secretary view data. */
-export interface SecretaryViewData {
+/** Full Florina view data. */
+export interface FlorinaViewData {
   readonly todos: readonly TodoItem[];
   readonly research: readonly ResearchJobView[];
   readonly pendingMemories: readonly PendingMemoryView[];
@@ -52,8 +52,8 @@ export const TODO_STATUS_METADATA: Readonly<Record<TodoStatus, { icon: string; c
   completed: { icon: 'check', color: 'green' },
 };
 
-/** Build the view from a Secretary snapshot. */
-export function buildSecretaryView(snapshot: SecretarySnapshot): SecretaryViewData {
+/** Build the view from a Florina snapshot. */
+export function buildFlorinaView(snapshot: FlorinaSnapshot): FlorinaViewData {
   return {
     todos: snapshot.todos,
     research: snapshot.research,
@@ -102,25 +102,25 @@ export function renderPendingMemory(mem: PendingMemoryView): RenderTree {
   ]);
 }
 
-/** Render the full Secretary panel. */
-export function renderSecretaryView(view: SecretaryViewData): RenderTree {
-  return el('SecretaryView', { empty: view.isEmpty }, [
+/** Render the full Florina panel. */
+export function renderFlorinaView(view: FlorinaViewData): RenderTree {
+  return el('FlorinaView', { empty: view.isEmpty }, [
     el(
-      'SecretarySection',
+      'FlorinaSection',
       { title: 'Plan' },
       view.todos.length > 0
         ? view.todos.map(renderTodoRow)
         : [el('EmptyHint', {}, ['no plan yet'])],
     ),
     el(
-      'SecretarySection',
+      'FlorinaSection',
       { title: 'Research in flight' },
       view.research.length > 0
         ? view.research.map(renderResearchJob)
         : [el('EmptyHint', {}, ['idle'])],
     ),
     el(
-      'SecretarySection',
+      'FlorinaSection',
       { title: 'Pending memory writes' },
       view.pendingMemories.length > 0
         ? view.pendingMemories.map(renderPendingMemory)

@@ -5,7 +5,7 @@
  * {@link VoiceSessionManager} owns the lifecycle of a {@link VoicePipeline}
  * within the host process. It:
  * - Connects an injected {@link RealtimeSessionPort} engine configured with
- *   the typed Secretary tool definitions.
+ *   the typed Florina tool definitions.
  * - Routes {@link ToolCallEvent}s from the voice model to
  *   {@link CommandExecutor.execute}, returning the result as a tool call
  *   output.
@@ -71,7 +71,7 @@ export interface VoiceSessionManagerOptions {
   readonly tools?: readonly VoiceToolDefinition[];
   /**
    * Runner for long-lived voice tools (issue #73) — e.g. `research`
-   * driven by the Secretary loop. When absent, async tools return a
+   * driven by the Florina loop. When absent, async tools return a
    * clear error rather than hanging the turn.
    */
   readonly asyncToolRunner?: AsyncVoiceToolRunner;
@@ -287,7 +287,7 @@ export class VoiceSessionManager {
   /**
    * Route a long-lived voice tool (issue #73). The speech turn closes
    * immediately with a `started` output; the runner's result is then
-   * injected as a user message so the Secretary speaks again when the
+   * injected as a user message so the Florina speaks again when the
    * work is ready — never blocking a turn on a slow tool.
    */
   private handleAsyncToolCall(

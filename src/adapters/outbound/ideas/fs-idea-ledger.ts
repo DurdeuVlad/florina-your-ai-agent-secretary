@@ -22,7 +22,7 @@ export class FsIdeaLedger implements IdeaLedgerPort {
   private readonly rootDir: string;
 
   /**
-   * @param rootDir Global ideas directory (e.g. `~/.agent-secretary/ideas`).
+   * @param rootDir Global ideas directory (e.g. `~/.florina/ideas`).
    *   Created lazily on first write.
    */
   constructor(rootDir: string) {

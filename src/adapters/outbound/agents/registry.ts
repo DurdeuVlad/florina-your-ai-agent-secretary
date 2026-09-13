@@ -112,7 +112,7 @@ export class AdapterRegistry implements AgentRuntimeRegistryPort {
 
   /**
    * List all registered adapter ids. Useful for enumerating available
-   * adapters to the user (e.g. `secretary adapters`).
+   * adapters to the user (e.g. `florina adapters`).
    */
   list(): readonly string[] {
     return [...this.factories.keys()];

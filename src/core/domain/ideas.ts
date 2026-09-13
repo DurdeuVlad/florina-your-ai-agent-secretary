@@ -1,7 +1,7 @@
 /**
  * Idea ledger + Brief domain types (DEC-033, issue #69).
  *
- * The Secretary is a thinking partner during ideation: each idea gets a
+ * The Florina is a thinking partner during ideation: each idea gets a
  * persistent markdown ledger she maintains (spec, research notes, open
  * questions, decisions-in-progress). Nothing becomes agent work without
  * an explicit human gate — the compiled Brief is shown for review, and
@@ -13,7 +13,7 @@ import type { EntityId, ISODateString } from './types.js';
 /**
  * Lifecycle of an idea ledger.
  *
- * - `open` — actively being worked on with the Secretary.
+ * - `open` — actively being worked on with the Florina.
  * - `promoted` — moved into a project's directory once a project is
  *   specified (ideas precede project selection, DEC-033).
  * - `compiled` — a Brief was compiled from the ledger.

@@ -97,7 +97,7 @@ export interface WindowBackend {
 export const DEFAULT_WINDOW_OPTIONS: WindowOptions = {
   width: 800,
   height: 600,
-  title: 'Agent Secretary',
+  title: 'Florina',
   resizable: true,
   frame: true,
   transparent: false,

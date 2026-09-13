@@ -29,7 +29,7 @@ import type { DiffDigest, PathCategory } from '../src/attention/diff-digest.js';
  * directory in `afterEach`.
  */
 function createTempGitRepo(): string {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'secretary-diff-'));
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'florina-diff-'));
   const repoPath = path.join(tmpRoot, 'repo');
   fs.mkdirSync(repoPath, { recursive: true });
   git(['init', '--initial-branch=main'], repoPath);

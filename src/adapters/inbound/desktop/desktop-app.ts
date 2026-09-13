@@ -4,7 +4,7 @@
  * {@link DesktopApp} wires together the three desktop-skeleton primitives:
  * a {@link WindowBackend} (the OS window), an {@link IpcBridge} (main ↔
  * renderer messaging), and a {@link RendererState} (the view-state mirror).
- * It owns the lifecycle: create the window, connect to the Secretary daemon
+ * It owns the lifecycle: create the window, connect to the Florina daemon
  * over WebSocket, sync daemon state into the renderer state, and tear it all
  * down on disconnect.
  *
@@ -143,7 +143,7 @@ export class DesktopApp {
   }
 
   /**
-   * Connect to the Secretary daemon at the given WebSocket URL. On success,
+   * Connect to the Florina daemon at the given WebSocket URL. On success,
    * updates renderer state to `connected` and wires incoming daemon messages
    * to renderer-state updates. Rejects with {@link DesktopConnectionError}
    * on failure.

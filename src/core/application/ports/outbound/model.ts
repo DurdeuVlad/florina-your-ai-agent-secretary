@@ -1,5 +1,5 @@
 /**
- * Model port — the core-owned seam between the Secretary's reasoning loop
+ * Model port — the core-owned seam between the Florina's reasoning loop
  * and whatever model serves it (DEC-034, issue #70).
  *
  * Provider-neutral: the port carries an abstract chat/tool vocabulary —
@@ -21,7 +21,7 @@ export interface ToolCall {
   readonly arguments: Record<string, unknown>;
 }
 
-/** A message in the Secretary's conversation. */
+/** A message in the Florina's conversation. */
 export type ChatMessage =
   | {
       readonly role: 'system' | 'user';

@@ -19,7 +19,7 @@
  * `maxSummaryEntries`, older entries fold into a single synopsis
  * (`[task synopsis]` prefix), keeping the most recent
  * `keepRecentEntries` verbatim — the same keep-tail mechanics as the
- * Secretary's {@link Condenser} (#75).
+ * Florina's {@link Condenser} (#75).
  *
  * Failover synergy (#64): `buildFailoverPrompt` reads
  * `rolledUpEventSummaries` — a capsule rolled up at freeze time IS the
@@ -186,7 +186,7 @@ export class CapsuleRollupService {
     this.recordCondensed({
       taskId,
       sessionId,
-      agentId: session?.agentId ?? 'secretary',
+      agentId: session?.agentId ?? 'florina',
       summary,
       forgottenEventIds: events.map((e) => e.id),
       keptEventCount: events.length,
@@ -205,7 +205,7 @@ export class CapsuleRollupService {
         this.recordCondensed({
           taskId,
           sessionId,
-          agentId: session?.agentId ?? 'secretary',
+          agentId: session?.agentId ?? 'florina',
           summary: synopsis,
           // The folded items are summaries, not events — the folded count
           // rides in the journal payload instead of forgottenEventIds.

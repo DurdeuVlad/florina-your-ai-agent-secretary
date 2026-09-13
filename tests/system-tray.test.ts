@@ -15,11 +15,11 @@ describe('MockTrayBackend', () => {
     const menu: TrayMenuItem[] = [
       { id: 'quit', label: 'Quit', enabled: true },
     ];
-    tray.create('Agent Secretary — Daemon: Disconnected', menu);
+    tray.create('Florina — Daemon: Disconnected', menu);
     expect(tray.isActive).toBe(true);
-    expect(tray.tooltip).toBe('Agent Secretary — Daemon: Disconnected');
+    expect(tray.tooltip).toBe('Florina — Daemon: Disconnected');
     expect(tray.menu).toHaveLength(1);
-    expect(tray.log).toContain('create:Agent Secretary — Daemon: Disconnected');
+    expect(tray.log).toContain('create:Florina — Daemon: Disconnected');
   });
 
   it('records setTooltip and setMenu', () => {

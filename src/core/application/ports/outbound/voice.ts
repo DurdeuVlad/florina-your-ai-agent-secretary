@@ -268,7 +268,7 @@ export interface RealtimeSessionPort extends RealtimeVoicePort {
   /**
    * Inject a user-role text message and ask the model to respond
    * (DEC-021, issue #73). Long-running tool work finishes after the
-   * speech turn that triggered it — this is how the Secretary speaks
+   * speech turn that triggered it — this is how the Florina speaks
    * again when the result is ready, without blocking a turn.
    */
   sendUserMessage(text: string): void;

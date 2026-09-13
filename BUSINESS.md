@@ -1,4 +1,4 @@
-# Agent Secretary: Business Case
+# Florina: Business Case
 
 ## Problem
 
@@ -19,7 +19,7 @@ The target user is an early adopter developer who:
 
 ## Current Workflow
 
-Without Agent Secretary, the current workflow is fragmented and manual:
+Without Florina, the current workflow is fragmented and manual:
 - Managing numerous terminal tabs, IDE windows, and agent session switching
 - Manually checking Git and reading raw diffs to understand progress
 - Mentally remembering the state and context of each agent
@@ -41,7 +41,7 @@ The critical insight is that *agent state is not the same as attention state*. A
 
 ## Value Proposition
 
-Agent Secretary moves the developer from supervising conversations and processes to supervising work, outcomes, and decisions.
+Florina moves the developer from supervising conversations and processes to supervising work, outcomes, and decisions.
 
 The core concept: An open-source attention broker for coding agents: one inbox that lets developers delegate work, monitors heterogeneous agent sessions, suppresses routine noise, and interrupts only when a human decision is genuinely needed.
 
@@ -53,16 +53,16 @@ Mental models:
 ## High-Level Product Flows
 
 ### Delegate Work
-The user asks the Secretary to assign or start work. The Secretary selects or is told which agent/session/provider should perform it. The work becomes a tracked Task.
+The user asks the Florina to assign or start work. The Florina selects or is told which agent/session/provider should perform it. The work becomes a tracked Task.
 
 ### Ongoing Supervision
-The agent works independently. The Secretary consumes events without constantly interrupting the developer. Most activity is batched.
+The agent works independently. The Florina consumes events without constantly interrupting the developer. Most activity is batched.
 
 ### Attention Request
-Something genuinely requiring the user occurs. The Secretary interrupts or surfaces it as an Attention Item with enough context to decide.
+Something genuinely requiring the user occurs. The Florina interrupts or surfaces it as an Attention Item with enough context to decide.
 
 ### Completion
-The agent finishes. The Secretary summarizes the Deliverable rather than replaying the session. It produces an executive digest with observed facts (files, tests, diff stats) and model-inferred insights (risk hotspots, behavior changes).
+The agent finishes. The Florina summarizes the Deliverable rather than replaying the session. It produces an executive digest with observed facts (files, tests, diff stats) and model-inferred insights (risk hotspots, behavior changes).
 
 ### Review
 The user asks questions about the result, diff, tests, trade-offs, and risks. Relevant Task context is loaded from the Context Capsule.
@@ -72,7 +72,7 @@ The user provides Approval, rejects, redirects, asks for changes, or delegates a
 
 ## Business Differentiation
 
-Agent Secretary is uniquely positioned because it is NOT:
+Florina is uniquely positioned because it is NOT:
 - Another coding agent: it doesn't write code; it supervises agents that do.
 - Another agent framework: it doesn't orchestrate agent reasoning; it supervises independent agent runtimes.
 - Another terminal multiplexer: it adds semantic understanding and attention routing, not just tab management.
@@ -85,7 +85,7 @@ The defensible center is the cross-agent event model, universal approval model, 
 
 ## Validation Assumptions
 
-For Agent Secretary to succeed, the following assumptions must hold true:
+For Florina to succeed, the following assumptions must hold true:
 - Developers run enough concurrent agents to create an attention bottleneck
 - They prefer a supervisory layer to individually interacting with every agent
 - Deliverable-first summaries are sufficient for most routine supervision
@@ -98,11 +98,11 @@ For Agent Secretary to succeed, the following assumptions must hold true:
 ## MVP Success Criteria
 
 Success is measured by behavioral changes:
-- User successfully supervises several simultaneous agent tasks through the Secretary
+- User successfully supervises several simultaneous agent tasks through the Florina
 - User can identify everything requiring attention without opening individual sessions
-- The majority of routine task supervision occurs through Secretary summaries rather than terminal inspection
+- The majority of routine task supervision occurs through Florina summaries rather than terminal inspection
 - User can move between unrelated projects without contextual contamination
-- User voluntarily returns to the Secretary instead of reverting to agent terminals
+- User voluntarily returns to the Florina instead of reverting to agent terminals
 
 **North-star metric:** Attention Compression Ratio (ACR) = total classifiable agent events processed by the attention engine / actual human interruptions surfaced
 

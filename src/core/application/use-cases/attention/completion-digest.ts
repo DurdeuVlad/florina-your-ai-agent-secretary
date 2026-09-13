@@ -1,7 +1,7 @@
 /**
  * Completion Digest — structured summary of a completed task run (#16).
  *
- * When an agent claims completion, the Secretary produces a Completion Digest
+ * When an agent claims completion, the Florina produces a Completion Digest
  * that separates observed (deterministic) facts from inferred information
  * (PRODUCT_DESIGN.md "Deliverable Review"). This module defines the
  * {@link CompletionDigest} type and the {@link CompletionDigestBuilder} that
@@ -288,7 +288,7 @@ export class CompletionDigestBuilder {
     riskLevel: CapabilityRiskLevel,
   ): DecisionReference | null {
     // DEC-010: Approve the underlying capability, never an LLM summary.
-    // DEC-011: The secretary narrows permissions, never silently widens them.
+    // DEC-011: Florina narrows permissions, never silently widens them.
     // DEC-007: Agent autonomy is user-configurable.
     if (capability === 'push' || capability === 'merge' || capability === 'deploy') {
       return {
@@ -299,7 +299,7 @@ export class CompletionDigestBuilder {
     if (riskLevel === 'critical') {
       return {
         id: 'DEC-011',
-        note: 'Critical risk action taken — secretary must narrow permissions, never silently widen.',
+        note: 'Critical risk action taken — Florina must narrow permissions, never silently widen.',
       };
     }
     if (capability === 'network' || capability === 'filesystem') {

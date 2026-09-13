@@ -73,7 +73,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
     decisions: [{ id: 'DEC-007', note: 'Autonomy is user-configurable.' }],
     riskHighlights: [],
     commitHash: 'abc1234',
-    branchName: 'secretary/add-pagination',
+    branchName: 'florina/add-pagination',
     ...overrides,
   };
 }
@@ -81,7 +81,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
 /** Build a DiffDigest with sensible defaults. */
 function makeDiff(overrides: Partial<DiffDigest> = {}): DiffDigest {
   return {
-    branch: 'secretary/add-pagination',
+    branch: 'florina/add-pagination',
     baseCommit: 'base000',
     headCommit: 'head000',
     author: 'Test <test@example.com>',
@@ -159,7 +159,7 @@ describe('DigestViewModel.buildView', () => {
     expect(view.filesChangedCount).toBe(9);
     expect(view.filesChanged).toEqual(digest.filesChanged);
     expect(view.commitHash).toBe('abc1234');
-    expect(view.branchName).toBe('secretary/add-pagination');
+    expect(view.branchName).toBe('florina/add-pagination');
   });
 
   it('formats the duration as a human-readable label', () => {
@@ -569,7 +569,7 @@ describe('diff template functions', () => {
 
   it('renderDiffView surfaces branch and head commit', () => {
     const tree = renderDiffView(view);
-    expect(tree.props!.branch).toBe('secretary/add-pagination');
+    expect(tree.props!.branch).toBe('florina/add-pagination');
     expect(tree.props!.headCommit).toBe('head000');
   });
 

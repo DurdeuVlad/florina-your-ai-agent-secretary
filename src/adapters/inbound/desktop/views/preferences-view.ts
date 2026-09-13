@@ -120,7 +120,7 @@ export function renderPreferencesView(view: PreferencesViewData): RenderTree {
       { title: 'Routing order' },
       view.rules.length > 0
         ? view.rules.map(renderRoutingRule)
-        : [el('EmptyHint', {}, ['no routing rules — the Secretary learns them as you talk'])],
+        : [el('EmptyHint', {}, ['no routing rules — the Florina learns them as you talk'])],
     ),
     el(
       'PreferenceSection',

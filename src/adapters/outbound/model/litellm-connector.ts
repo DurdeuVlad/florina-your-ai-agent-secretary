@@ -1,5 +1,5 @@
 /**
- * ModelConnector — the Secretary's plug-and-play model boundary
+ * ModelConnector — the Florina's plug-and-play model boundary
  * (DEC-034, issue #70).
  *
  * {@link ModelConnector} is the single seam between the reasoning loop and

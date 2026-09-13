@@ -1,5 +1,5 @@
 /**
- * Health check endpoint for the Secretary daemon (DEC-008).
+ * Health check endpoint for the Florina daemon (DEC-008).
  *
  * The health check returns daemon + storage status: uptime, whether the
  * persistence connection is usable, and the number of active WebSocket

@@ -1,5 +1,5 @@
 /**
- * ToolRegistry — the typed catalog of things the Secretary may do
+ * ToolRegistry — the typed catalog of things the Florina may do
  * (DEC-034, issue #70).
  *
  * Tools are registered with a JSON-Schema parameter spec (handed to the

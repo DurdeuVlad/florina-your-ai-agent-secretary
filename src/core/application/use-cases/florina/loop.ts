@@ -1,5 +1,5 @@
 /**
- * SecretaryLoop — the only agentic loop this project owns (DEC-001/034,
+ * FlorinaLoop — the only agentic loop this project owns (DEC-001/034,
  * issue #70).
  *
  * The loop is deliberately stateless across iterations (OpenHands pattern):
@@ -56,8 +56,8 @@ export type LoopEvent =
       readonly iterations: number;
     };
 
-/** Options for {@link SecretaryLoop}. */
-export interface SecretaryLoopOptions {
+/** Options for {@link FlorinaLoop}. */
+export interface FlorinaLoopOptions {
   readonly connector: ModelPort;
   readonly tools: ToolRegistry;
   /** Hard cap on model round-trips per run (default 25). */
@@ -77,7 +77,7 @@ export interface SecretaryLoopOptions {
   readonly condenser?: Condenser;
 }
 
-/** Outcome of {@link SecretaryLoop.run}. */
+/** Outcome of {@link FlorinaLoop.run}. */
 export interface LoopResult {
   /** The final assistant message (content without tool calls). */
   readonly final: ChatMessage;
@@ -97,7 +97,7 @@ export class LoopError extends Error {
   }
 }
 
-export class SecretaryLoop {
+export class FlorinaLoop {
   private readonly connector: ModelPort;
   private readonly tools: ToolRegistry;
   private readonly maxIterations: number;
@@ -106,7 +106,7 @@ export class SecretaryLoop {
   private readonly toolContext: ToolContext;
   private readonly condenser: Condenser | undefined;
 
-  constructor(options: SecretaryLoopOptions) {
+  constructor(options: FlorinaLoopOptions) {
     this.connector = options.connector;
     this.tools = options.tools;
     this.maxIterations = options.maxIterations ?? 25;

@@ -160,7 +160,7 @@ function agentCompleted(overrides: Partial<SupervisorEvent> = {}): SupervisorEve
 
 function makeDiffDigest(overrides: Partial<DiffDigest> = {}): DiffDigest {
   return {
-    branch: 'secretary/add-pagination',
+    branch: 'florina/add-pagination',
     baseCommit: 'base456',
     headCommit: 'abc123def',
     author: 'Test <test@example.com>',
@@ -229,7 +229,7 @@ describe('CompletionDigestBuilder', () => {
       const digest = builder.build('task-42', 'sess-7', events, diff);
 
       expect(digest.diffSummary).toEqual(diff);
-      expect(digest.branchName).toBe('secretary/add-pagination');
+      expect(digest.branchName).toBe('florina/add-pagination');
       expect(digest.commitHash).toBe('abc123def');
     });
 
@@ -305,11 +305,11 @@ describe('CompletionDigestBuilder', () => {
 
     it('includes branch name in summary when diff digest is provided', () => {
       const events: SupervisorEvent[] = [agentStarted(), agentCompleted()];
-      const diff = makeDiffDigest({ branch: 'secretary/feature-x' });
+      const diff = makeDiffDigest({ branch: 'florina/feature-x' });
 
       const digest = builder.build('task-42', 'sess-7', events, diff);
 
-      expect(digest.summary).toContain('branch: secretary/feature-x');
+      expect(digest.summary).toContain('branch: florina/feature-x');
     });
 
     it('handles missing completion event gracefully', () => {
@@ -547,7 +547,7 @@ describe('DigestBuilder orchestrator', () => {
     });
 
     expect(digest.diffSummary).toEqual(diff);
-    expect(digest.branchName).toBe('secretary/add-pagination');
+    expect(digest.branchName).toBe('florina/add-pagination');
   });
 });
 
@@ -594,7 +594,7 @@ describe('CompletionDigestRepository', () => {
     expect(retrieved!.filesChangedCount).toBe(1);
     expect(retrieved!.testsPassed).toBe(10);
     expect(retrieved!.commitHash).toBe('abc123def');
-    expect(retrieved!.branchName).toBe('secretary/add-pagination');
+    expect(retrieved!.branchName).toBe('florina/add-pagination');
   });
 
   it('saves and retrieves a digest by session ID', () => {

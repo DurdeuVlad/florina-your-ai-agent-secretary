@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  SecretaryLoop,
+  FlorinaLoop,
   LoopError,
   ConnectorError,
   ToolRegistry,
@@ -11,12 +11,14 @@ import {
   type CompletionResponse,
   type LoopEvent,
   type ModelConnector,
-} from '../src/secretary/index.js';
+} from '../src/florina/index.js';
 
 /** Scripted fake connector: pops one canned response per complete() call. */
 class ScriptedConnector implements ModelConnector {
   readonly requests: CompletionRequest[] = [];
-  private readonly script: (CompletionResponse | ((req: CompletionRequest) => CompletionResponse))[];
+  private readonly script: (
+    CompletionResponse | ((req: CompletionRequest) => CompletionResponse)
+  )[];
 
   constructor(script: typeof this.script) {
     this.script = [...script];
@@ -34,10 +36,10 @@ class ScriptedConnector implements ModelConnector {
 
 const ok = (content: string | null): CompletionResponse => ({ content, toolCalls: [] });
 
-describe('SecretaryLoop', () => {
+describe('FlorinaLoop', () => {
   it('returns the final answer when the model does not call tools', async () => {
     const connector = new ScriptedConnector([ok('all done')]);
-    const loop = new SecretaryLoop({ connector, tools: new ToolRegistry() });
+    const loop = new FlorinaLoop({ connector, tools: new ToolRegistry() });
 
     const result = await loop.run([{ role: 'user', content: 'hi' }]);
 
@@ -78,7 +80,7 @@ describe('SecretaryLoop', () => {
     });
 
     const events: LoopEvent[] = [];
-    const loop = new SecretaryLoop({
+    const loop = new FlorinaLoop({
       connector,
       tools,
       onEvent: (e) => events.push(e),
@@ -90,12 +92,7 @@ describe('SecretaryLoop', () => {
     expect(result.iterations).toBe(2);
     expect(result.final).toEqual({ role: 'assistant', content: 'echoed: hello' });
     // user → assistant(tool_calls) → tool result → assistant(final)
-    expect(result.messages.map((m) => m.role)).toEqual([
-      'user',
-      'assistant',
-      'tool',
-      'assistant',
-    ]);
+    expect(result.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant']);
     expect(events.map((e) => e.kind)).toEqual([
       'iteration',
       'tool_call',
@@ -113,7 +110,7 @@ describe('SecretaryLoop', () => {
       },
       ok('recovered'),
     ]);
-    const loop = new SecretaryLoop({ connector, tools: new ToolRegistry() });
+    const loop = new FlorinaLoop({ connector, tools: new ToolRegistry() });
 
     const result = await loop.run([{ role: 'user', content: 'x' }]);
 
@@ -139,7 +136,7 @@ describe('SecretaryLoop', () => {
       { content: null, toolCalls: [{ id: 'c1', name: 'explode', arguments: {} }] },
       ok('handled'),
     ]);
-    const loop = new SecretaryLoop({ connector, tools });
+    const loop = new FlorinaLoop({ connector, tools });
     const result = await loop.run([{ role: 'user', content: 'x' }]);
     expect(result.messages[2]).toMatchObject({ role: 'tool', isError: true });
   });
@@ -159,7 +156,7 @@ describe('SecretaryLoop', () => {
       execute: async () => ({ content: 'ok' }),
     });
     const events: LoopEvent[] = [];
-    const loop = new SecretaryLoop({
+    const loop = new FlorinaLoop({
       connector,
       tools,
       maxIterations: 3,
@@ -175,10 +172,8 @@ describe('SecretaryLoop', () => {
 
   it('wraps connector failures in LoopError', async () => {
     const connector = new ScriptedConnector([]);
-    const loop = new SecretaryLoop({ connector, tools: new ToolRegistry() });
-    await expect(loop.run([{ role: 'user', content: 'x' }])).rejects.toBeInstanceOf(
-      LoopError,
-    );
+    const loop = new FlorinaLoop({ connector, tools: new ToolRegistry() });
+    await expect(loop.run([{ role: 'user', content: 'x' }])).rejects.toBeInstanceOf(LoopError);
   });
 
   it('forwards usage events for journaling', async () => {
@@ -190,7 +185,7 @@ describe('SecretaryLoop', () => {
       },
     ]);
     const events: LoopEvent[] = [];
-    const loop = new SecretaryLoop({
+    const loop = new FlorinaLoop({
       connector,
       tools: new ToolRegistry(),
       onEvent: (e) => events.push(e),
@@ -202,7 +197,7 @@ describe('SecretaryLoop', () => {
 
   it('does not mutate the caller-provided message array', async () => {
     const connector = new ScriptedConnector([ok('ok')]);
-    const loop = new SecretaryLoop({ connector, tools: new ToolRegistry() });
+    const loop = new FlorinaLoop({ connector, tools: new ToolRegistry() });
     const input: ChatMessage[] = [{ role: 'user', content: 'x' }];
     await loop.run(input);
     expect(input).toHaveLength(1);

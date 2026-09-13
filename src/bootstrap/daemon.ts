@@ -1,5 +1,5 @@
 /**
- * Secretary daemon -- the local control plane composition root (DEC-008,
+ * Florina daemon -- the local control plane composition root (DEC-008,
  * DEC-037, issue #93).
  *
  * The daemon is a long-running localhost WebSocket server that all four
@@ -77,10 +77,10 @@ import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.
 import { CapacityRouter } from '../core/application/use-cases/routing/capacity-router.js';
 import { FailoverService } from '../core/application/use-cases/tasks/failover.js';
 import { DelegationService } from '../core/application/use-cases/federation/delegation.js';
-import { RemoteSecretaryAdapter } from '../adapters/outbound/federation/remote-secretary-adapter.js';
+import { RemoteFlorinaAdapter } from '../adapters/outbound/federation/remote-florina-adapter.js';
 import { CapsuleRollupService } from '../core/application/use-cases/context/capsule-rollup.js';
 import { PreferenceProfileStore } from '../adapters/outbound/preferences/json-preference-profile.js';
-import { SecretaryMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
+import { FlorinaMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
 import { managerServiceFactory } from './mcp-server.js';
 import type { SupervisorEvent } from '../core/domain/events.js';
 
@@ -91,7 +91,7 @@ export const DEFAULT_DAEMON_PORT = 17419;
 export const DEFAULT_MCP_PORT = 17420;
 
 /** Default lockfile location (per-user OS temp dir). */
-export const DEFAULT_LOCKFILE = path.join(os.tmpdir(), 'agent-secretary.lock');
+export const DEFAULT_LOCKFILE = path.join(os.tmpdir(), 'florina.lock');
 
 /** Daemon configuration. */
 export interface DaemonOptions {
@@ -118,7 +118,7 @@ export interface DaemonOptions {
   readonly mcpPort?: number | null;
   /**
    * Preference profile JSON path backing the CapacityRouter (DEC-029).
-   * Defaults to `~/.agent-secretary/preferences.json`.
+   * Defaults to `~/.florina/preferences.json`.
    */
   readonly preferenceProfilePath?: string;
   /** When true, do not install SIGINT/SIGTERM handlers (useful for tests). */
@@ -153,7 +153,7 @@ export interface DaemonOptions {
 /** Daemon lifecycle states. */
 export type DaemonState = 'stopped' | 'starting' | 'running' | 'stopping';
 
-/** Events emitted by the SecretaryDaemon. */
+/** Events emitted by the FlorinaDaemon. */
 export interface DaemonEvents {
   state: (state: DaemonState) => void;
   connection: (socket: WebSocketConnection) => void;
@@ -165,13 +165,13 @@ export interface DaemonEvents {
  *
  * Usage:
  * ```ts
- * const daemon = new SecretaryDaemon({ dbPath: './secretary.db' });
+ * const daemon = new FlorinaDaemon({ dbPath: './florina.db' });
  * await daemon.start();
  * // ... clients connect to ws://127.0.0.1:17419 ...
  * await daemon.stop();
  * ```
  */
-export class SecretaryDaemon extends EventEmitter {
+export class FlorinaDaemon extends EventEmitter {
   private readonly options: {
     port: number;
     lockfile: string;
@@ -186,7 +186,7 @@ export class SecretaryDaemon extends EventEmitter {
   };
   private state: DaemonState = 'stopped';
   private server: WebSocketControlPlaneServer | null = null;
-  private mcpServer: SecretaryMcpHttpServer | null = null;
+  private mcpServer: FlorinaMcpHttpServer | null = null;
   private db: StorageDatabase | null = null;
   private api: ControlPlaneApi | null = null;
   private commandApi: CommandApi | null = null;
@@ -218,11 +218,11 @@ export class SecretaryDaemon extends EventEmitter {
     this.options = {
       port: options.port ?? DEFAULT_DAEMON_PORT,
       lockfile: options.lockfile ?? DEFAULT_LOCKFILE,
-      dbPath: options.dbPath ?? path.join(os.homedir(), '.agent-secretary', 'secretary.db'),
+      dbPath: options.dbPath ?? path.join(os.homedir(), '.florina', 'florina.db'),
       mcpPort: options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort,
       preferenceProfilePath:
         options.preferenceProfilePath ??
-        path.join(os.homedir(), '.agent-secretary', 'preferences.json'),
+        path.join(os.homedir(), '.florina', 'preferences.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
       ...(options.ideasDir !== undefined ? { ideasDir: options.ideasDir } : {}),
       ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
@@ -302,7 +302,7 @@ export class SecretaryDaemon extends EventEmitter {
 
   /**
    * The wired context-health monitor (DEC-035, issue #77) — per-agent
-   * window-fill snapshots for `secretary status` and the fleet view.
+   * window-fill snapshots for `florina status` and the fleet view.
    */
   get contextHealthMonitor(): ContextHealthMonitor | null {
     return this.contextHealth;
@@ -318,7 +318,7 @@ export class SecretaryDaemon extends EventEmitter {
 
   /**
    * The `http://` URL managers register with their provider CLIs to reach
-   * the Secretary MCP tool surface, or `null` when the MCP server is
+   * the Florina MCP tool surface, or `null` when the MCP server is
    * disabled or not yet started (DEC-018, issue #63).
    */
   get mcpUrl(): string | null {
@@ -441,7 +441,7 @@ export class SecretaryDaemon extends EventEmitter {
       // treats it as ordinary provider capacity.
       for (const remote of this.options.remoteProviders ?? []) {
         this.adapterRegistry.register(remote.id, () => {
-          const adapter = new RemoteSecretaryAdapter(null, {
+          const adapter = new RemoteFlorinaAdapter(null, {
             id: remote.id,
             remote: {
               host: remote.host,
@@ -598,7 +598,7 @@ export class SecretaryDaemon extends EventEmitter {
       // transport on its own localhost port serving the per-project
       // manager tool service. Disabled when mcpPort is null.
       if (this.options.mcpPort !== null) {
-        this.mcpServer = new SecretaryMcpHttpServer({
+        this.mcpServer = new FlorinaMcpHttpServer({
           port: this.options.mcpPort,
           serviceFactory: managerServiceFactory({
             commandApi: this.commandApi,
@@ -723,13 +723,13 @@ export class SecretaryDaemon extends EventEmitter {
         fs.unlinkSync(this.options.lockfile);
       } else {
         throw new Error(
-          `Another Secretary daemon is already running (pid ${pid}, lockfile ${this.options.lockfile})`,
+          `Another Florina daemon is already running (pid ${pid}, lockfile ${this.options.lockfile})`,
         );
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         // Re-throw our own "already running" error; otherwise continue.
-        if (err instanceof Error && err.message.startsWith('Another Secretary')) {
+        if (err instanceof Error && err.message.startsWith('Another Florina')) {
           throw err;
         }
         // Other read errors: ignore and try to write our own lockfile.
@@ -768,7 +768,7 @@ export class SecretaryDaemon extends EventEmitter {
     }
     const dbPath = this.options.dbPath;
     if (dbPath === ':memory:') {
-      return fs.mkdtempSync(path.join(os.tmpdir(), 'secretary-ideas-'));
+      return fs.mkdtempSync(path.join(os.tmpdir(), 'florina-ideas-'));
     }
     return path.join(path.dirname(dbPath), 'ideas');
   }

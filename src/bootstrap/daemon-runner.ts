@@ -1,5 +1,5 @@
 /**
- * DaemonRunner — manages the Secretary daemon process lifecycle (#20,
+ * DaemonRunner — manages the Florina daemon process lifecycle (#20,
  * DEC-037).
  *
  * The CLI uses this to start, stop, and inspect the daemon. For MVP the
@@ -9,7 +9,7 @@
  * a child process — the {@link DaemonRunner.start} method accepts a `fork`
  * flag, but defaults to in-process for simplicity.
  *
- * This is a bootstrap module: it composes the {@link SecretaryDaemon}
+ * This is a bootstrap module: it composes the {@link FlorinaDaemon}
  * composition root with OS-level process management (PID files, signals).
  *
  * PID file management:
@@ -21,13 +21,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { SecretaryDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_MCP_PORT } from './daemon.js';
+import { FlorinaDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_MCP_PORT } from './daemon.js';
 
 /** Default PID file location (per-user OS temp dir). */
-export const DEFAULT_PID_FILE = path.join(os.tmpdir(), 'agent-secretary.pid');
+export const DEFAULT_PID_FILE = path.join(os.tmpdir(), 'florina.pid');
 
 /** Default SQLite database path. */
-export const DEFAULT_DB_PATH = path.join(os.homedir(), '.agent-secretary', 'secretary.db');
+export const DEFAULT_DB_PATH = path.join(os.homedir(), '.florina', 'florina.db');
 
 /** Options for constructing a {@link DaemonRunner}. */
 export interface DaemonRunnerOptions {
@@ -57,9 +57,9 @@ export interface DaemonStatus {
 }
 
 /**
- * Manages the Secretary daemon lifecycle from the CLI.
+ * Manages the Florina daemon lifecycle from the CLI.
  *
- * The runner holds an optional in-process {@link SecretaryDaemon} reference
+ * The runner holds an optional in-process {@link FlorinaDaemon} reference
  * so `stop` can shut down a daemon started in the same process. For daemons
  * started in a separate process (future), `stop` signals the PID directly.
  */
@@ -69,13 +69,13 @@ export class DaemonRunner {
   private readonly dbPath: string;
   private readonly lockfile: string;
   private readonly mcpPort: number | null;
-  private daemon: SecretaryDaemon | null = null;
+  private daemon: FlorinaDaemon | null = null;
 
   constructor(options: DaemonRunnerOptions = {}) {
     this.pidFile = options.pidFile ?? DEFAULT_PID_FILE;
     this.port = options.port ?? DEFAULT_DAEMON_PORT;
     this.dbPath = options.dbPath ?? DEFAULT_DB_PATH;
-    this.lockfile = options.lockfile ?? path.join(os.tmpdir(), 'agent-secretary.lock');
+    this.lockfile = options.lockfile ?? path.join(os.tmpdir(), 'florina.lock');
     this.mcpPort = options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort;
   }
 
@@ -99,7 +99,7 @@ export class DaemonRunner {
     // Clean up a stale PID file before starting.
     this.removePidFile();
 
-    this.daemon = new SecretaryDaemon({
+    this.daemon = new FlorinaDaemon({
       port: this.port,
       dbPath: this.dbPath,
       lockfile: this.lockfile,
@@ -159,7 +159,7 @@ export class DaemonRunner {
   }
 
   /** The in-process daemon, if started in this process (for tests). */
-  get inProcessDaemon(): SecretaryDaemon | null {
+  get inProcessDaemon(): FlorinaDaemon | null {
     return this.daemon;
   }
 

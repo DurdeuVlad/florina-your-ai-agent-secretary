@@ -1,10 +1,10 @@
 /**
  * Manager MCP registration — the per-provider launch-config descriptor that
- * makes a manager agent's CLI aware of the Secretary tool server
+ * makes a manager agent's CLI aware of the Florina tool server
  * (DEC-018, issue #63).
  *
  * A manager is spawned by a provider CLI; that CLI must be told where the
- * Secretary MCP server lives. {@link managerMcpRegistration} produces the
+ * Florina MCP server lives. {@link managerMcpRegistration} produces the
  * exact registration command for each supported provider so the launch
  * path (or the human) can run it verbatim — no guessing at flag shapes.
  */
@@ -49,16 +49,16 @@ export function managerMcpRegistration(
   const args: readonly string[] = (() => {
     switch (provider) {
       case 'claude-code':
-        return ['mcp', 'add', '--transport', 'http', 'secretary', url];
+        return ['mcp', 'add', '--transport', 'http', 'florina', url];
       case 'codex':
-        return ['mcp', 'add', 'secretary', '--url', url];
+        return ['mcp', 'add', 'florina', '--url', url];
       case 'gemini':
-        return ['mcp', 'add', '--transport', 'http', 'secretary', url];
+        return ['mcp', 'add', '--transport', 'http', 'florina', url];
       case 'devin':
-        return ['mcp', 'add', 'secretary', url];
+        return ['mcp', 'add', 'florina', url];
       default:
         // Unknown provider: emit the generic shape for the human to adapt.
-        return ['mcp', 'add', 'secretary', url];
+        return ['mcp', 'add', 'florina', url];
     }
   })();
   return {

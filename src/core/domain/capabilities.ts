@@ -13,7 +13,7 @@
  * - The {@link CapabilityType} vocabulary is a superset of the event-level
  *   capability kinds so adapters, the policy engine, and the approval
  *   authority mapper share one enumeration.
- * - The Secretary narrows permissions, never silently widens them (DEC-011).
+ * - The Florina narrows permissions, never silently widens them (DEC-011).
  *   An LLM risk assessment can never turn a deny into an allow — that
  *   enforcement lives in `./policy.js`, but the structured fields here are the
  *   deterministic basis it operates on.
@@ -89,7 +89,7 @@ export const CAPABILITY_TYPE_VALUES: readonly CapabilityType[] = [
  * A structured scope boundary for a capability request.
  *
  * Scopes narrow what a capability may touch (paths, hosts, commands, ...).
- * The Secretary only ever narrows scope — never silently widens it (DEC-011).
+ * The Florina only ever narrows scope — never silently widens it (DEC-011).
  */
 export interface CapabilityScope {
   /** The class of resource the scope constrains. */
@@ -127,7 +127,7 @@ export interface CapabilityRequest {
 
 /**
  * The scope/duration of an approval once granted (DEC-007 configurable
- * autonomy). The Secretary narrows scope — a one-time approval never silently
+ * autonomy). The Florina narrows scope — a one-time approval never silently
  * becomes project-scoped.
  */
 export type ApprovalDuration = 'one-time' | 'task' | 'project';
@@ -245,7 +245,7 @@ export interface BuildCapabilityApprovalInput {
  * Build a {@link CapabilityApproval} recording the exact capability authorized
  * and the authority level used (DEC-010). `granted` defaults to `false` so an
  * approval must be explicitly confirmed before it permits anything — the
- * Secretary narrows permissions, never silently widens them (DEC-011).
+ * Florina narrows permissions, never silently widens them (DEC-011).
  */
 export function buildCapabilityApproval(input: BuildCapabilityApprovalInput): CapabilityApproval {
   return {

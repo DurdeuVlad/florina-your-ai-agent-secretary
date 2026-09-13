@@ -1,5 +1,5 @@
 /**
- * Remote Secretary adapter (DEC-036, issue #78) — parent side.
+ * Remote Florina adapter (DEC-036, issue #78) — parent side.
  *
  * A child daemon on another machine presents as a provider-shaped
  * capacity pool: this adapter implements {@link AgentRuntimePort} over
@@ -28,10 +28,10 @@ import type {
   Response,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import {
-  RemoteSecretaryClient,
-  RemoteSecretaryError,
-  type RemoteSecretaryClientOptions,
-} from './remote-secretary-client.js';
+  RemoteFlorinaClient,
+  RemoteFlorinaError,
+  type RemoteFlorinaClientOptions,
+} from './remote-florina-client.js';
 
 /** Narrowed client surface — the real client satisfies it, tests fake it. */
 export interface RemoteClientPort {
@@ -42,15 +42,15 @@ export interface RemoteClientPort {
   close(): void;
 }
 
-/** Options for {@link RemoteSecretaryAdapter}. */
-export interface RemoteSecretaryAdapterOptions {
+/** Options for {@link RemoteFlorinaAdapter}. */
+export interface RemoteFlorinaAdapterOptions {
   /**
    * Pool id — `provider@host` (e.g. `codex@server-x`). Registered in the
    * adapter registry under this id so the router sees it as capacity.
    */
   readonly id: string;
   /** Child daemon control-plane endpoint. */
-  readonly remote: RemoteSecretaryClientOptions;
+  readonly remote: RemoteFlorinaClientOptions;
   /** Child-side project delegations attach to (the repo lives there). */
   readonly projectId: string;
   /** Provider the child should prefer, when eligible on that machine. */
@@ -70,13 +70,13 @@ export interface RemoteSecretaryAdapterOptions {
  * State transitions mirror it: disconnected → connecting → connected →
  * disconnected.
  */
-export class RemoteSecretaryAdapter implements AgentRuntimePort {
+export class RemoteFlorinaAdapter implements AgentRuntimePort {
   readonly id: string;
   readonly fidelityTier: AdapterFidelityTier;
 
   private state: AdapterConnectionState = 'disconnected';
   private readonly bus: EventPublisherPort | null;
-  private readonly options: RemoteSecretaryAdapterOptions;
+  private readonly options: RemoteFlorinaAdapterOptions;
   private readonly client: RemoteClientPort;
   /** child taskId → parent {taskId, sessionId} correlation. */
   private readonly delegated = new Map<string, { taskId: string; sessionId: string }>();
@@ -85,13 +85,12 @@ export class RemoteSecretaryAdapter implements AgentRuntimePort {
   private pumpStarted = false;
   private streamDone = false;
 
-  constructor(bus: EventPublisherPort | null | undefined, options: RemoteSecretaryAdapterOptions) {
+  constructor(bus: EventPublisherPort | null | undefined, options: RemoteFlorinaAdapterOptions) {
     this.id = options.id;
     this.fidelityTier = options.fidelityTier ?? 'C';
     this.bus = bus ?? null;
     this.options = options;
-    this.client =
-      options.client ?? new RemoteSecretaryClient(options.remote);
+    this.client = options.client ?? new RemoteFlorinaClient(options.remote);
   }
 
   get connectionState(): AdapterConnectionState {
@@ -180,14 +179,12 @@ export class RemoteSecretaryAdapter implements AgentRuntimePort {
   }
 
   async cancel(sessionId: string): Promise<void> {
-    const entry = [...this.delegated.entries()].find(
-      ([, v]) => v.sessionId === sessionId,
-    );
+    const entry = [...this.delegated.entries()].find(([, v]) => v.sessionId === sessionId);
     if (entry === undefined) return;
     await this.client.send({
       kind: 'stop-task',
       taskId: entry[0],
-      reason: 'cancelled by parent secretary',
+      reason: 'cancelled by parent florina',
     });
     this.enqueue({
       type: 'AgentStopped',
@@ -252,4 +249,4 @@ export class RemoteSecretaryAdapter implements AgentRuntimePort {
   }
 }
 
-export { RemoteSecretaryError };
+export { RemoteFlorinaError };

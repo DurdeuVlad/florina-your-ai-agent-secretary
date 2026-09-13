@@ -1,9 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import {
-  LiteLLMConnector,
-  ConnectorError,
-  ToolRegistry,
-} from '../src/secretary/index.js';
+import { LiteLLMConnector, ConnectorError, ToolRegistry } from '../src/florina/index.js';
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -38,7 +34,7 @@ describe('LiteLLMConnector', () => {
 
     await connector.complete({
       messages: [
-        { role: 'system', content: 'you are a secretary' },
+        { role: 'system', content: 'you are Florina' },
         { role: 'user', content: 'hello' },
       ],
       tools: registry.specs(),
@@ -153,9 +149,7 @@ describe('LiteLLMConnector', () => {
     });
 
     const res = await connector.complete({ messages: [{ role: 'user', content: 'x' }] });
-    expect(res.toolCalls).toEqual([
-      { id: 'call_1', name: 'todo', arguments: { action: 'list' } },
-    ]);
+    expect(res.toolCalls).toEqual([{ id: 'call_1', name: 'todo', arguments: { action: 'list' } }]);
     expect(res.usage).toEqual({
       promptTokens: 10,
       completionTokens: 5,
@@ -206,9 +200,7 @@ describe('LiteLLMConnector', () => {
   });
 
   it('throws ConnectorError when the proxy returns non-JSON', async () => {
-    const fakeFetch = vi.fn(
-      async () => new Response('<html>proxy down</html>', { status: 200 }),
-    );
+    const fakeFetch = vi.fn(async () => new Response('<html>proxy down</html>', { status: 200 }));
     const connector = new LiteLLMConnector({
       baseUrl: 'http://x',
       model: 'm',

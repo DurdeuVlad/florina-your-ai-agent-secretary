@@ -20,7 +20,7 @@
  * - Permission requests map to `ApprovalRequested` with structured capability
  *   fields per DEC-010. The capability and destination are inferred from the
  *   structured `tool_name` / `tool_input` fields, not from free text.
- * - The Secretary narrows permissions, never silently widens them (DEC-011).
+ * - The Florina narrows permissions, never silently widens them (DEC-011).
  *   Any unstructured or unknown field falls back to conservative defaults:
  *   `CapabilityType.Other` and `CapabilityRiskLevel.Critical` so the attention
  *   engine never auto-approves an unrecognized request.
@@ -279,7 +279,7 @@ export function inferDestinationFromTool(
 /**
  * Determine the risk level for a capability request inferred from a tool call.
  *
- * The Secretary narrows permissions, never silently widens them (DEC-011).
+ * The Florina narrows permissions, never silently widens them (DEC-011).
  * The default risk for any unrecognized or potentially destructive capability
  * is `critical` so the attention engine never auto-approves it. Known
  * low-risk read-only operations are downgraded conservatively.

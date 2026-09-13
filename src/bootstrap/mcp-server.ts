@@ -3,7 +3,7 @@
  *
  * Wires the inbound MCP adapter family to the daemon's live core services:
  * each incoming manager request is resolved to a project
- * (`x-secretary-project` header or `?project=` query param), then a fresh
+ * (`x-florina-project` header or `?project=` query param), then a fresh
  * {@link ManagerToolService} is composed for that project — the
  * CapacityRouter is rebuilt per request so preference-profile edits take
  * effect immediately.
@@ -55,7 +55,7 @@ export function managerServiceFactory(deps: ManagerServiceFactoryDeps): ManagerS
     if (projectId === null) {
       throw new Error(
         'manager connection is missing its project scope ' +
-          '(x-secretary-project header or ?project= query param)',
+          '(x-florina-project header or ?project= query param)',
       );
     }
     const project = deps.projects.getById(projectId);

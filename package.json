@@ -1,12 +1,12 @@
 {
-  "name": "agent-secretary",
+  "name": "florina",
   "version": "0.0.1",
   "description": "An open-source attention broker for coding agents.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "secretary": "dist/cli/index.js",
-    "asec": "dist/cli/index.js"
+    "florina": "dist/cli/index.js",
+    "flor": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",

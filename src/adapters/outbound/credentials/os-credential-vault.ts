@@ -7,12 +7,12 @@
  *
  * - **Windows**: Windows Credential Manager via the `cmdkey` child process.
  *   Credentials are stored as generic credentials under the
- *   `AgentSecretary:` namespace. `cmdkey` can store and delete but cannot
+ *   `AgentFlorina:` namespace. `cmdkey` can store and delete but cannot
  *   retrieve passwords from the command line (the wincred API is needed for
  *   that), so the encrypted file store is used as the retrieval path on
  *   Windows. A native addon would be needed for full keychain retrieval.
  * - **macOS**: the `security` command (Keychain). Generic password items in
- *   the login keychain under the `AgentSecretary` service. Full
+ *   the login keychain under the `AgentFlorina` service. Full
  *   store/retrieve/delete support.
  * - **Linux / fallback**: a file-based encrypted store. Credentials are
  *   encrypted with AES-256-GCM using a key derived from machine-specific
@@ -22,7 +22,7 @@
  *
  * Security notes (DEC-011):
  * - The vault is the "secret/capability broker" rung of the security
- *   hierarchy. It sits below the secretary policy rung.
+ *   hierarchy. It sits below Florina policy rung.
  * - `retrieveCredential` is intended for internal use by the
  *   {@link CapabilityBroker} only — workers must never call it directly.
  * - `listCredentials` returns names only — never values.
@@ -64,7 +64,7 @@ export interface CredentialBrokerOptions {
   readonly backend?: CredentialBackend;
   /**
    * Directory for the file-based fallback store. Defaults to
-   * `~/.agent-secretary/credentials`.
+   * `~/.florina/credentials`.
    */
   readonly fileStoreDir?: string;
   /**
@@ -75,7 +75,7 @@ export interface CredentialBrokerOptions {
 }
 
 /** Prefix used to namespace credentials in OS keychains. */
-const KEYCHAIN_SERVICE = 'AgentSecretary';
+const KEYCHAIN_SERVICE = 'AgentFlorina';
 
 /** PBKDF2 iterations for file-store key derivation. */
 const PBKDF2_ITERATIONS = 100_000;
@@ -110,14 +110,14 @@ function detectBackend(): CredentialBackend {
  * store or KMS should be used.
  */
 function defaultMachineKeyMaterial(): string {
-  return `agent-secretary:${os.hostname()}:${os.userInfo().username}:${os.platform()}:${os.arch()}`;
+  return `florina:${os.hostname()}:${os.userInfo().username}:${os.platform()}:${os.arch()}`;
 }
 
 /**
  * Default directory for the file-based credential store.
  */
 function defaultFileStoreDir(): string {
-  return path.join(os.homedir(), '.agent-secretary', 'credentials');
+  return path.join(os.homedir(), '.florina', 'credentials');
 }
 
 /**
@@ -253,7 +253,7 @@ export class CredentialBroker implements CredentialVaultPort {
     // Store the credential. The password is base64-encoded to avoid command-
     // line parsing issues with special characters in the JSON payload.
     const encoded = Buffer.from(JSON.stringify(record), 'utf-8').toString('base64');
-    execFileSync('cmdkey', [`/generic:${target}`, '/user:agent-secretary', `/pass:${encoded}`], {
+    execFileSync('cmdkey', [`/generic:${target}`, '/user:florina', `/pass:${encoded}`], {
       stdio: 'ignore',
     });
     // Also write to the encrypted file store (retrieval path on Windows).

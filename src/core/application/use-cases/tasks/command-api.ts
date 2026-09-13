@@ -1,5 +1,5 @@
 /**
- * Typed command API for the Secretary daemon (issue #19, DEC-002, DEC-026).
+ * Typed command API for the Florina daemon (issue #19, DEC-002, DEC-026).
  *
  * Voice and CLI share the same typed command API â€” voice is never a parallel
  * orchestration system (PRODUCT_DESIGN.md "Voice Experience"). Every surface
@@ -100,8 +100,8 @@ export interface SessionConfig {
   readonly prompt?: string;
   /**
    * MCP servers the session registers at launch (DEC-018, issue #63) —
-   * manager-role tasks carry the Secretary's own tool server so the
-   * manager agent can call `secretary_spawn_task` et al.
+   * manager-role tasks carry the Florina's own tool server so the
+   * manager agent can call `florina_spawn_task` et al.
    */
   readonly mcpServers?: readonly McpServerSpec[];
 }
@@ -260,7 +260,7 @@ export interface ShutdownCommand {
  *
  * When `agentId` is present the response contains at most that agent's
  * snapshot; otherwise every tracked agent is returned. Powers
- * `secretary status` and the desktop fleet view.
+ * `florina status` and the desktop fleet view.
  */
 export interface QueryContextHealthCommand {
   readonly kind: 'context-health';
@@ -368,7 +368,7 @@ export interface CreatePrCommand {
 }
 
 /**
- * Accept a remote delegation from a parent Secretary (DEC-036, issue
+ * Accept a remote delegation from a parent Florina (DEC-036, issue
  * #78). The payload is the Task-Capsule objective plus routing intent;
  * the child creates + starts the task through the same machinery as a
  * local spawn — the repo named by `projectId` must exist on this
@@ -736,7 +736,7 @@ export interface CommandApiDeps {
   readonly preferences?: PreferenceProfilePort;
   /**
    * Federated delegation service (DEC-036, issue #78). When wired,
-   * `delegate-task` accepts remote delegations from a parent Secretary;
+   * `delegate-task` accepts remote delegations from a parent Florina;
    * when absent the command fails cleanly — this daemon is not a child.
    */
   readonly delegation?: DelegationService;
@@ -1261,7 +1261,7 @@ export class CommandApi {
   /**
    * raise-attention: surface a question or decision to the human.
    *
-   * Used by manager agents (`secretary_request_human_input`) and daemon
+   * Used by manager agents (`florina_request_human_input`) and daemon
    * subsystems to create inbox items through the typed command path rather
    * than a side channel (DEC-002/014, issue #63).
    */
@@ -1410,7 +1410,7 @@ export class CommandApi {
    * context-health: per-agent window-fill snapshots (DEC-035, issue #77).
    *
    * When no monitor is wired the response is an empty list — the command
-   * itself is still well-formed so `secretary status` degrades cleanly.
+   * itself is still well-formed so `florina status` degrades cleanly.
    */
   private async handleContextHealth(
     cmd: QueryContextHealthCommand,
@@ -1620,7 +1620,7 @@ export class CommandApi {
 
   /**
    * delegate-task (DEC-036, issue #78): accept a remote delegation from a
-   * parent Secretary. The DelegationService resolves the project and
+   * parent Florina. The DelegationService resolves the project and
    * spawns through the same route → create → worktree → start machinery
    * as every local spawn — a remote pool is just more capacity.
    */

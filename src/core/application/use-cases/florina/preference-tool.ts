@@ -1,9 +1,9 @@
 /**
- * `preference` tool — how the Secretary writes learned routing preferences
+ * `preference` tool — how the Florina writes learned routing preferences
  * as durable User-scope memories (DEC-020/029, issue #65).
  *
  * When the user states a preference in conversation ("never Opus on
- * Claude", "Haiku for repeatable reading"), the Secretary records it here:
+ * Claude", "Haiku for repeatable reading"), the Florina records it here:
  * a routing rule or a model-level deny. Denies are machine-enforced by the
  * daemon — a prompt preference can never be prompt-engineered around.
  * Every mutation is persisted immediately so learned preferences survive
@@ -23,9 +23,7 @@ function render(store: PreferenceProfilePort): string {
         `rule[${i}]: ${r.provider}${r.model !== undefined ? `/${r.model}` : ''}` +
         (r.workTypes !== undefined ? ` for work=[${r.workTypes.join(',')}]` : ' (catch-all)'),
     ),
-    ...denied.map(
-      (d) => `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}`,
-    ),
+    ...denied.map((d) => `deny: ${d.provider}${d.model !== undefined ? `/${d.model}` : ''}`),
   ];
   return lines.length === 0 ? 'no preferences recorded' : lines.join('\n');
 }
@@ -41,7 +39,7 @@ export function createPreferenceTool(store: PreferenceProfilePort): ToolDefiniti
   return {
     name: 'preference',
     description:
-      'Record and inspect the user\'s durable provider/model routing preferences. ' +
+      "Record and inspect the user's durable provider/model routing preferences. " +
       'Use when the user states a preference ("never use Opus", "Codex for heavy lifting") ' +
       'so it persists as a User-scope memory rather than a one-off instruction.',
     parameters: {

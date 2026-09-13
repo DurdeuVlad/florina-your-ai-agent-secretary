@@ -15,7 +15,7 @@
  *
  * Security hierarchy (DEC-011):
  *
- *   OS/container -> agent sandbox -> capability broker -> secretary policy
+ *   OS/container -> agent sandbox -> capability broker -> Florina policy
  *   -> human approval -> LLM recommendations
  *
  * The capability broker sits at the "capability broker" rung. Policy is

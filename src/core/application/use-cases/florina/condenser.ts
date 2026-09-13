@@ -1,5 +1,5 @@
 /**
- * Condenser — rolling context compaction for the Secretary's loop
+ * Condenser — rolling context compaction for the Florina's loop
  * (DEC-035, issue #75).
  *
  * Conversation histories grow without bound; the model's context window
@@ -61,7 +61,8 @@ export interface CondenserOptions {
   readonly summarize?: Summarizer;
 }
 
-const CONDENSED_PREFIX = '[context condensed — earlier messages summarized; full history remains in the event journal]';
+const CONDENSED_PREFIX =
+  '[context condensed — earlier messages summarized; full history remains in the event journal]';
 
 /**
  * Deterministic extractive fallback: keeps each message's role, tool names,

@@ -7,8 +7,8 @@ import {
   PreferenceProfileError,
   validatePreferenceProfile,
 } from '../src/daemon/preference-profile.js';
-import { createPreferenceTool } from '../src/secretary/preference-tool.js';
-import { ToolRegistry } from '../src/secretary/tool-registry.js';
+import { createPreferenceTool } from '../src/florina/preference-tool.js';
+import { ToolRegistry } from '../src/florina/tool-registry.js';
 import { CapacityRouter } from '../src/daemon/capacity-router.js';
 import { QuotaLedger } from '../src/daemon/quota-ledger.js';
 import { writeFile } from 'node:fs/promises';

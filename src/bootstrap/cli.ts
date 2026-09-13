@@ -14,7 +14,7 @@ import { createStdinVoiceSession } from './voice-session.js';
 
 /**
  * CLI entry point. Parses argv, dispatches to a subcommand, and returns the
- * process exit code. Called by the `secretary` / `asec` binary shim at
+ * process exit code. Called by the `florina` / `flor` binary shim at
  * `src/cli/index.ts`.
  */
 export async function main(

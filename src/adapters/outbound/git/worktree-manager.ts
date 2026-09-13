@@ -11,22 +11,22 @@
  *
  * Every task worktree is created on a branch named exactly:
  *
- *     secretary/<task-slug>
+ *     florina/<task-slug>
  *
  * where `<task-slug>` is a sanitized, filesystem- and git-safe identifier
- * derived from the task (e.g. `add-cursor-pagination`). The `secretary/`
- * prefix namespaces all Secretary-managed branches so they are clearly
+ * derived from the task (e.g. `add-cursor-pagination`). The `florina/`
+ * prefix namespaces all Florina-managed branches so they are clearly
  * distinguishable from human-authored feature branches and can be listed /
  * cleaned up safely. This convention is documented here, in AGENTS.md, and
  * recorded as the resolution of DEC-024 in the Decision Ledger.
  *
  * ## Prune policy (DEC-024 — resolved)
  *
- * Worktrees are retained until an explicit prune (`secretary prune`).
+ * Worktrees are retained until an explicit prune (`florina prune`).
  * `pruneWorktree` removes a worktree only when it is **clean** (no
  * uncommitted changes). Dirty worktrees are never silently deleted —
  * `pruneWorktree` throws so the human can decide what to do with the
- * uncommitted work (DEC-011: the Secretary narrows permissions and never
+ * uncommitted work (DEC-011: the Florina narrows permissions and never
  * silently widens them; destroying uncommitted work would be a destructive
  * widening).
  *
@@ -48,19 +48,19 @@ import type { GitClientPort } from '../../../core/application/ports/outbound/git
 import { NodeGitClient } from './node-git-client.js';
 
 /**
- * Prefix for every Secretary-managed worktree branch (DEC-024).
+ * Prefix for every Florina-managed worktree branch (DEC-024).
  *
- * Branches are always created as `secretary/<task-slug>`.
+ * Branches are always created as `florina/<task-slug>`.
  */
-export const SECRETARY_BRANCH_PREFIX = 'secretary';
+export const FLORINA_BRANCH_PREFIX = 'florina';
 
 /**
- * Directory name (relative to the repository's parent) where Secretary
+ * Directory name (relative to the repository's parent) where Florina
  * worktrees are placed. Keeping worktrees outside the main working tree
  * avoids nesting issues with `git worktree add` and keeps the main repo
  * clean.
  */
-export const SECRETARY_WORKTREE_DIR = '.secretary-worktrees';
+export const FLORINA_WORKTREE_DIR = '.florina-worktrees';
 
 /**
  * Manages the git worktree lifecycle for tasks (DEC-024).
@@ -78,11 +78,11 @@ export class GitWorktreeAdapter implements WorktreePort {
 
   /**
    * Create a new git worktree for a task on the branch
-   * `secretary/<task-slug>` (DEC-024).
+   * `florina/<task-slug>` (DEC-024).
    *
    * The worktree is placed at a deterministic path derived from the
    * repository path and the task slug:
-   * `<parent-of-repo>/.secretary-worktrees/<repo-basename>-<task-slug>`.
+   * `<parent-of-repo>/.florina-worktrees/<repo-basename>-<task-slug>`.
    *
    * @param repoPath   Absolute path to the main repository (the worktree's
    *                   base).
@@ -94,7 +94,7 @@ export class GitWorktreeAdapter implements WorktreePort {
    */
   createWorktree(repoPath: string, taskSlug: string): string {
     const slug = sanitizeSlug(taskSlug);
-    const branch = `${SECRETARY_BRANCH_PREFIX}/${slug}`;
+    const branch = `${FLORINA_BRANCH_PREFIX}/${slug}`;
     const worktreePath = this.worktreePathFor(repoPath, slug);
 
     // `git worktree add` creates the worktree directory itself, but its
@@ -183,14 +183,14 @@ export class GitWorktreeAdapter implements WorktreePort {
   /**
    * Compute the deterministic worktree path for a repository + slug.
    *
-   * Worktrees are placed in a sibling `.secretary-worktrees` directory so
+   * Worktrees are placed in a sibling `.florina-worktrees` directory so
    * they never nest inside the main working tree (which `git worktree add`
    * refuses) and so the path is stable across runs.
    */
   worktreePathFor(repoPath: string, slug: string): string {
     const parent = path.dirname(repoPath);
     const repoBasename = path.basename(repoPath);
-    return path.join(parent, SECRETARY_WORKTREE_DIR, `${repoBasename}-${slug}`);
+    return path.join(parent, FLORINA_WORKTREE_DIR, `${repoBasename}-${slug}`);
   }
 
   /**
@@ -244,13 +244,13 @@ export function sanitizeSlug(slug: string): string {
 }
 
 /**
- * Build the canonical Secretary branch name for a task slug (DEC-024).
+ * Build the canonical Florina branch name for a task slug (DEC-024).
  *
  * @param taskSlug The raw task slug (will be sanitized).
- * @returns `secretary/<sanitized-slug>`.
+ * @returns `florina/<sanitized-slug>`.
  */
-export function secretaryBranchName(taskSlug: string): string {
-  return `${SECRETARY_BRANCH_PREFIX}/${sanitizeSlug(taskSlug)}`;
+export function florinaBranchName(taskSlug: string): string {
+  return `${FLORINA_BRANCH_PREFIX}/${sanitizeSlug(taskSlug)}`;
 }
 
 /**

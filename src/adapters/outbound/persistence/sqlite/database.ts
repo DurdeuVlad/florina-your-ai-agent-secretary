@@ -1,6 +1,6 @@
 /**
  * Database initialization, connection management, and migration orchestration
- * for the Agent Secretary SQLite storage layer (DEC-012, DEC-020).
+ * for the Florina SQLite storage layer (DEC-012, DEC-020).
  *
  * `Database` wraps a `better-sqlite3` connection, runs forward-only migrations
  * on open, and exposes a health check. The class is intentionally synchronous
@@ -42,7 +42,7 @@ export interface OpenResult {
  *
  * Usage:
  * ```ts
- * const db = new Database({ path: './secretary.db' });
+ * const db = new Database({ path: './florina.db' });
  * db.open();        // runs migrations
  * db.healthCheck(); // returns true if the connection is usable
  * db.close();       // releases the connection

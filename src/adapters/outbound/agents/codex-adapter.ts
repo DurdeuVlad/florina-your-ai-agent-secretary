@@ -237,7 +237,7 @@ export class CodexAdapter extends BaseAdapter {
         agentId: this.mapperCtx.agentId,
         adapterFidelityTier: this.mapperCtx.adapterFidelityTier,
         reason: 'user',
-        details: 'Cancelled by secretary',
+        details: 'Cancelled by Florina',
       });
       this.completeStream();
     }

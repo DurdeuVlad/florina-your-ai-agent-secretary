@@ -32,7 +32,7 @@ export interface DenyRule {
 
 /**
  * The user's preference profile (issue #65): ordered routing rules plus
- * model-level deny rules. Written by the Secretary's preference memories
+ * model-level deny rules. Written by the Florina's preference memories
  * (User-scope capsule) and editable via CLI.
  */
 export interface PreferenceProfile {

@@ -24,7 +24,7 @@ import { join } from 'node:path';
  * CLI flags forwarded to the `whisper.cpp` binary.
  *
  * These map directly onto `whisper-cli` arguments; see the whisper.cpp docs
- * for the full set. Only the subset relevant to the Secretary pipeline is
+ * for the full set. Only the subset relevant to the Florina pipeline is
  * modelled here.
  */
 export interface WhisperCliOptions {
@@ -36,7 +36,7 @@ export interface WhisperCliOptions {
   readonly beamSize: number;
   /** Whether to enable the speed-up heuristic (faster, slightly less accurate). */
   readonly speedUp: boolean;
-  /** Emit JSON output (always `true` for the Secretary pipeline). */
+  /** Emit JSON output (always `true` for the Florina pipeline). */
   readonly outputJson: boolean;
 }
 
@@ -388,7 +388,7 @@ export class WhisperCppBackend implements WhisperBackend {
     }
     const audioPath = join(
       this.tempDir,
-      `secretary-whisper-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`,
+      `florina-whisper-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`,
     );
     this.tempFiles.push(audioPath);
     await writeFile(audioPath, audioData);
