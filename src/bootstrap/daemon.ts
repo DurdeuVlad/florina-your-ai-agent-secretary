@@ -61,6 +61,8 @@ import {
   type ApprovalGate,
 } from '../core/application/use-cases/attention/attention-aggregator.js';
 import { GrantService } from '../core/application/use-cases/capabilities/grant-service.js';
+import { EventJournalWriter } from '../core/application/use-cases/journal/event-journal-writer.js';
+import { VerificationGate } from '../core/application/use-cases/verification/verification-gate.js';
 import { collectHealth } from '../core/application/use-cases/health.js';
 import type { HealthStatus } from '../core/application/use-cases/health.js';
 import { QuotaLedger } from '../core/application/use-cases/routing/quota-ledger.js';
@@ -157,6 +159,8 @@ export class SecretaryDaemon extends EventEmitter {
   private failoverService: FailoverService | null = null;
   private capsuleRollup: CapsuleRollupService | null = null;
   private grantService: GrantService | null = null;
+  private journalWriter: EventJournalWriter | null = null;
+  private verificationGate: VerificationGate | null = null;
   private startedAt = 0;
   private lockFd: number | null = null;
   private signalHandlers: Array<() => void> = [];
@@ -314,10 +318,32 @@ export class SecretaryDaemon extends EventEmitter {
             : 'escalate';
         },
       };
+      // Wire the verification gate (DEC-032, issue #68): a claimed
+      // completion surfaces as done only with journaled proof. The gate
+      // reads evidence persisted by the journal writer.
+      this.verificationGate = new VerificationGate({ journal: repos.events });
       this.attentionAggregator = new AttentionAggregator(this.attentionInbox, this.bus, {
         approvalGate,
+        verificationGate: this.verificationGate,
       });
       this.attentionAggregator.start();
+
+      // Wire the bus→journal bridge (DEC-012): adapter observations —
+      // test results, verification probes, file changes — are durable
+      // evidence in the immutable journal, not just transient bus
+      // traffic. Required by the verification gate (#68).
+      this.journalWriter = new EventJournalWriter({
+        journal: repos.events,
+        bus: this.bus,
+        // Journaling is best-effort: events for unregistered
+        // tasks/sessions can't satisfy the journal's foreign keys and
+        // must not break the publish pipeline. 'error' is only emitted
+        // when a listener exists (emitting it without one throws).
+        onError: (err) => {
+          if (this.listenerCount('error') > 0) this.emit('error', err);
+        },
+      });
+      this.journalWriter.start();
       this.worktreeManager = new GitWorktreeAdapter();
       this.taskStateMachine = new TaskStateMachine(repos.tasks, repos.events);
 
@@ -590,6 +616,8 @@ export class SecretaryDaemon extends EventEmitter {
     if (this.attentionAggregator) {
       this.attentionAggregator.stop();
       this.attentionAggregator = null;
+      this.journalWriter?.stop();
+      this.journalWriter = null;
     }
     if (this.metricsCollector) {
       this.metricsCollector.detach();
@@ -635,6 +663,7 @@ export class SecretaryDaemon extends EventEmitter {
     this.failoverService = null;
     this.capsuleRollup = null;
     this.grantService = null;
+    this.verificationGate = null;
   }
 
   private setState(state: DaemonState): void {

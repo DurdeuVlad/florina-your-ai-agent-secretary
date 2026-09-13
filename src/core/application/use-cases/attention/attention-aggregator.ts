@@ -21,6 +21,7 @@ import type {
   SupervisorEvent,
 } from '../../../domain/events.js';
 import type { CapabilityRiskLevel } from '../../../domain/capabilities.js';
+import type { VerificationGate } from '../verification/verification-gate.js';
 import {
   type AttentionItem,
   type AttentionItemKind,
@@ -65,6 +66,13 @@ export interface AttentionAggregatorConfig {
    * `ApprovalRequested` events covered by an active grant.
    */
   readonly approvalGate?: ApprovalGate;
+  /**
+   * Optional verification gate (DEC-032, issue #68). When set, an
+   * `AgentCompleted` claim is assessed against journaled evidence:
+   * verified → `Digest` item; unverified → `UnverifiedCompletion` item
+   * carrying a re-verification objective instead of surfacing as done.
+   */
+  readonly verificationGate?: VerificationGate;
 }
 
 /** Default deduplication window: 30 seconds. */
@@ -94,6 +102,7 @@ export class AttentionAggregator {
   private readonly dedupWindowMs: number;
   private readonly now: () => number;
   private readonly approvalGate?: ApprovalGate;
+  private readonly verificationGate?: VerificationGate;
   private unsubscribe?: () => void;
   /** Last creation time (ms) per dedup key `${taskId}:${kind}`. */
   private readonly lastCreated = new Map<string, number>();
@@ -108,6 +117,7 @@ export class AttentionAggregator {
     this.dedupWindowMs = config.dedupWindowMs ?? DEFAULT_DEDUP_WINDOW_MS;
     this.now = config.now ?? (() => Date.now());
     this.approvalGate = config.approvalGate;
+    this.verificationGate = config.verificationGate;
   }
 
   /**
@@ -232,8 +242,42 @@ export class AttentionAggregator {
     });
   }
 
-  /** AgentCompleted → Digest, priority Low. */
+  /**
+   * AgentCompleted → Digest (verified) or UnverifiedCompletion (DEC-032).
+   *
+   * "Done means proven": when a {@link VerificationGate} is configured,
+   * the completion claim is assessed against journaled evidence. A
+   * verified claim produces the normal `Digest` item; an unverified one
+   * produces a `UnverifiedCompletion` item (High — a failure mode, not
+   * a normal state) carrying the re-verification objective for routing
+   * back to the worker or its manager.
+   */
   private addDigestItem(event: AgentCompletedEvent): void {
+    const gate = this.verificationGate;
+    const assessment = gate?.gateCompletion(event.taskId, event.sessionId, event.agentId);
+
+    if (gate !== undefined && assessment !== undefined && assessment.verdict === 'unverified') {
+      this.maybeAddItem({
+        taskId: event.taskId,
+        kind: 'UnverifiedCompletion',
+        priority: 'High',
+        createdAt: event.timestamp,
+        payload: {
+          summary: event.summary,
+          deliverables: event.deliverables,
+          exitCode: event.exitCode,
+          durationMs: event.durationMs,
+          sessionId: event.sessionId,
+          agentId: event.agentId,
+          verified: false,
+          evidenceCount: assessment.facts.length,
+          missing: [...assessment.missing],
+          verificationObjective: gate.verificationObjective(assessment),
+        },
+      });
+      return;
+    }
+
     this.maybeAddItem({
       taskId: event.taskId,
       kind: 'Digest',
@@ -246,6 +290,12 @@ export class AttentionAggregator {
         durationMs: event.durationMs,
         sessionId: event.sessionId,
         agentId: event.agentId,
+        ...(assessment !== undefined
+          ? {
+              verified: assessment.verdict === 'verified',
+              evidenceCount: assessment.facts.length,
+            }
+          : {}),
       },
     });
   }

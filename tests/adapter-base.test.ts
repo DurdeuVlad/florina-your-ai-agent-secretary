@@ -439,6 +439,10 @@ describe('integration: daemon + stub adapter + event journal', () => {
 
     // Wire EventBus events into the journal: each published SupervisorEvent
     // is appended to the EventRepository as an immutable journal row.
+    // (journalDb is intentionally a separate in-memory db from the
+    // daemon's own journal — the daemon's EventJournalWriter handles the
+    // production path; this test exercises the adapter → bus → journal
+    // pipeline against an external repository.)
     const unsubscribe = bus.onEvent((event: SupervisorEvent) => {
       const journalEvent = buildEvent({
         sessionId: event.sessionId,
@@ -458,7 +462,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
 
       // Consume the full event stream.
       for await (const _event of stub.streamEvents()) {
-        // Events are journaled by the EventBus listener above.
+        // Events are journaled by the daemon's EventJournalWriter.
       }
 
       await stub.disconnect();

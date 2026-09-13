@@ -31,6 +31,7 @@ export type AttentionItemKind =
   | 'IdleAgent'
   | 'StaleTask'
   | 'Digest'
+  | 'UnverifiedCompletion'
   | 'Custom';
 
 /**
@@ -104,6 +105,7 @@ export const ATTENTION_ITEM_KINDS: readonly AttentionItemKind[] = [
   'IdleAgent',
   'StaleTask',
   'Digest',
+  'UnverifiedCompletion',
   'Custom',
 ] as const;
 
