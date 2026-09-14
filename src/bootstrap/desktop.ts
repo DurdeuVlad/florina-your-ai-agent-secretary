@@ -77,6 +77,7 @@ async function main(): Promise<void> {
       resizable: true,
     },
     trayBackend: new ElectronTrayBackend(),
+    closeToTray: true,
     onTrayAction: (action: TrayAction) => {
       switch (action) {
         case 'show-window':
@@ -90,7 +91,8 @@ async function main(): Promise<void> {
           runCli('stop');
           break;
         case 'quit':
-          app.quit();
+          // Explicit quit: tear down cleanly (stop() bypasses close-to-tray).
+          void desktopApp.stop().finally(() => app.quit());
           break;
       }
     },
