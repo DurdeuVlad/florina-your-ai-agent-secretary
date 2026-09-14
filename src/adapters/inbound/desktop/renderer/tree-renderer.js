@@ -96,7 +96,7 @@ const TAG_CLASS = {
   WorkRow: 'workrow',
   WorkDot: 'dot wait',
   /* chat activity/diff drawer (issue #181) */
-  ActivityDrawerList: null,
+  ActivityDrawerList: null, // plain div — layout owned by #chatDrawerList
 };
 
 function propsToClass(tag, props) {

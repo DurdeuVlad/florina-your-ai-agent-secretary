@@ -10,7 +10,7 @@
  */
 import type { TaskSnapshot } from '../../../../core/application/use-cases/tasks/command-api.js';
 import type { RenderTree } from './view-types.js';
-import { renderTaskRow } from './home-view.js';
+import { renderTaskRow, ACTIVE_STATES } from './home-view.js';
 
 function el(
   tag: string,
@@ -19,8 +19,6 @@ function el(
 ): RenderTree {
   return { tag, props, children };
 }
-
-const ACTIVE_STATES = new Set(['delegated', 'running', 'blocked', 'attention-needed']);
 
 /** Build the drawer's task list — active tasks only, newest first. */
 export function renderChatActivityDrawer(tasks: readonly TaskSnapshot[]): RenderTree {
