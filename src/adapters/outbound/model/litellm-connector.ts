@@ -55,6 +55,12 @@ export interface LiteLLMConnectorOptions {
   readonly model: string;
   /** Optional proxy key, sent as `Authorization: Bearer`. */
   readonly apiKey?: string;
+  /**
+   * Optional `reasoning_effort` sent verbatim in the request body. Some
+   * models (e.g. `gpt-5.6-luna`) reject function tools on chat completions
+   * unless this is set — typically to `'none'`.
+   */
+  readonly reasoningEffort?: string;
   /** Injectable fetch implementation (defaults to global fetch). */
   readonly fetch?: typeof fetch;
 }
@@ -133,12 +139,14 @@ export class LiteLLMConnector implements ModelPort {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly apiKey: string | undefined;
+  private readonly reasoningEffort: string | undefined;
   private readonly doFetch: typeof fetch;
 
   constructor(options: LiteLLMConnectorOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.model = options.model;
     this.apiKey = options.apiKey;
+    this.reasoningEffort = options.reasoningEffort;
     const f = options.fetch ?? globalThis.fetch;
     if (f === undefined) {
       throw new ConnectorError('no fetch implementation available');
@@ -158,6 +166,9 @@ export class LiteLLMConnector implements ModelPort {
     };
     if (request.temperature !== undefined) {
       body.temperature = request.temperature;
+    }
+    if (this.reasoningEffort !== undefined) {
+      body.reasoning_effort = this.reasoningEffort;
     }
     if (request.tools !== undefined && request.tools.length > 0) {
       // Provider-neutral ToolSpecs are translated to the OpenAI `tools[]`

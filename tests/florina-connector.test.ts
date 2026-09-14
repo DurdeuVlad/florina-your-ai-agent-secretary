@@ -80,6 +80,25 @@ describe('LiteLLMConnector', () => {
     });
     const messages = body.messages as { role: string }[];
     expect(messages.map((m) => m.role)).toEqual(['system', 'user']);
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+
+  it('sends reasoning_effort when configured (e.g. gpt-5.6-luna requires it for tools)', async () => {
+    const fakeFetch = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: 'hi' } }] }),
+    );
+    const connector = new LiteLLMConnector({
+      baseUrl: 'http://litellm.local:4000',
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'none',
+      fetch: fakeFetch as unknown as typeof fetch,
+    });
+
+    await connector.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+    const [, init] = fakeFetch.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.reasoning_effort).toBe('none');
   });
 
   it('serializes tool calls and tool results back onto the wire', async () => {

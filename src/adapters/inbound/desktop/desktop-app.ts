@@ -108,12 +108,13 @@ export interface DesktopAppOptions {
    */
   readonly closeToTray?: boolean;
   /**
-   * Push-to-talk toggle hook: invoked when the renderer sends the
-   * `ptt:toggle` verb (the HUD pill click — the HUD is merged into the
-   * main window, so the click lands on the `command` channel). The
-   * composition root wires this to `HudController.toggleLocalListening`.
+   * Push-to-talk state hook: {@link pttToggle} calls this with the
+   * resulting listening state after routing to the real audio pipeline
+   * (dictation round or voice talk-turn). The composition root wires it
+   * to `HudController.setLocalListening` so the HUD pill mirrors actual
+   * capture — it never animates without a live engine behind it.
    */
-  readonly onPttToggle?: () => void;
+  readonly onPttToggle?: (listening: boolean) => void;
   /**
    * Daemon lifecycle (issue #132): invoked once per {@link connectToDaemon}
    * intent when the FIRST connection attempt fails — i.e. the daemon is
@@ -222,7 +223,7 @@ export class DesktopApp {
   private readonly reconnectBaseDelayMs: number;
   private readonly reconnectMaxDelayMs: number;
   private readonly closeToTray: boolean;
-  private readonly onPttToggle?: () => void;
+  private readonly onPttToggle?: (listening: boolean) => void;
   private readonly onDaemonMissing?: () => void;
   private readonly dictation: DictationService | undefined;
   private readonly voiceSession: DesktopVoiceSession | undefined;
@@ -231,6 +232,8 @@ export class DesktopApp {
   /** Voice-mode on/off + whether a talk turn is capturing (issue #162). */
   private voiceActive = false;
   private voiceListening = false;
+  /** A `voicemode:start` connect is in flight — guards double-clicks. */
+  private voiceConnecting = false;
   /** True once the current connect intent has linked at least once (#132). */
   private everConnected = false;
   private started = false;
@@ -828,7 +831,7 @@ export class DesktopApp {
   async handleRendererCommand(message: unknown): Promise<void> {
     const m = message as { id?: unknown; cmd?: unknown };
     if (m.cmd === 'ptt:toggle') {
-      this.onPttToggle?.();
+      void this.pttToggle();
       this.bridge.sendToRenderer('command:result', { id: m.id, res: { ok: true } });
       return;
     }
@@ -1099,6 +1102,55 @@ export class DesktopApp {
   }
 
   /**
+   * One push-to-talk semantic shared by the global hotkey and the HUD
+   * pill click (`ptt:toggle`): voice mode on → toggle a talk turn;
+   * off → toggle a dictation round (start captures, stop commits and
+   * emits the final). The HUD hook fires only when a real engine
+   * accepted the toggle — a dead button never animates the pill.
+   */
+  async pttToggle(): Promise<void> {
+    if (this.voiceActive && this.voiceSession !== undefined) {
+      try {
+        if (this.voiceListening) {
+          this.voiceSession.stopListening();
+          this.voiceListening = false;
+        } else {
+          this.voiceSession.startListening();
+          this.voiceListening = true;
+        }
+      } catch (err) {
+        // A dead session (socket dropped mid-mode) must surface honestly —
+        // the HUD never animates on a talk turn that didn't start.
+        this.voiceListening = false;
+        this.bridge.sendToRenderer('voice:update', {
+          listening: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+      this.onPttToggle?.(this.voiceListening);
+      this.bridge.sendToRenderer('voice:update', { listening: this.voiceListening });
+      return;
+    }
+    if (this.dictation !== undefined) {
+      if (this.dictation.active) {
+        this.onPttToggle?.(false);
+        void this.dictation.stop().catch(() => undefined);
+      } else {
+        await this.dictation.start().catch(() => undefined);
+        // The hook fires only once the engine reports listening —
+        // a failed start (no key, dead engine) never fakes the HUD.
+        if (this.dictation.currentState === 'listening') this.onPttToggle?.(true);
+      }
+      return;
+    }
+    this.bridge.sendToRenderer('dictation:update', {
+      state: 'error',
+      error: 'no voice engine — set OPENAI_API_KEY or FLORINA_WHISPER_MODEL',
+    });
+  }
+
+  /**
    * Voice-mode verbs (issue #162). `voicemode:start` opens the realtime
    * session (tools + HUD state reporting); `voicemode:stop` closes it;
    * `voice:talk` toggles a push-to-talk turn inside the session — the mic
@@ -1116,10 +1168,23 @@ export class DesktopApp {
       ack({ ok: false, error: 'voice mode is not configured' });
       return true;
     }
+    if (raw === 'voicemode:start' && (this.voiceActive || this.voiceConnecting)) {
+      // Already on, or a connect is still in flight — idempotent ack.
+      ack({ ok: true });
+      return true;
+    }
     try {
       if (raw === 'voicemode:start') {
+        // The connect can take seconds — tell the renderer so the
+        // toggle isn't a dead click.
+        this.bridge.sendToRenderer('voice:update', { connecting: true });
+        this.voiceConnecting = true;
         this.dictation?.cancel(); // one audio pipeline at a time
-        await this.voiceSession.start();
+        try {
+          await this.voiceSession.start();
+        } finally {
+          this.voiceConnecting = false;
+        }
         this.voiceActive = true;
         this.bridge.sendToRenderer('voice:update', { active: true });
       } else if (raw === 'voicemode:stop') {

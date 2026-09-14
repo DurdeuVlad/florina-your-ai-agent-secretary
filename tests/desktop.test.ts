@@ -1334,7 +1334,7 @@ describe('session inspector', () => {
  * ================================================================== */
 
 describe('ptt:toggle command', () => {
-  it('invokes the onPttToggle hook and acknowledges', async () => {
+  it('acknowledges and pushes an honest error when no voice engine exists', async () => {
     const transport = new MockIpcTransport();
     const onPttToggle = vi.fn();
     const app = new DesktopApp({
@@ -1344,11 +1344,59 @@ describe('ptt:toggle command', () => {
     });
     app.start();
     await app.handleRendererCommand({ id: 20, cmd: 'ptt:toggle' });
-    expect(onPttToggle).toHaveBeenCalledTimes(1);
     expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
       id: 20,
       res: { ok: true },
     });
+    // No engine → the HUD hook never fires; the renderer sees the error.
+    expect(onPttToggle).not.toHaveBeenCalled();
+    const err = transport.toRenderer.find((m) => m.channel === 'dictation:update');
+    expect((err?.data as { state: string }).state).toBe('error');
+    await app.stop();
+  });
+
+  it('drives a real dictation round and reports the listening state to the HUD', async () => {
+    const transport = new MockIpcTransport();
+    const onPttToggle = vi.fn();
+    const dictation = new DictationService({
+      transport: {
+        startCapture: () => undefined,
+        stopCapture: () => undefined,
+        play: () => undefined,
+        stopPlayback: () => undefined,
+        close: () => undefined,
+      },
+      session: {
+        isConnected: false,
+        currentState: 'idle' as const,
+        connect: async () => undefined,
+        disconnect: async () => undefined,
+        startListening: () => undefined,
+        stopListening: () => undefined,
+        sendToolCallOutput: () => undefined,
+        sendUserMessage: () => undefined,
+        onToolCall: () => () => undefined,
+        onTranscript: () => () => undefined,
+        onStateChange: () => () => undefined,
+      },
+      apiKey: 'sk-test',
+      finalTimeoutMs: 50,
+      onUpdate: () => undefined,
+      onTranscript: () => undefined,
+    });
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      dictation,
+      onPttToggle,
+    });
+    app.start();
+    await app.handleRendererCommand({ id: 21, cmd: 'ptt:toggle' });
+    // pttToggle is async — the dictation start resolves on a microtask.
+    await vi.waitFor(() => expect(onPttToggle).toHaveBeenCalledWith(true));
+    expect(dictation.currentState).toBe('listening');
+    await app.handleRendererCommand({ id: 22, cmd: 'ptt:toggle' });
+    await vi.waitFor(() => expect(onPttToggle).toHaveBeenLastCalledWith(false));
     await app.stop();
   });
 });
@@ -2708,6 +2756,47 @@ describe('voice-mode verbs (issue #162)', () => {
     expect(voiceUpdates(transport)).toContainEqual({
       config: { micDeviceId: 'usb-mic-1', voiceModeDefault: true },
     });
+    await app.disconnect();
+  });
+
+  it('ptt:toggle inside voice mode toggles the talk turn (hotkey parity)', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+    await app.handleRendererCommand({ id: 'v20', cmd: 'voicemode:start' });
+    expect(voiceUpdates(transport)).toContainEqual({ active: true });
+
+    await app.handleRendererCommand({ id: 'v21', cmd: 'ptt:toggle' });
+    await vi.waitFor(() => expect(session.listening).toBe(true));
+    expect(voiceUpdates(transport)).toContainEqual({ listening: true });
+
+    await app.handleRendererCommand({ id: 'v22', cmd: 'ptt:toggle' });
+    await vi.waitFor(() => expect(session.listening).toBe(false));
+    expect(voiceUpdates(transport)).toContainEqual({ listening: false });
+    await app.disconnect();
+  });
+
+  it('voicemode:start pushes a connecting state and ignores a second start', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+    // Hold the connect open so the second verb lands mid-flight.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const realStart = session.start.bind(session);
+    session.start = async () => {
+      await gate;
+      return realStart();
+    };
+    const first = app.handleRendererCommand({ id: 'v30', cmd: 'voicemode:start' });
+    await vi.waitFor(() => expect(voiceUpdates(transport)).toContainEqual({ connecting: true }));
+    await app.handleRendererCommand({ id: 'v31', cmd: 'voicemode:start' });
+    const res31 = transport.toRenderer
+      .filter((m) => m.channel === 'command:result')
+      .map((m) => m.data as { id: string; res: { ok: boolean } })
+      .find((r) => r.id === 'v31');
+    expect(res31?.res.ok).toBe(true); // idempotent — not an error
+    release();
+    await first;
+    expect(voiceUpdates(transport)).toContainEqual({ active: true });
     await app.disconnect();
   });
 });

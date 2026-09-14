@@ -203,6 +203,18 @@ async function main(): Promise<void> {
         });
         manager.onStateChange((s) => stateCbs.forEach((cb) => cb(s)));
         manager.onTranscript((t, p) => transcriptCbs.forEach((cb) => cb(t, p)));
+        // Without this the wrapper only *built* the manager — the realtime
+        // socket never opened, `voicemode:start` reported success anyway,
+        // and every talk turn threw "not connected". A failed start drops
+        // the half-built manager so the next click retries fresh.
+        try {
+          await manager.start();
+        } catch (err) {
+          const m = manager;
+          manager = null;
+          void m.stop().catch(() => undefined);
+          throw err;
+        }
       },
       async stop() {
         const m = manager;
@@ -231,14 +243,16 @@ async function main(): Promise<void> {
   // transport and the pill renders in the app header.
   const hud = new HudController({
     ipc,
-    hotkeyHint: 'Hold Space to talk',
+    hotkeyHint: 'Ctrl+Space to talk',
   });
 
   const desktopApp = new DesktopApp({
     window,
     ipcTransport: ipc,
-    onPttToggle: () => {
-      hud.toggleLocalListening();
+    // The HUD pill mirrors real capture state — never animates on a
+    // dead toggle (no engine → pttToggle pushes an honest error).
+    onPttToggle: (listening) => {
+      hud.setLocalListening(listening);
     },
     windowOptions: {
       width: 1180,
@@ -321,7 +335,7 @@ async function main(): Promise<void> {
     'CommandOrControl',
     process.platform === 'darwin' ? 'Cmd' : 'Ctrl',
   );
-  if (hotkeys.register(pttAccelerator, () => hud.toggleLocalListening())) {
+  if (hotkeys.register(pttAccelerator, () => void desktopApp.pttToggle())) {
     hud.viewModel.setHotkeyHint(`${hintAccel} to talk — or click`);
   } else {
     hud.viewModel.setHotkeyHint(`Hotkey conflict: ${pttAccelerator} — set FLORINA_PTT_HOTKEY`);
