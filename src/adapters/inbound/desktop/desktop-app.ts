@@ -26,6 +26,7 @@ import type { MetricsSnapshot } from '../../../core/application/use-cases/metric
 import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
 import { renderHomeView } from './views/home-view.js';
 import { renderInspectorView } from './views/inspector-view.js';
+import { renderFleetScreen } from './views/fleet-screen.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
@@ -118,6 +119,8 @@ export class DesktopApp {
   private readonly windowOptions: WindowOptions;
   private readonly tray: SystemTrayManager | null;
   private socket: WebSocket | null = null;
+  /** Serializes sendCommand — the daemon protocol has no request ids. */
+  private commandChain: Promise<unknown> = Promise.resolve();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
@@ -344,8 +347,24 @@ export class DesktopApp {
    * Send a typed {@link Command} to the daemon over the live WebSocket and
    * resolve with the typed {@link Response}. Rejects if not connected or the
    * response times out / is malformed.
+   *
+   * The daemon protocol has no request correlation — responses arrive in
+   * the order commands were received. Commands are therefore serialized
+   * through {@link commandChain} so a pending command's listener only ever
+   * sees its own response (found while adding query-fleet to the refresh
+   * fan-out: concurrent listeners each resolved with the first response).
    */
   sendCommand(command: Command, timeoutMs = 10_000): Promise<Response> {
+    const run = this.commandChain.then(() => this.sendCommandNow(command, timeoutMs));
+    this.commandChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /** Single in-flight command — see {@link sendCommand} for serialization. */
+  private sendCommandNow(command: Command, timeoutMs: number): Promise<Response> {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new DesktopConnectionError('Not connected to daemon'));
     }
@@ -356,13 +375,13 @@ export class DesktopApp {
       }, timeoutMs);
 
       const onMessage = (data: unknown): void => {
-        clearTimeout(timer);
-        socket.off('message', onMessage);
         const text = typeof data === 'string' ? data : (data as Buffer).toString('utf8');
         let parsed: unknown;
         try {
           parsed = JSON.parse(text);
         } catch (err) {
+          clearTimeout(timer);
+          socket.off('message', onMessage);
           reject(
             new DesktopConnectionError(
               'Malformed response from daemon',
@@ -371,6 +390,18 @@ export class DesktopApp {
           );
           return;
         }
+        // Daemon pushes (subscribe stream) carry `type`; command responses
+        // don't. A push arriving mid-request is not our response — keep
+        // waiting for the real one.
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          typeof (parsed as { type?: unknown }).type === 'string'
+        ) {
+          return;
+        }
+        clearTimeout(timer);
+        socket.off('message', onMessage);
         resolve(parsed as Response);
       };
 
@@ -772,11 +803,14 @@ export class DesktopApp {
     // A dropped socket mid-refresh is normal (reconnect races) — treat a
     // failed send as "no answer" and keep the last known state rather than
     // blanking the renderer or throwing an unhandled rejection.
-    const [inboxRes, tasksRes] = await Promise.all([
+    const [inboxRes, tasksRes, fleetRes] = await Promise.all([
       this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
       this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
+      this.sendCommand({ kind: 'query-fleet' }).catch(() => null),
     ]);
-    if (inboxRes === null && tasksRes === null) return; // offline — keep last known
+    if (inboxRes === null && tasksRes === null && fleetRes === null) {
+      return; // offline — keep last known
+    }
     const items =
       inboxRes !== null && inboxRes.ok && 'items' in inboxRes
         ? (inboxRes as { items: AttentionItemSnapshot[] }).items
@@ -792,5 +826,9 @@ export class DesktopApp {
     // and an open task's timeline re-pulls so events journal forward.
     if (this.inspectorTaskId === null) this.pushInspector();
     else void this.refreshInspectorEvents();
+    // Fleet/quota screen (#127): quota + parked + routing decisions.
+    if (fleetRes !== null && fleetRes.ok && 'providers' in fleetRes) {
+      this.bridge.sendToRenderer('fleet:update', renderFleetScreen(fleetRes));
+    }
   }
 }

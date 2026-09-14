@@ -16,12 +16,14 @@ import type {
   TaskResponse,
   TaskListResponse,
   EventsResponse,
+  FleetResponse,
   PruneResponse,
   ShutdownResponse,
   DigestResponse,
   UnknownCommandResponse,
 } from '../src/daemon/command-api.js';
 import { EventBus } from '../src/daemon/event-stream.js';
+import { QuotaLedger } from '../src/core/application/use-cases/routing/quota-ledger.js';
 import { AttentionInbox } from '../src/attention/attention-inbox.js';
 import { MetricsCollector } from '../src/daemon/metrics.js';
 import { TaskStateMachine } from '../src/daemon/task-lifecycle.js';
@@ -1038,6 +1040,102 @@ describe('CommandApi', () => {
 
       expect(res.ok).toBe(false);
       expect(res.events).toEqual([]);
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * query-fleet (issue #127 — fleet/quota screen)
+   * ---------------------------------------------------------------- */
+  describe('query-fleet', () => {
+    /** Journal a routing event for a task (TaskParked / TaskFailedOver). */
+    function journalRouting(
+      taskId: string,
+      sessionId: string,
+      kind: string,
+      payload: Record<string, unknown>,
+    ): void {
+      fixture.eventRepository.insert({
+        id: `evt_${Math.random().toString(36).slice(2, 10)}`,
+        sessionId,
+        taskId,
+        timestamp: new Date().toISOString(),
+        kind,
+        payload,
+      } as never);
+    }
+
+    it('returns provider quota state from the ledger', async () => {
+      const resetsAt = new Date(Date.now() + 3600_000).toISOString();
+      const ledger = new QuotaLedger();
+      ledger.recordWindow({
+        provider: 'gemini',
+        window: 'daily',
+        usedPct: 0.97,
+        resetsAt,
+        status: 'exhausted',
+        source: 'polled',
+        observedAt: new Date().toISOString(),
+      });
+      const api = new CommandApi({ ...fixture.deps, quotaLedger: ledger });
+
+      const res = (await api.execute({ kind: 'query-fleet' })) as FleetResponse;
+
+      expect(res.ok).toBe(true);
+      const gemini = res.providers.find((p) => p.provider === 'gemini');
+      expect(gemini).toBeDefined();
+      expect(gemini!.available).toBe(false);
+      expect(gemini!.exhaustedUntil).toBe(resetsAt);
+      expect(gemini!.usedPct).toBeCloseTo(0.97);
+    });
+
+    it('reports unobserved providers as optimistically available', async () => {
+      const res = (await fixture.api.execute({ kind: 'query-fleet' })) as FleetResponse;
+      expect(res.ok).toBe(true);
+      // No ledger wired — an empty provider list is the honest answer.
+      expect(res.providers).toEqual([]);
+      expect(res.parked).toEqual([]);
+    });
+
+    it('surfaces parked tasks with resume times from the journal', async () => {
+      const { task, sessionId } = createTaskWithSession(fixture, {
+        objective: 'image-pipeline',
+      });
+      journalRouting(task.id, sessionId, 'TaskParked', {
+        reason: 'all candidate providers exhausted',
+        resumeAt: new Date(Date.now() + 1800_000).toISOString(),
+      });
+
+      const res = (await fixture.api.execute({ kind: 'query-fleet' })) as FleetResponse;
+
+      expect(res.ok).toBe(true);
+      expect(res.parked).toHaveLength(1);
+      expect(res.parked[0].objective).toBe('image-pipeline');
+      expect(res.parked[0].resumeAt).not.toBeNull();
+      expect(
+        res.routingDecisions.some((d) => d.kind === 'TaskParked' && d.summary.includes('parked')),
+      ).toBe(true);
+    });
+
+    it('lists failover decisions and ignores parked tasks that resumed', async () => {
+      const { task, sessionId } = createTaskWithSession(fixture, {
+        objective: 'schema-cleanup',
+      });
+      journalRouting(task.id, sessionId, 'TaskParked', { reason: 'quota dry' });
+      journalRouting(task.id, sessionId, 'TaskResumed', { provider: 'codex' });
+      journalRouting(task.id, sessionId, 'TaskFailedOver', {
+        fromProvider: 'gemini',
+        toProvider: 'codex',
+        reason: 'gemini exhausted',
+      });
+
+      const res = (await fixture.api.execute({ kind: 'query-fleet' })) as FleetResponse;
+
+      // Latest routing event is TaskFailedOver (after resume) → not parked.
+      expect(res.parked).toHaveLength(0);
+      const failover = res.routingDecisions.find((d) => d.kind === 'TaskFailedOver');
+      expect(failover).toBeDefined();
+      expect(failover!.summary).toContain('→ codex');
+      expect(failover!.summary).toContain('gemini exhausted');
     });
   });
 

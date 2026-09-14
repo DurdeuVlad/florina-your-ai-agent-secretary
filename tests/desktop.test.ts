@@ -278,6 +278,7 @@ describe('IpcBridge', () => {
       'daemon:status',
       'inspector:update',
       'view:show',
+      'fleet:update',
       'hud:state',
       'command',
       'command:result',
@@ -1331,5 +1332,95 @@ describe('ptt:toggle command', () => {
       res: { ok: true },
     });
     await app.stop();
+  });
+});
+
+/* ================================================================== *
+ * Fleet/quota screen (issue #127)
+ * ================================================================== */
+
+describe('fleet screen', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('refreshNow pulls query-fleet and pushes the fleet:update tree', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    let sawFleetQuery = false;
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-fleet') {
+        sawFleetQuery = true;
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            providers: [
+              {
+                provider: 'codex',
+                available: true,
+                exhaustedUntil: null,
+                usedPct: 0.62,
+                resetsAt: '2026-01-01T18:00:00Z',
+                lastObservedAt: '2026-01-01T14:00:00Z',
+              },
+            ],
+            parked: [
+              {
+                taskId: 'task_1',
+                objective: 'image-pipeline',
+                reason: 'all candidate providers exhausted',
+                resumeAt: '2026-01-01T14:32:00Z',
+              },
+            ],
+            routingDecisions: [
+              {
+                taskId: 'task_1',
+                objective: 'image-pipeline',
+                kind: 'TaskFailedOver',
+                summary: 'image-pipeline → codex: gemini exhausted',
+                timestamp: '2026-01-01T13:58:00Z',
+              },
+            ],
+          }),
+        );
+      } else {
+        socket.send(JSON.stringify({ ok: true, items: [], tasks: [] }));
+      }
+    });
+
+    await app.refreshNow();
+
+    expect(sawFleetQuery).toBe(true);
+    const push = transport.toRenderer.filter((m) => m.channel === 'fleet:update').pop();
+    expect(push).toBeDefined();
+    const tree = push!.data as Record<string, unknown>;
+    expect(tree['tag']).toBe('FleetView');
+    const findAll = (n: unknown, tag: string, out: unknown[] = []): unknown[] => {
+      if (typeof n !== 'object' || n === null) return out;
+      const r = n as Record<string, unknown>;
+      if (r['tag'] === tag) out.push(r);
+      for (const c of (r['children'] as unknown[]) ?? []) findAll(c, tag, out);
+      return out;
+    };
+    expect(findAll(tree, 'FleetCard')).toHaveLength(1);
+    // Parked section rendered.
+    const titles = findAll(tree, 'InspRowTitle').map((r) =>
+      String((r as Record<string, unknown>)['children']?.[0] ?? ''),
+    );
+    expect(titles).toContain('image-pipeline');
+    expect(titles).toContain('image-pipeline → codex: gemini exhausted');
+    await app.disconnect();
   });
 });

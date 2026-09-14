@@ -64,6 +64,15 @@ const TAG_CLASS = {
   InspRowSub: 't',
   DetailMono: 'mono',
   FidelityNotice: 'fidelity',
+  /* fleet/quota screen (issue #127) */
+  FleetView: 'fleet-view',
+  FleetCard: 'card',
+  FleetTop: 'top',
+  FleetProvider: 'kind',
+  FleetSummary: 'summary',
+  FleetRow: 'taskrow',
+  Chip: 'chip',
+  Bar: null, // handled specially (bar + inner fill)
   Button: null, // <button>
   ClearAllButton: null,
   ActionButton: null,
@@ -128,6 +137,15 @@ function renderNode(node) {
     if (c) el.style.color = 'var(--' + c + ')';
   }
   if (tag === 'DetailMono') el.style.whiteSpace = 'pre-wrap';
+
+  /* --- fleet/quota bar (issue #127): <div class="bar"><i style="width:N%"></i></div> --- */
+  if (tag === 'Bar') {
+    el.classList.add('bar');
+    const fill = document.createElement('i');
+    fill.style.width = String(props && props.pct ? props.pct : 0) + '%';
+    if (props && props.dry) fill.classList.add('dry');
+    el.appendChild(fill);
+  }
   if (tag === 'SectionHeader' && props && props.label) {
     const label = document.createElement('span');
     label.className = 'sect-label';
