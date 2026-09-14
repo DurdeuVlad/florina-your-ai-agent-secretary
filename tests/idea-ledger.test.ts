@@ -21,8 +21,10 @@ import {
 import type {
   IdeaResponse,
   IdeaListResponse,
+  IdeaReadResponse,
   BriefResponse,
   BriefConfirmResponse,
+  BriefListResponse,
 } from '../src/core/application/use-cases/tasks/command-api.js';
 import { TaskStateMachine } from '../src/core/application/use-cases/tasks/task-lifecycle.js';
 import { MetricsCollector } from '../src/core/application/use-cases/metrics.js';
@@ -410,5 +412,96 @@ describe('idea/brief commands', () => {
     const create = (await api.execute({ kind: 'idea-create', title: 'x' })) as IdeaResponse;
     expect(create.ok).toBe(false);
     expect(create.error).toContain('not wired');
+  });
+});
+
+describe('ideas screen queries (issue #129)', () => {
+  it('idea-list rows carry entry counts and a body preview', async () => {
+    const { api } = commandFixture();
+    const created = (await api.execute({
+      kind: 'idea-create',
+      title: 'ledger with entries',
+      body: 'seed line one',
+    })) as IdeaResponse;
+    const id = created.idea!.id;
+    await api.execute({ kind: 'idea-append', ideaId: id, heading: 'Research', body: 'notes a' });
+    await api.execute({ kind: 'idea-append', ideaId: id, heading: 'Open Qs', body: 'notes b' });
+
+    const listed = (await api.execute({ kind: 'idea-list' })) as IdeaListResponse;
+    expect(listed.ok).toBe(true);
+    const row = listed.ideas.find((i) => i.id === id)!;
+    expect(row.entryCount).toBe(2);
+    expect(row.preview).toBe('seed line one');
+  });
+
+  it('idea-read returns the ledger record and markdown body', async () => {
+    const { api } = commandFixture();
+    const created = (await api.execute({
+      kind: 'idea-create',
+      title: 'readable',
+      body: 'the body text',
+    })) as IdeaResponse;
+    const id = created.idea!.id;
+
+    const read = (await api.execute({ kind: 'idea-read', ideaId: id })) as IdeaReadResponse;
+    expect(read.ok).toBe(true);
+    expect(read.idea!.title).toBe('readable');
+    expect(read.body).toContain('the body text');
+  });
+
+  it('idea-read fails cleanly for an unknown ledger', async () => {
+    const { api } = commandFixture();
+    const read = (await api.execute({
+      kind: 'idea-read',
+      ideaId: 'idea-nope',
+    })) as IdeaReadResponse;
+    expect(read.ok).toBe(false);
+    expect(read.error).toContain('idea-nope');
+  });
+
+  it('brief-list returns compiled briefs across statuses', async () => {
+    const { api } = commandFixture();
+    const created = (await api.execute({ kind: 'idea-create', title: 'gated' })) as IdeaResponse;
+    await api.execute({
+      kind: 'brief-compile',
+      ideaId: created.idea!.id,
+      plan: { projectId: 'p1', tasks: [{ objective: 'do the thing' }] },
+    });
+
+    const listed = (await api.execute({ kind: 'brief-list' })) as BriefListResponse;
+    expect(listed.ok).toBe(true);
+    expect(listed.briefs).toHaveLength(1);
+    expect(listed.briefs[0]!.status).toBe('draft');
+    expect(listed.briefs[0]!.plan.projectId).toBe('p1');
+  });
+
+  it('idea-read and brief-list fail cleanly when the service is not wired', async () => {
+    const db = new StorageDatabase({ path: ':memory:' });
+    db.open();
+    const api = new CommandApi({
+      eventBus: new EventBus(),
+      taskStateMachine: new TaskStateMachine(
+        new TaskRepository(db.connection),
+        new EventRepository(db.connection),
+      ),
+      attentionInbox: new AttentionInbox(),
+      metricsCollector: new MetricsCollector(),
+      worktreeManager: {
+        createWorktree: () => '/wt',
+        detectDirty: () => false,
+        worktreeStatus: () => ({ clean: true, dirty: false }),
+        pruneWorktree: () => undefined,
+        listWorktrees: () => [],
+        worktreePathFor: () => '/wt',
+      },
+      eventRepository: new EventRepository(db.connection),
+      taskStore: { getById: () => null, listAll: () => [], update: () => undefined },
+      approvalStore: new ApprovalRepository(db.connection),
+      sessionStore: new SessionRepository(db.connection),
+    });
+    const read = (await api.execute({ kind: 'idea-read', ideaId: 'x' })) as IdeaReadResponse;
+    expect(read.ok).toBe(false);
+    const briefs = (await api.execute({ kind: 'brief-list' })) as BriefListResponse;
+    expect(briefs.ok).toBe(false);
   });
 });

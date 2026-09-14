@@ -29,6 +29,11 @@ import { renderInspectorView } from './views/inspector-view.js';
 import { renderFleetScreen } from './views/fleet-screen.js';
 import { renderPrefsScreen } from './views/prefs-screen.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
+import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
+import type {
+  BriefListResponse,
+  IdeaListResponse,
+} from '../../../core/application/use-cases/tasks/command-api.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
@@ -141,6 +146,8 @@ export class DesktopApp {
   private inspectorTaskId: string | null = null;
   private inspectorEventIndex: number | null = null;
   private inspectorEvents: readonly Event[] = [];
+  /** Open ledger reader on the ideas screen (#129), if any. */
+  private ideaReader: { ideaId: string; title: string; body: string } | null = null;
 
   constructor(options: DesktopAppOptions) {
     this.window = options.window;
@@ -634,6 +641,9 @@ export class DesktopApp {
     if (typeof m.cmd === 'string' && (await this.handleInspectorCommand(m.cmd, m.id))) {
       return;
     }
+    if (typeof m.cmd === 'string' && (await this.handleIdeasCommand(m.cmd, m.id))) {
+      return;
+    }
     const cmd = this.resolveRendererCommand(m.cmd);
     if (cmd === null) {
       // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
@@ -653,9 +663,11 @@ export class DesktopApp {
       error: e instanceof Error ? e.message : String(e),
     }));
     this.bridge.sendToRenderer('command:result', { id: m.id, res });
-    // A committed preference mutation re-pulls the profile so the prefs
-    // screen reflects the journaled change immediately (#128).
-    if (cmd.kind === 'update-preference' && res.ok) void this.refreshViews();
+    // Committed mutations re-pull their view data so the screen reflects
+    // the journaled change immediately (#128 preferences, #129 ideas).
+    if (res.ok && (cmd.kind === 'update-preference' || IDEACMD_KINDS.has(cmd.kind))) {
+      void this.refreshViews();
+    }
   }
 
   /**
@@ -682,6 +694,20 @@ export class DesktopApp {
         return { error: 'prefcmd payload must be an update-preference command' };
       } catch {
         return { error: 'malformed prefcmd payload' };
+      }
+    }
+    // `ideacmd:<uri-encoded JSON>` — same pattern for the ideas screen,
+    // whitelisted to the idea/brief command kinds (issue #129).
+    if (cmd.startsWith('ideacmd:')) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cmd.slice('ideacmd:'.length))) as unknown;
+        const kind = (parsed as { kind?: unknown }).kind;
+        if (typeof kind === 'string' && IDEACMD_KINDS.has(kind)) {
+          return parsed as Command;
+        }
+        return { error: 'ideacmd payload must be an idea/brief command' };
+      } catch {
+        return { error: 'malformed ideacmd payload' };
       }
     }
     const [verb, itemId] = cmd.split(':', 2);
@@ -746,6 +772,40 @@ export class DesktopApp {
       } else {
         ack({ ok: false, error: `No event at index ${raw.slice(14)}` });
       }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Ideas-screen verbs (#129). `idearead:<id>` pulls the ledger body
+   * (`idea-read`) into the reader pane; `ideaclose` clears it. Both
+   * re-push the ideas tree. Returns true when the command was claimed.
+   */
+  private async handleIdeasCommand(raw: string, id: unknown): Promise<boolean> {
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      this.bridge.sendToRenderer('command:result', { id, res });
+    };
+    if (raw.startsWith('idearead:')) {
+      const ideaId = raw.slice('idearead:'.length);
+      const res = await this.sendCommand({ kind: 'idea-read', ideaId }).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      if (!res.ok || !('idea' in res) || res.idea === null || !('body' in res)) {
+        this.ideaReader = null;
+        ack({ ok: false, error: 'error' in res ? res.error : 'idea-read failed' });
+      } else {
+        this.ideaReader = { ideaId, title: res.idea.title, body: res.body ?? '' };
+        void this.refreshViews();
+        ack({ ok: true });
+      }
+      return true;
+    }
+    if (raw === 'ideaclose') {
+      this.ideaReader = null;
+      void this.refreshViews();
+      ack({ ok: true });
       return true;
     }
     return false;
@@ -827,13 +887,22 @@ export class DesktopApp {
     // A dropped socket mid-refresh is normal (reconnect races) — treat a
     // failed send as "no answer" and keep the last known state rather than
     // blanking the renderer or throwing an unhandled rejection.
-    const [inboxRes, tasksRes, fleetRes, prefsRes] = await Promise.all([
+    const [inboxRes, tasksRes, fleetRes, prefsRes, ideasRes, briefsRes] = await Promise.all([
       this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
       this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
       this.sendCommand({ kind: 'query-fleet' }).catch(() => null),
       this.sendCommand({ kind: 'query-preferences' }).catch(() => null),
+      this.sendCommand({ kind: 'idea-list' }).catch(() => null),
+      this.sendCommand({ kind: 'brief-list' }).catch(() => null),
     ]);
-    if (inboxRes === null && tasksRes === null && fleetRes === null && prefsRes === null) {
+    if (
+      inboxRes === null &&
+      tasksRes === null &&
+      fleetRes === null &&
+      prefsRes === null &&
+      ideasRes === null &&
+      briefsRes === null
+    ) {
       return; // offline — keep last known
     }
     const items =
@@ -860,6 +929,17 @@ export class DesktopApp {
       this.bridge.sendToRenderer(
         'prefs:update',
         renderPrefsScreen(prefsRes.profile as PreferenceProfile),
+      );
+    }
+    // Ideas screen (#129): ledger directory + awaiting-decision briefs.
+    if (ideasRes !== null && briefsRes !== null && 'ideas' in ideasRes && 'briefs' in briefsRes) {
+      this.bridge.sendToRenderer(
+        'ideas:update',
+        renderIdeasScreen({
+          ideas: ideasRes as IdeaListResponse,
+          briefs: briefsRes as BriefListResponse,
+          ...(this.ideaReader !== null ? { reader: this.ideaReader } : {}),
+        }),
       );
     }
   }

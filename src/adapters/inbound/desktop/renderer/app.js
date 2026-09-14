@@ -55,6 +55,9 @@ if (bridge) {
   /* preferences screen (issue #128) */
   bridge.on('prefs:update', (tree) => mount(tree, $('prefs')));
 
+  /* ideas screen (issue #129) */
+  bridge.on('ideas:update', (tree) => mount(tree, $('ideas')));
+
   /* PTT pill in the header — same states as the old overlay (issue #123) */
   bridge.on('hud:state', renderHud);
 }
@@ -122,6 +125,15 @@ document.addEventListener('click', (e) => {
   }
   if (cmd === 'prefadd') {
     openPrefAdder();
+    return;
+  }
+  /* ideas screen forms (issue #129) — renderer-local, daemon via ideacmd: */
+  if (cmd === 'ideaadd') {
+    openIdeaAdder();
+    return;
+  }
+  if (cmd.startsWith('ideacompile:')) {
+    openIdeaCompiler(btn.closest('.card'), cmd.slice('ideacompile:'.length));
     return;
   }
   void bridge.command(cmd).then((res) => {
@@ -258,6 +270,109 @@ function openPrefAdder() {
   provider.focus();
 }
 
+/* ---------- ideas screen forms (issue #129) ---------- */
+
+function ideaCmd(payload) {
+  return 'ideacmd:' + encodeURIComponent(JSON.stringify(payload));
+}
+
+function makeInput(placeholder, textarea) {
+  const el = document.createElement(textarea ? 'textarea' : 'input');
+  if (!textarea) el.type = 'text';
+  el.placeholder = placeholder;
+  return el;
+}
+
+function formActions(onSave) {
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const save = document.createElement('button');
+  save.textContent = 'Save';
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost';
+  cancel.textContent = 'Cancel';
+  actions.appendChild(save);
+  actions.appendChild(cancel);
+  return { actions, save, cancel };
+}
+
+/** + New idea: title + optional seed body → idea-create. */
+function openIdeaAdder() {
+  const host = $('ideas');
+  if (!host || host.querySelector('.pref-addform')) return;
+  const card = document.createElement('div');
+  card.className = 'card pref-addform';
+  const title = makeInput('idea title');
+  const body = makeInput('first note (optional)');
+  card.appendChild(title);
+  card.appendChild(body);
+  const { actions, save, cancel } = formActions();
+  save.addEventListener('click', () => {
+    if (!title.value.trim()) {
+      toast('title is required');
+      return;
+    }
+    void bridge
+      .command(
+        ideaCmd({
+          kind: 'idea-create',
+          title: title.value.trim(),
+          ...(body.value.trim() ? { body: body.value.trim() } : {}),
+        }),
+      )
+      .then((res) => {
+        if (res && res.ok === false) toast(res.error || 'idea-create failed');
+        else card.remove();
+      });
+  });
+  cancel.addEventListener('click', () => card.remove());
+  card.appendChild(actions);
+  host.prepend(card);
+  title.focus();
+}
+
+/**
+ * Compile brief: the delegation plan is human-supplied (DEC-033) — a
+ * project id plus one task objective per line (`| provider` optional).
+ * Produces `brief-compile`; the draft Brief then awaits confirmation.
+ */
+function openIdeaCompiler(card, ideaId) {
+  if (!card || card.querySelector('.pref-form, .pref-addform')) return;
+  const form = document.createElement('div');
+  form.className = 'pref-addform';
+  const project = makeInput('project id (e.g. agent-secretary)');
+  const tasks = makeInput('one task per line — "objective | provider"', true);
+  tasks.rows = 4;
+  form.appendChild(project);
+  form.appendChild(tasks);
+  const { actions, save, cancel } = formActions();
+  save.textContent = 'Compile brief';
+  save.addEventListener('click', () => {
+    const projectId = project.value.trim();
+    const planTasks = tasks.value
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l !== '')
+      .map((l) => {
+        const [objective, provider] = l.split('|').map((s) => s.trim());
+        return { objective, ...(provider ? { preferProvider: provider } : {}) };
+      });
+    if (!projectId || planTasks.length === 0) {
+      toast('project and at least one task are required');
+      return;
+    }
+    void bridge
+      .command(ideaCmd({ kind: 'brief-compile', ideaId, plan: { projectId, tasks: planTasks } }))
+      .then((res) => {
+        if (res && res.ok === false) toast(res.error || 'brief-compile failed');
+        else form.remove();
+      });
+  });
+  cancel.addEventListener('click', () => form.remove());
+  card.appendChild(form);
+  project.focus();
+}
+
 function toast(msg) {
   const t = $('toast');
   t.textContent = msg;
@@ -272,6 +387,7 @@ const TITLES = {
   inbox: ['Attention Inbox', 'what needs you right now'],
   tasks: ['Tasks', 'delegated work and its state'],
   fleet: ['Fleet', 'provider capacity and routing'],
+  ideas: ['Ideas', 'ledger entries — compile a Brief when one is ready'],
   prefs: ['Preferences', 'durable routing rules and denies'],
 };
 
@@ -353,10 +469,15 @@ function inspActivate() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (
+    e.target.tagName === 'INPUT' ||
+    e.target.tagName === 'SELECT' ||
+    e.target.tagName === 'TEXTAREA'
+  )
+    return;
   if (gPending) {
     gPending = false;
-    const map = { i: 'inbox', t: 'tasks', f: 'fleet', p: 'prefs' };
+    const map = { i: 'inbox', t: 'tasks', f: 'fleet', d: 'ideas', p: 'prefs' };
     if (map[e.key]) showView(map[e.key]);
     return;
   }

@@ -280,6 +280,7 @@ describe('IpcBridge', () => {
       'view:show',
       'fleet:update',
       'prefs:update',
+      'ideas:update',
       'hud:state',
       'command',
       'command:result',
@@ -1594,6 +1595,175 @@ describe('preferences screen', () => {
     });
     await updated; // mutation triggered a second pull
     expect(prefQueries).toBeGreaterThanOrEqual(2);
+    await app.disconnect();
+  });
+});
+
+/* ================================================================== *
+ * Ideas screen (issue #129)
+ * ================================================================== */
+
+describe('ideas screen', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  const IDEA_LIST = {
+    ok: true,
+    ideas: [
+      {
+        id: 'idea-1',
+        title: 'Multi-repo context sync',
+        status: 'open',
+        path: '/ideas/idea-1.md',
+        createdAt: '2026-09-10T10:00:00Z',
+        updatedAt: '2026-09-15T10:00:00Z',
+        entryCount: 6,
+        preview: 'capsule interface summary',
+      },
+    ],
+  };
+  const BRIEF_LIST = {
+    ok: true,
+    briefs: [
+      {
+        id: 'brief-1',
+        ideaId: 'idea-1',
+        title: 'Tray notification center',
+        spec: 'frozen',
+        plan: { projectId: 'agent-secretary', tasks: [{ objective: 'add tray badge' }] },
+        status: 'draft',
+        createdAt: '2026-09-15T09:00:00Z',
+      },
+    ],
+  };
+
+  function wireIdeasResponder(socket: import('ws').WebSocket): {
+    seen: Record<string, unknown>[];
+    ideaReads: number;
+  } {
+    const seen: Record<string, unknown>[] = [];
+    const state = { seen, ideaReads: 0 };
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      seen.push(cmd);
+      if (cmd['kind'] === 'idea-list') {
+        socket.send(JSON.stringify(IDEA_LIST));
+      } else if (cmd['kind'] === 'brief-list') {
+        socket.send(JSON.stringify(BRIEF_LIST));
+      } else if (cmd['kind'] === 'idea-read') {
+        state.ideaReads += 1;
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            idea: IDEA_LIST.ideas[0],
+            body: '## Research\nnotes here',
+          }),
+        );
+      } else {
+        socket.send(
+          JSON.stringify({ ok: true, items: [], tasks: [], profile: { rules: [], denied: [] } }),
+        );
+      }
+    });
+    return state;
+  }
+
+  function findAll(node: unknown, tag: string, out: unknown[] = []): unknown[] {
+    if (typeof node !== 'object' || node === null) return out;
+    const r = node as Record<string, unknown>;
+    if (r['tag'] === tag) out.push(r);
+    for (const c of (r['children'] as unknown[]) ?? []) findAll(c, tag, out);
+    return out;
+  }
+
+  it('refreshNow pulls idea-list + brief-list and pushes the ideas:update tree', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    wireIdeasResponder(socket);
+
+    await app.refreshNow();
+
+    const push = transport.toRenderer.filter((m) => m.channel === 'ideas:update').pop();
+    expect(push).toBeDefined();
+    const tree = push!.data as Record<string, unknown>;
+    const cards = findAll(tree, 'PrefCard');
+    expect(cards).toHaveLength(2); // 1 open ledger + 1 draft brief
+    await app.disconnect();
+  });
+
+  it('routes ideacmd: brief-confirm to the daemon and rejects other kinds', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    const { seen } = wireIdeasResponder(socket);
+
+    const confirm = { kind: 'brief-confirm', briefId: 'brief-1', confirmedBy: 'desktop' };
+    await app.handleRendererCommand({
+      id: 'bc1',
+      cmd: `ideacmd:${encodeURIComponent(JSON.stringify(confirm))}`,
+    });
+    const okRes = transport.toRenderer.find(
+      (m) => m.channel === 'command:result' && (m.data as { id?: unknown }).id === 'bc1',
+    );
+    expect((okRes!.data as { res: { ok: boolean } }).res.ok).toBe(true);
+    expect(seen.some((c) => c['kind'] === 'brief-confirm')).toBe(true);
+
+    // A non-whitelisted kind never reaches the daemon.
+    const before = seen.length;
+    await app.handleRendererCommand({
+      id: 'bc2',
+      cmd: `ideacmd:${encodeURIComponent(JSON.stringify({ kind: 'shutdown' }))}`,
+    });
+    const badRes = transport.toRenderer.find(
+      (m) => m.channel === 'command:result' && (m.data as { id?: unknown }).id === 'bc2',
+    );
+    expect((badRes!.data as { res: { ok: boolean } }).res.ok).toBe(false);
+    expect(seen.length).toBe(before);
+    await app.disconnect();
+  });
+
+  it('idearead opens the ledger reader and ideaclose clears it', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    const { ideaReads } = wireIdeasResponder(socket);
+    void ideaReads;
+
+    await app.refreshNow();
+    transport.toRenderer.length = 0;
+
+    await app.handleRendererCommand({ id: 'r1', cmd: 'idearead:idea-1' });
+    // refreshViews is async — wait for the ideas:update carrying the body.
+    await new Promise((r) => setTimeout(r, 100));
+    const withReader = transport.toRenderer.filter((m) => m.channel === 'ideas:update').pop();
+    const tree = withReader!.data as Record<string, unknown>;
+    const flat = JSON.stringify(tree);
+    expect(flat).toContain('notes here');
+    expect(flat).toContain('Ledger — Multi-repo context sync');
+
+    transport.toRenderer.length = 0;
+    await app.handleRendererCommand({ id: 'r2', cmd: 'ideaclose' });
+    await new Promise((r) => setTimeout(r, 100));
+    const cleared = transport.toRenderer.filter((m) => m.channel === 'ideas:update').pop();
+    expect(JSON.stringify(cleared!.data)).not.toContain('notes here');
     await app.disconnect();
   });
 });

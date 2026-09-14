@@ -24,6 +24,7 @@ const PUSH_CHANNELS = new Set([
   'view:show',
   'fleet:update',
   'prefs:update',
+  'ideas:update',
   'hud:state',
   'command:result',
 ]);
