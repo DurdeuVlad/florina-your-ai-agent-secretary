@@ -8,6 +8,7 @@
  */
 import { mount } from './tree-renderer.js';
 import { createMicCapture } from './audio-capture.js';
+import { createPlayback } from './audio-playback.js';
 
 const $ = (id) => document.getElementById(id);
 const bridge = window.florina;
@@ -101,6 +102,35 @@ if (bridge) {
     if (d.state === 'listening') {
       $('dictation').querySelector('b').textContent = 'listening…';
     }
+  });
+
+  /* voice mode (issue #162): the same capture toggle drives the mic, but
+     transcripts preview as captions — finals journal into the thread via
+     chat-append, they never enter the composer. AI audio plays back over
+     dictation:audio-out. */
+  bridge.on('voice:update', (d) => {
+    if (!d) return;
+    if (d.config) {
+      micDeviceId = d.config.micDeviceId || null;
+      if (d.config.voiceModeDefault && !voiceOn) toggleVoiceMode();
+    }
+    if (typeof d.active === 'boolean') setVoiceMode(d.active);
+    if (typeof d.listening === 'boolean') setMicListening(d.listening);
+    if (d.suspended) toast('daemon lost — voice turn suspended');
+    if (typeof d.state === 'string' && d.state !== 'listening') setMicListening(false);
+    if (typeof d.partial === 'string' && voiceOn) {
+      $('dictation').hidden = false;
+      $('dictation').querySelector('b').textContent = 'voice…';
+      $('dictationText').textContent = d.partial;
+    }
+    if (typeof d.final === 'string') {
+      $('dictation').hidden = true;
+      $('dictationText').textContent = '';
+    }
+  });
+  bridge.on('dictation:audio-out', (d) => {
+    if (d && d.stop) playback.stop();
+    else if (d && typeof d.pcm === 'string') playback.play(d.pcm);
   });
 
   /* PTT pill in the header — same states as the old overlay (issue #123) */
@@ -448,14 +478,17 @@ function sendChat() {
 /* ---------- dictation (issue #161) ---------- */
 
 const mic = createMicCapture();
+const playback = createPlayback();
 let micOn = false;
+let voiceOn = false;
+let micDeviceId = null;
 
 /** Start the renderer mic; chunks flow to main as dictation:audio IPC. */
 function startMic() {
   if (micOn) return;
   micOn = true;
   mic
-    .start((pcm) => bridge.dictationAudio(pcm))
+    .start((pcm) => bridge.dictationAudio(pcm), micDeviceId)
     .then(() => {
       // A capture:false arrived while getUserMedia was still pending —
       // the round is over; tear the freshly-built chain straight down.
@@ -466,7 +499,8 @@ function startMic() {
       // it doesn't wait on chunks that will never arrive.
       micOn = false;
       toast(err && err.name === 'NotAllowedError' ? 'microphone access denied' : 'no microphone');
-      void bridge.command('dictation:cancel');
+      // Voice-mode turn in flight → end it; dictation round → cancel it.
+      void bridge.command(voiceOn ? 'voice:talk' : 'dictation:cancel');
     });
 }
 
@@ -493,10 +527,36 @@ function insertDictated(text) {
   input.focus();
 }
 
+/** Flip voice-mode visuals + local flag (driven by voice:update). */
+function setVoiceMode(on) {
+  voiceOn = on;
+  $('chatVoice').classList.toggle('listening', on);
+  $('chatMic').title = on
+    ? 'Talk — a spoken turn the Secretary answers'
+    : 'Dictate — speech becomes editable text here';
+  if (!on) {
+    playback.stop();
+    $('dictation').hidden = true;
+    $('dictationText').textContent = '';
+  }
+}
+
+/** Toggle voice mode through the daemon-side session verbs. */
+function toggleVoiceMode() {
+  if (!bridge) return;
+  void bridge.command(voiceOn ? 'voicemode:stop' : 'voicemode:start').then((res) => {
+    if (res && res.ok === false) toast(res.error || 'voice mode failed');
+  });
+}
+
+$('chatVoice').addEventListener('click', toggleVoiceMode);
+
 $('chatMic').addEventListener('click', () => {
   if (!bridge) return;
-  void bridge.command(micOn ? 'dictation:stop' : 'dictation:start').then((res) => {
-    if (res && res.ok === false) toast(res.error || 'dictation failed');
+  // Voice mode on → the mic button is push-to-talk; off → dictation.
+  const verb = voiceOn ? 'voice:talk' : micOn ? 'dictation:stop' : 'dictation:start';
+  void bridge.command(verb).then((res) => {
+    if (res && res.ok === false) toast(res.error || 'mic failed');
   });
 });
 
@@ -549,6 +609,13 @@ function showView(name) {
   $('viewSub').textContent = TITLES[name][1];
   $('chatClear').style.display = name === 'chat' ? '' : 'none';
   if (name === 'chat') $('chatInput').focus();
+  // Leaving Chat suspends an open capture (issue #162): voice talk turns
+  // end (the reply still journals into the thread); dictation rounds
+  // cancel — inserting dictated text while the user is away would be a
+  // surprise on return.
+  if (name !== 'chat' && micOn) {
+    void bridge.command(voiceOn ? 'voice:talk' : 'dictation:cancel');
+  }
 }
 
 document

@@ -22,6 +22,13 @@ const { app, session } = require('electron') as typeof import('electron');
 import { DesktopApp } from '../adapters/inbound/desktop/desktop-app.js';
 import { DictationService } from '../core/application/use-cases/voice/dictation-service.js';
 import { IpcAudioTransport } from '../adapters/inbound/desktop/ipc-audio-transport.js';
+import type { DesktopVoiceSession } from '../adapters/inbound/desktop/desktop-app.js';
+import type { VoiceSessionManager } from '../adapters/inbound/voice/voice-session-manager.js';
+import type {
+  AudioTransport,
+  TranscriptionPort,
+  VoiceSessionState,
+} from '../core/application/ports/outbound/voice.js';
 import { HudController } from '../adapters/inbound/desktop/hud-controller.js';
 import { ElectronWindowBackend } from '../adapters/inbound/desktop/electron/window-backend.js';
 import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-transport.js';
@@ -95,13 +102,13 @@ async function main(): Promise<void> {
   const dictationTransport = new IpcAudioTransport(ipc);
   const openaiKey = process.env['OPENAI_API_KEY'];
   let dictation: DictationService | undefined;
+  let whisper: TranscriptionPort | undefined;
   const whisperModel = process.env['FLORINA_WHISPER_MODEL'];
   if (openaiKey !== undefined || whisperModel !== undefined) {
     const { RealtimeBridge, defaultSocketFactory } =
       await import('../adapters/outbound/voice/realtime-bridge.js');
     const { WhisperAdapter } = await import('../adapters/outbound/voice/whisper-adapter.js');
     const { WhisperCppBackend } = await import('../adapters/outbound/voice/whisper-backend.js');
-    let whisper;
     if (whisperModel !== undefined) {
       const adapter = new WhisperAdapter(new WhisperCppBackend());
       try {
@@ -135,6 +142,77 @@ async function main(): Promise<void> {
     });
   }
 
+  // Voice mode (issue #162): two-way spoken turns through
+  // VoiceSessionManager on the SAME IPC transport (dictation and voice
+  // mode are mutually exclusive — the DesktopApp verbs enforce it). The
+  // manager is built lazily on first `voicemode:start` so the app doesn't
+  // pay the connect cost when voice is never used. Spoken finals journal
+  // into the canonical chat thread via `chat-append`; state reports flow
+  // to the daemon HUD through attachVoiceStateReporting (#131).
+  const settings = readDesktopSettings();
+  let voiceSession: DesktopVoiceSession | undefined;
+  if (openaiKey !== undefined) {
+    let manager: VoiceSessionManager | null = null;
+    const stateCbs = new Set<(s: VoiceSessionState) => void>();
+    const transcriptCbs = new Set<(text: string, partial: boolean) => void>();
+    const transport: AudioTransport = dictationTransport;
+    voiceSession = {
+      async start() {
+        if (manager !== null) return;
+        const { RealtimeBridge, defaultSocketFactory } =
+          await import('../adapters/outbound/voice/realtime-bridge.js');
+        const { createStdinVoiceSession } = await import('./voice-session.js');
+        const bridge = new RealtimeBridge(transport, defaultSocketFactory);
+        // Journal the spoken exchange into the single Secretary thread —
+        // user speech (input_audio_transcription.completed) and assistant
+        // replies (response output transcripts) land as journaled rows.
+        let lastAssistant = '';
+        bridge.onTranscript((t) => {
+          const text = t.text.trim();
+          if (t.partial || text === '') return;
+          if (t.source === 'assistant') {
+            // text+audio transcript paths can both fire for one reply.
+            if (text === lastAssistant) return;
+            lastAssistant = text;
+          } else {
+            lastAssistant = '';
+          }
+          void desktopApp
+            .sendCommand({ kind: 'chat-append', role: t.source ?? 'user', text })
+            .catch(() => undefined);
+        });
+        manager = await createStdinVoiceSession({
+          apiKey: openaiKey,
+          commandApi: { execute: (cmd) => desktopApp.sendCommand(cmd) },
+          audioTransport: transport,
+          bridge,
+          ...(whisper !== undefined ? { whisperAdapter: whisper } : {}),
+        });
+        manager.onStateChange((s) => stateCbs.forEach((cb) => cb(s)));
+        manager.onTranscript((t, p) => transcriptCbs.forEach((cb) => cb(t, p)));
+      },
+      async stop() {
+        const m = manager;
+        manager = null;
+        await m?.stop();
+      },
+      startListening() {
+        manager?.startListening();
+      },
+      stopListening() {
+        manager?.stopListening();
+      },
+      onStateChange(cb) {
+        stateCbs.add(cb);
+        return () => stateCbs.delete(cb);
+      },
+      onTranscript(cb) {
+        transcriptCbs.add(cb);
+        return () => transcriptCbs.delete(cb);
+      },
+    };
+  }
+
   // PTT HUD (issue #123, merged into the main window per user feedback):
   // no separate overlay — hud:state pushes go over the main window's IPC
   // transport and the pill renders in the app header.
@@ -162,6 +240,11 @@ async function main(): Promise<void> {
     // listens. Mid-session drops never reach this hook.
     onDaemonMissing: () => runCli('start'),
     ...(dictation !== undefined ? { dictation } : {}),
+    ...(voiceSession !== undefined ? { voiceSession } : {}),
+    voiceConfig: {
+      ...(settings.micDeviceId !== undefined ? { micDeviceId: settings.micDeviceId } : {}),
+      voiceModeDefault: settings.voiceModeDefault,
+    },
     onTrayAction: (action: TrayAction) => {
       switch (action) {
         case 'show-window':
@@ -196,6 +279,7 @@ async function main(): Promise<void> {
     window.contents.once('did-finish-load', () => {
       hud.refresh();
       desktopApp.replayDaemonStatus();
+      desktopApp.replayVoiceConfig();
       void desktopApp.refreshNow();
     });
   }

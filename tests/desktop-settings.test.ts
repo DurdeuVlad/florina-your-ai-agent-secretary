@@ -35,8 +35,11 @@ describe('desktop settings (issue #132)', () => {
 
   it('round-trips a written settings file', () => {
     const dir = tmpDir();
-    writeDesktopSettings({ stopDaemonOnQuit: true }, dir);
-    expect(readDesktopSettings(dir)).toEqual({ stopDaemonOnQuit: true });
+    writeDesktopSettings({ stopDaemonOnQuit: true, voiceModeDefault: false }, dir);
+    expect(readDesktopSettings(dir)).toEqual({
+      stopDaemonOnQuit: true,
+      voiceModeDefault: false,
+    });
   });
 
   it('returns defaults on a malformed file — never breaks startup', () => {
@@ -48,6 +51,33 @@ describe('desktop settings (issue #132)', () => {
   it('ignores unknown fields and bad types', () => {
     const dir = tmpDir();
     writeFileSync(desktopSettingsPath(dir), JSON.stringify({ stopDaemonOnQuit: 'yes', future: 1 }));
+    expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
+  });
+
+  it('round-trips the voice-mode preferences (issue #162)', () => {
+    const dir = tmpDir();
+    writeDesktopSettings(
+      { stopDaemonOnQuit: false, micDeviceId: 'usb-mic-1', voiceModeDefault: true },
+      dir,
+    );
+    expect(readDesktopSettings(dir)).toEqual({
+      stopDaemonOnQuit: false,
+      micDeviceId: 'usb-mic-1',
+      voiceModeDefault: true,
+    });
+  });
+
+  it('defaults voiceModeDefault off and micDeviceId absent', () => {
+    expect(DEFAULT_DESKTOP_SETTINGS.voiceModeDefault).toBe(false);
+    expect(DEFAULT_DESKTOP_SETTINGS.micDeviceId).toBeUndefined();
+  });
+
+  it('drops a malformed micDeviceId / voiceModeDefault', () => {
+    const dir = tmpDir();
+    writeFileSync(
+      desktopSettingsPath(dir),
+      JSON.stringify({ micDeviceId: '', voiceModeDefault: 'yes' }),
+    );
     expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
   });
 });

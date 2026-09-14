@@ -17,10 +17,22 @@ export interface DesktopSettings {
    * the window leaves it running.
    */
   readonly stopDaemonOnQuit: boolean;
+  /**
+   * Preferred microphone device id (renderer `getUserMedia` constraint,
+   * issue #162). Undefined → the OS default input device.
+   */
+  readonly micDeviceId?: string;
+  /**
+   * When true, the Chat composer opens in voice mode (two-way turns)
+   * instead of dictation (issue #162). Default false — dictation is the
+   * conservative default; voice mode is an explicit opt-in.
+   */
+  readonly voiceModeDefault: boolean;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   stopDaemonOnQuit: false,
+  voiceModeDefault: false,
 };
 
 /** Path of the desktop settings file inside `dir` (default `~/.florina`). */
@@ -42,6 +54,13 @@ export function readDesktopSettings(dir?: string): DesktopSettings {
         typeof parsed['stopDaemonOnQuit'] === 'boolean'
           ? parsed['stopDaemonOnQuit']
           : DEFAULT_DESKTOP_SETTINGS.stopDaemonOnQuit,
+      voiceModeDefault:
+        typeof parsed['voiceModeDefault'] === 'boolean'
+          ? parsed['voiceModeDefault']
+          : DEFAULT_DESKTOP_SETTINGS.voiceModeDefault,
+      ...(typeof parsed['micDeviceId'] === 'string' && parsed['micDeviceId'].length > 0
+        ? { micDeviceId: parsed['micDeviceId'] }
+        : {}),
     };
   } catch {
     return { ...DEFAULT_DESKTOP_SETTINGS };

@@ -37,6 +37,7 @@ export const IPC_CHANNELS = [
   'dictation:audio',
   'dictation:audio-out',
   'dictation:update',
+  'voice:update',
   'hud:state',
   'command',
   'command:result',

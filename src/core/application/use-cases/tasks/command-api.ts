@@ -523,6 +523,18 @@ export interface ChatClearCommand {
 }
 
 /**
+ * Journal a message WITHOUT running a turn (issue #162): voice-mode turns
+ * are answered by the realtime engine, not ChatService — both sides of the
+ * spoken exchange still land in the canonical thread. Roles are limited to
+ * `user`/`assistant` — `system`/`tool` rows remain unconstructible.
+ */
+export interface ChatAppendCommand {
+  readonly kind: 'chat-append';
+  readonly role: 'user' | 'assistant';
+  readonly text: string;
+}
+
+/**
  * The canonical discriminated union of all commands (DEC-026).
  *
  * The `kind` field is the discriminant; {@link CommandApi.execute} switches
@@ -564,7 +576,8 @@ export type Command =
   | DelegateTaskCommand
   | ChatSendCommand
   | ChatReadCommand
-  | ChatClearCommand;
+  | ChatClearCommand
+  | ChatAppendCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -604,6 +617,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'chat-send',
   'chat-read',
   'chat-clear',
+  'chat-append',
 ] as const;
 
 /* ================================================================== *
@@ -925,6 +939,13 @@ export interface ChatReadResponse {
   readonly error?: string;
 }
 
+/** chat-append response (issue #162) — the journaled message. */
+export interface ChatAppendResponse {
+  readonly ok: boolean;
+  readonly message?: ConversationMessage;
+  readonly error?: string;
+}
+
 /** chat-clear response (issue #157). */
 export interface ChatClearResponse {
   readonly ok: boolean;
@@ -962,6 +983,7 @@ export type Response =
   | ChatSendResponse
   | ChatReadResponse
   | ChatClearResponse
+  | ChatAppendResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -1307,6 +1329,8 @@ export class CommandApi {
         return this.handleChatRead();
       case 'chat-clear':
         return this.handleChatClear();
+      case 'chat-append':
+        return this.handleChatAppend(command);
       default:
         return {
           ok: false,
@@ -2346,6 +2370,40 @@ export class CommandApi {
     }
     this.chatStore.recordClear(new Date().toISOString());
     return { ok: true };
+  }
+
+  /**
+   * chat-append (issue #162): journal a voice-turn message without
+   * running a ChatService turn — the realtime engine already answered.
+   * Roles are narrowed to user/assistant; the append journals through the
+   * same store + sink as chat-send so subscribers see the row live.
+   */
+  private async handleChatAppend(cmd: ChatAppendCommand): Promise<ChatAppendResponse> {
+    if (this.chatStore === undefined) {
+      return { ok: false, error: 'chat store is not wired into this daemon' };
+    }
+    // The role narrowing in ChatAppendCommand is compile-time only — a
+    // forged command could inject system/tool rows without this check.
+    if (cmd.role !== 'user' && cmd.role !== 'assistant') {
+      return { ok: false, error: 'role must be user or assistant' };
+    }
+    const text = cmd.text.trim();
+    if (text.length === 0) {
+      return { ok: false, error: 'text is required' };
+    }
+    const message: ConversationMessage = {
+      id: generateId('msg'),
+      role: cmd.role,
+      content: text,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      this.chatStore.append(message);
+    } catch (err) {
+      return { ok: false, error: `failed to journal message: ${errorMessage(err)}` };
+    }
+    this.chatMessageSink?.(message);
+    return { ok: true, message };
   }
 }
 

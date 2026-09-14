@@ -288,6 +288,7 @@ describe('IpcBridge', () => {
       'dictation:audio',
       'dictation:audio-out',
       'dictation:update',
+      'voice:update',
       'hud:state',
       'command',
       'command:result',
@@ -2428,6 +2429,280 @@ describe('dictation verbs', () => {
           m.channel === 'dictation:update' && (m.data as { final?: string }).final !== undefined,
       ),
     ).toBe(false);
+    await app.disconnect();
+  });
+});
+
+/* ================================================================== *
+ * Voice-mode verbs (issue #162): two-way turns via an injected
+ * DesktopVoiceSession, mutual exclusion with dictation, daemon-loss
+ * suspension, and preference replay.
+ * ================================================================== */
+
+describe('voice-mode verbs (issue #162)', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  class StubVoiceSession {
+    started = 0;
+    stopped = 0;
+    listening = false;
+    failStart: Error | null = null;
+    private stateCbs = new Set<(s: string) => void>();
+    private transcriptCbs = new Set<(t: string, p: boolean) => void>();
+    async start(): Promise<void> {
+      if (this.failStart !== null) throw this.failStart;
+      this.started += 1;
+    }
+    async stop(): Promise<void> {
+      this.stopped += 1;
+    }
+    startListening(): void {
+      this.listening = true;
+    }
+    stopListening(): void {
+      this.listening = false;
+    }
+    onStateChange(cb: (s: never) => void): () => void {
+      this.stateCbs.add(cb as (s: string) => void);
+      return () => this.stateCbs.delete(cb as (s: string) => void);
+    }
+    onTranscript(cb: (t: string, p: boolean) => void): () => void {
+      this.transcriptCbs.add(cb);
+      return () => this.transcriptCbs.delete(cb);
+    }
+    emitState(s: 'idle' | 'listening' | 'processing' | 'responding' | 'error'): void {
+      for (const cb of this.stateCbs) cb(s);
+    }
+    emitTranscript(text: string, partial: boolean): void {
+      for (const cb of this.transcriptCbs) cb(text, partial);
+    }
+  }
+
+  function voiceApp(
+    transport: MockIpcTransport,
+    options?: {
+      dictation?: DictationService;
+      voiceConfig?: { micDeviceId?: string; voiceModeDefault?: boolean };
+    },
+  ): { app: DesktopApp; session: StubVoiceSession } {
+    const session = new StubVoiceSession();
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      voiceSession: session,
+      ...(options?.dictation !== undefined ? { dictation: options.dictation } : {}),
+      ...(options?.voiceConfig !== undefined ? { voiceConfig: options.voiceConfig } : {}),
+    });
+    app.start();
+    return { app, session };
+  }
+
+  function voiceUpdates(transport: MockIpcTransport): Array<Record<string, unknown>> {
+    return transport.toRenderer
+      .filter((m) => m.channel === 'voice:update')
+      .map((m) => m.data as Record<string, unknown>);
+  }
+
+  function noopTransport(): {
+    startCapture: () => void;
+    stopCapture: () => void;
+    play: () => void;
+    stopPlayback: () => void;
+    close: () => void;
+  } {
+    return {
+      startCapture: () => undefined,
+      stopCapture: () => undefined,
+      play: () => undefined,
+      stopPlayback: () => undefined,
+      close: () => undefined,
+    };
+  }
+
+  it('voicemode:start opens the session and reports active', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+    await app.handleRendererCommand({ id: 'v1', cmd: 'voicemode:start' });
+    expect(session.started).toBe(1);
+    expect(voiceUpdates(transport)).toContainEqual({ active: true });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 'v1',
+      res: { ok: true },
+    });
+    await app.disconnect();
+  });
+
+  it('voice:talk toggles a talk turn only while voice mode is on', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+
+    await app.handleRendererCommand({ id: 'v2', cmd: 'voice:talk' });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 'v2',
+      res: { ok: false, error: 'voice mode is off' },
+    });
+
+    await app.handleRendererCommand({ id: 'v3', cmd: 'voicemode:start' });
+    await app.handleRendererCommand({ id: 'v4', cmd: 'voice:talk' });
+    expect(session.listening).toBe(true);
+    expect(voiceUpdates(transport)).toContainEqual({ listening: true });
+
+    await app.handleRendererCommand({ id: 'v5', cmd: 'voice:talk' });
+    expect(session.listening).toBe(false);
+    expect(voiceUpdates(transport)).toContainEqual({ listening: false });
+    await app.disconnect();
+  });
+
+  it('voicemode:stop closes the session and reports inactive', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+    await app.handleRendererCommand({ id: 'v6', cmd: 'voicemode:start' });
+    await app.handleRendererCommand({ id: 'v7', cmd: 'voicemode:stop' });
+    expect(session.stopped).toBe(1);
+    expect(voiceUpdates(transport)).toContainEqual({ active: false });
+    await app.disconnect();
+  });
+
+  it('starting voice mode cancels an in-flight dictation round', async () => {
+    const transport = new MockIpcTransport();
+    const dictation = new DictationService({
+      transport: noopTransport(),
+      session: {
+        isConnected: true,
+        currentState: 'idle' as const,
+        connect: async () => undefined,
+        disconnect: async () => undefined,
+        startListening: () => undefined,
+        stopListening: () => undefined,
+        sendToolCallOutput: () => undefined,
+        sendUserMessage: () => undefined,
+        onToolCall: () => () => undefined,
+        onTranscript: () => () => undefined,
+        onStateChange: () => () => undefined,
+      },
+      apiKey: 'sk-test',
+      onUpdate: (u) => transport.sendToRenderer('dictation:update', { state: u.state }),
+      onTranscript: () => undefined,
+    });
+    const { app } = voiceApp(transport, { dictation });
+    await app.handleRendererCommand({ id: 'd1', cmd: 'dictation:start' });
+    expect(dictation.currentState).toBe('listening');
+
+    await app.handleRendererCommand({ id: 'v8', cmd: 'voicemode:start' });
+    expect(dictation.currentState).toBe('idle');
+    await app.disconnect();
+  });
+
+  it('dictation:start is refused while voice mode is active', async () => {
+    const transport = new MockIpcTransport();
+    const { app } = voiceApp(transport, {
+      dictation: new DictationService({
+        transport: noopTransport(),
+        apiKey: 'sk-test',
+        onUpdate: () => undefined,
+        onTranscript: () => undefined,
+      }),
+    });
+    await app.handleRendererCommand({ id: 'v9', cmd: 'voicemode:start' });
+    await app.handleRendererCommand({ id: 'd2', cmd: 'dictation:start' });
+    const refused = transport.toRenderer
+      .filter((m) => m.channel === 'command:result')
+      .map((m) => m.data as { id: string; res: { ok: boolean; error?: string } })
+      .find((r) => r.id === 'd2');
+    expect(refused?.res.ok).toBe(false);
+    expect(refused?.res.error).toContain('voice mode');
+    await app.disconnect();
+  });
+
+  it('forwards engine state and transcripts as voice:update pushes', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+    await app.handleRendererCommand({ id: 'v10', cmd: 'voicemode:start' });
+
+    session.emitState('responding');
+    session.emitTranscript('checking the fleet', true);
+    session.emitTranscript('checking the fleet now', false);
+
+    const updates = voiceUpdates(transport);
+    expect(updates).toContainEqual({ state: 'responding' });
+    expect(updates).toContainEqual({ partial: 'checking the fleet' });
+    expect(updates).toContainEqual({ final: 'checking the fleet now' });
+    await app.disconnect();
+  });
+
+  it('a daemon drop suspends an in-flight talk turn', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] !== undefined) socket.send(JSON.stringify({ ok: true }));
+    });
+
+    await app.handleRendererCommand({ id: 'v11', cmd: 'voicemode:start' });
+    await app.handleRendererCommand({ id: 'v12', cmd: 'voice:talk' });
+    expect(session.listening).toBe(true);
+
+    server.dropClient();
+    await waitFor(() => voiceUpdates(transport).some((u) => u['suspended'] === true));
+    expect(session.listening).toBe(false);
+    expect(voiceUpdates(transport)).toContainEqual({ listening: false, suspended: true });
+    await app.disconnect();
+  });
+
+  it('voice verbs fail honestly when no session is wired', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    await app.handleRendererCommand({ id: 'v13', cmd: 'voicemode:start' });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 'v13',
+      res: { ok: false, error: 'voice mode is not configured' },
+    });
+    await app.disconnect();
+  });
+
+  it('a failed start does not leave voice mode active', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = voiceApp(transport);
+    session.failStart = new Error('realtime refused');
+    await app.handleRendererCommand({ id: 'v14', cmd: 'voicemode:start' });
+    const res = transport.toRenderer
+      .filter((m) => m.channel === 'command:result')
+      .map((m) => m.data as { id: string; res: { ok: boolean; error?: string } })
+      .find((r) => r.id === 'v14');
+    expect(res?.res.ok).toBe(false);
+    expect(res?.res.error).toContain('realtime refused');
+
+    await app.handleRendererCommand({ id: 'v15', cmd: 'voice:talk' });
+    const talk = transport.toRenderer
+      .filter((m) => m.channel === 'command:result')
+      .map((m) => m.data as { id: string; res: { ok: boolean; error?: string } })
+      .find((r) => r.id === 'v15');
+    expect(talk?.res.ok).toBe(false);
+    await app.disconnect();
+  });
+
+  it('replayVoiceConfig pushes mic + default preferences to the renderer', async () => {
+    const transport = new MockIpcTransport();
+    const { app } = voiceApp(transport, {
+      voiceConfig: { micDeviceId: 'usb-mic-1', voiceModeDefault: true },
+    });
+    app.replayVoiceConfig();
+    expect(voiceUpdates(transport)).toContainEqual({
+      config: { micDeviceId: 'usb-mic-1', voiceModeDefault: true },
+    });
     await app.disconnect();
   });
 });
