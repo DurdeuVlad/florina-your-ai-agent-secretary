@@ -310,6 +310,20 @@ export interface ListIdeasCommand {
   readonly kind: 'idea-list';
 }
 
+/** Read a ledger's markdown body — the desktop reader view (issue #129). */
+export interface ReadIdeaCommand {
+  readonly kind: 'idea-read';
+  readonly ideaId: string;
+}
+
+/**
+ * List compiled Briefs (any status) — the ideas screen's
+ * awaiting-decision section filters to `draft` (issue #129).
+ */
+export interface ListBriefsCommand {
+  readonly kind: 'brief-list';
+}
+
 /**
  * Append a titled section to a ledger — research notes, open questions,
  * decisions in progress.
@@ -459,10 +473,12 @@ export type Command =
   | QueryContextHealthCommand
   | CreateIdeaCommand
   | ListIdeasCommand
+  | ReadIdeaCommand
   | AppendIdeaCommand
   | PromoteIdeaCommand
   | CompileBriefCommand
   | ConfirmBriefCommand
+  | ListBriefsCommand
   | UpdatePreferenceCommand
   | QueryPreferencesCommand
   | GetDigestCommand
@@ -489,10 +505,12 @@ export const COMMAND_KINDS: readonly string[] = [
   'context-health',
   'idea-create',
   'idea-list',
+  'idea-read',
   'idea-append',
   'idea-promote',
   'brief-compile',
   'brief-confirm',
+  'brief-list',
   'update-preference',
   'query-preferences',
   'get-digest',
@@ -607,10 +625,36 @@ export interface IdeaResponse {
   readonly error?: string;
 }
 
+/**
+ * One `idea-list` row: the ledger index entry plus list affordances the
+ * screen needs — `entryCount` (the `## ` sections in the body) and a
+ * `preview` line (first non-heading text, truncated). Both derive from
+ * the ledger body, which the file index does not carry.
+ */
+export interface IdeaListItem extends IdeaLedger {
+  readonly entryCount: number;
+  readonly preview: string;
+}
+
 /** Response to `idea-list`. */
 export interface IdeaListResponse {
   readonly ok: boolean;
-  readonly ideas: readonly IdeaLedger[];
+  readonly ideas: readonly IdeaListItem[];
+}
+
+/** Response to `idea-read` — the ledger record plus its markdown body. */
+export interface IdeaReadResponse {
+  readonly ok: boolean;
+  readonly idea: IdeaLedger | null;
+  readonly body: string | null;
+  readonly error?: string;
+}
+
+/** Response to `brief-list` — every compiled Brief, any status. */
+export interface BriefListResponse {
+  readonly ok: boolean;
+  readonly briefs: readonly Brief[];
+  readonly error?: string;
 }
 
 /** Response to `brief-compile` — the persisted draft. */
@@ -743,8 +787,10 @@ export type Response =
   | ContextHealthResponse
   | IdeaResponse
   | IdeaListResponse
+  | IdeaReadResponse
   | BriefResponse
   | BriefConfirmResponse
+  | BriefListResponse
   | PreferenceResponse
   | DelegateTaskResponse
   | UnknownCommandResponse;
@@ -983,6 +1029,8 @@ export class CommandApi {
         return this.handleCreateIdea(command);
       case 'idea-list':
         return this.handleListIdeas();
+      case 'idea-read':
+        return this.handleReadIdea(command);
       case 'idea-append':
         return this.handleAppendIdea(command);
       case 'idea-promote':
@@ -991,6 +1039,8 @@ export class CommandApi {
         return this.handleCompileBrief(command);
       case 'brief-confirm':
         return this.handleConfirmBrief(command);
+      case 'brief-list':
+        return this.handleListBriefs();
       case 'update-preference':
         return this.handleUpdatePreference(command);
       case 'query-preferences':
@@ -1666,7 +1716,39 @@ export class CommandApi {
 
   private async handleListIdeas(): Promise<IdeaListResponse> {
     if (this.ideas === undefined) return { ok: false, ideas: [] };
-    return { ok: true, ideas: this.ideas.listIdeas() };
+    return {
+      ok: true,
+      ideas: this.ideas.listIdeas().map((l) => {
+        const body = this.ideas?.readIdeaBody(l.id) ?? '';
+        return { ...l, ...summarizeIdeaBody(body) };
+      }),
+    };
+  }
+
+  private async handleReadIdea(cmd: ReadIdeaCommand): Promise<IdeaReadResponse> {
+    if (this.ideas === undefined) {
+      return {
+        ok: false,
+        idea: null,
+        body: null,
+        error: 'idea ledgers are not wired into this daemon',
+      };
+    }
+    if (!cmd.ideaId) {
+      return { ok: false, idea: null, body: null, error: 'ideaId is required' };
+    }
+    const idea = this.ideas.getIdea(cmd.ideaId);
+    if (idea === null) {
+      return { ok: false, idea: null, body: null, error: `no idea ledger ${cmd.ideaId}` };
+    }
+    return { ok: true, idea, body: this.ideas.readIdeaBody(cmd.ideaId) };
+  }
+
+  private async handleListBriefs(): Promise<BriefListResponse> {
+    if (this.ideas === undefined) {
+      return { ok: false, briefs: [], error: 'idea ledgers are not wired into this daemon' };
+    }
+    return { ok: true, briefs: this.ideas.listBriefs() };
   }
 
   private async handleAppendIdea(cmd: AppendIdeaCommand): Promise<IdeaResponse> {
@@ -1913,6 +1995,27 @@ function isTerminalState(state: TaskStateType): boolean {
   return TERMINAL_STATES.has(state);
 }
 
+/**
+ * Summarize a ledger's markdown body for the ideas list (issue #129):
+ * `entryCount` = the `## ` sections (each append lands as a section), and
+ * `preview` = the first non-heading, non-empty line, truncated.
+ */
+function summarizeIdeaBody(body: string): { entryCount: number; preview: string } {
+  let entryCount = 0;
+  let preview = '';
+  for (const line of body.split('\n')) {
+    const t = line.trim();
+    if (t.startsWith('## ')) {
+      entryCount += 1;
+      continue;
+    }
+    if (preview === '' && t !== '' && !t.startsWith('#')) {
+      preview = t.length > 160 ? `${t.slice(0, 157)}…` : t;
+    }
+  }
+  return { entryCount, preview };
+}
+
 /** Generate a reasonably unique id without a crypto dependency. */
 function generateId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
@@ -2036,17 +2139,22 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                               ? IdeaResponse
                               : C extends ListIdeasCommand
                                 ? IdeaListResponse
-                                : C extends CompileBriefCommand
-                                  ? BriefResponse
-                                  : C extends ConfirmBriefCommand
-                                    ? BriefConfirmResponse
-                                    : C extends UpdatePreferenceCommand | QueryPreferencesCommand
-                                      ? PreferenceResponse
-                                      : C extends GetDigestCommand
-                                        ? DigestResponse
-                                        : C extends CreatePrCommand
-                                          ? CreatePrResponse
-                                          : Response;
+                                : C extends ReadIdeaCommand
+                                  ? IdeaReadResponse
+                                  : C extends ListBriefsCommand
+                                    ? BriefListResponse
+                                    : C extends CompileBriefCommand
+                                      ? BriefResponse
+                                      : C extends ConfirmBriefCommand
+                                        ? BriefConfirmResponse
+                                        : C extends
+                                              UpdatePreferenceCommand | QueryPreferencesCommand
+                                          ? PreferenceResponse
+                                          : C extends GetDigestCommand
+                                            ? DigestResponse
+                                            : C extends CreatePrCommand
+                                              ? CreatePrResponse
+                                              : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the
