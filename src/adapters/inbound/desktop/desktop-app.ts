@@ -74,6 +74,13 @@ export interface DesktopAppOptions {
    * (HUD + tray stay live) until an explicit {@link stop} or tray Quit.
    */
   readonly closeToTray?: boolean;
+  /**
+   * Push-to-talk toggle hook: invoked when the renderer sends the
+   * `ptt:toggle` verb (the HUD pill click — the HUD is merged into the
+   * main window, so the click lands on the `command` channel). The
+   * composition root wires this to `HudController.toggleLocalListening`.
+   */
+  readonly onPttToggle?: () => void;
 }
 
 /**
@@ -120,6 +127,7 @@ export class DesktopApp {
   private readonly reconnectBaseDelayMs: number;
   private readonly reconnectMaxDelayMs: number;
   private readonly closeToTray: boolean;
+  private readonly onPttToggle?: () => void;
   private started = false;
   private stopping = false;
   /** Latest task list from the daemon (inspector column 1, #126). */
@@ -137,6 +145,7 @@ export class DesktopApp {
     this.reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 1_000;
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
     this.closeToTray = options.closeToTray ?? false;
+    this.onPttToggle = options.onPttToggle;
     this.windowOptions = options.windowOptions ?? {};
     if (options.trayBackend !== undefined) {
       this.tray = new SystemTrayManager(options.trayBackend);
@@ -584,6 +593,11 @@ export class DesktopApp {
    */
   async handleRendererCommand(message: unknown): Promise<void> {
     const m = message as { id?: unknown; cmd?: unknown };
+    if (m.cmd === 'ptt:toggle') {
+      this.onPttToggle?.();
+      this.bridge.sendToRenderer('command:result', { id: m.id, res: { ok: true } });
+      return;
+    }
     if (typeof m.cmd === 'string' && (await this.handleInspectorCommand(m.cmd, m.id))) {
       return;
     }

@@ -156,4 +156,17 @@ describe('HudController local PTT (issue #124)', () => {
     expect(lastHudPush(transport)!.isListening).toBe(false);
     expect(lastHudPush(transport)!.voiceMode).toBe('offline');
   });
+
+  it('inline mode (no window) pushes hud:state without creating a window', () => {
+    const transport = new MockIpcTransport();
+    const hud = new HudController({ ipc: transport });
+    hud.start();
+    // No window was created — state pushes still flow over the transport.
+    hud.applyRendererState(makeState({ daemonStatus: 'connected' }));
+    hud.toggleLocalListening();
+    const pushed = lastHudPush(transport);
+    expect(pushed).toBeDefined();
+    expect(pushed!.isListening).toBe(true);
+    hud.stop();
+  });
 });
