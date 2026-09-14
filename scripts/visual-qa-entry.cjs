@@ -39,6 +39,7 @@ const APP_VIEWS = {
   ideas: 'd',
   prefs: 'p',
   secretary: 's',
+  chat: 'c', // #160 — until the screen lands, 'g c' is unmapped and this shot mirrors the prior view
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

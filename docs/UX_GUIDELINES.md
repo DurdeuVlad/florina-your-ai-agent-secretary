@@ -90,9 +90,11 @@ default, tinted only when carrying priority meaning.
 └──────────┴─────────────────────────────────────────┘
 ```
 
-- **Sidebar**: nav (Inbox w/ count badge, Tasks, Fleet, Ideas, Preferences,
-  Secretary) + daemon status footer (dot + one word). Never shows project
-  pickers or filters — the inbox decides what matters.
+- **Sidebar**: nav (Chat, Inbox w/ count badge, Tasks, Fleet, Ideas,
+  Preferences, Secretary) + daemon status footer (dot + one word). Never
+  shows project pickers or filters — the inbox decides what matters.
+- **Chat is the launch view** — the single Secretary conversation is the
+  product's center; inbox/fleet/etc. are support surfaces.
 - **Header**: view title + one-line qualifier ("what needs you right now")
   - at most two actions. No breadcrumbs — depth is ≤2.
 - **Content**: single column of cards. Three-column layouts exist _only_
@@ -173,11 +175,44 @@ the only surface allowed to interrupt — and only while held/active.
 Status word + 5 actions max (`Start/Stop daemon`, `Open inbox`,
 `Show window`, `Quit`). Status mirrors the sidebar dot exactly.
 
+### 3.9 Chat — the central thread
+
+One conversation with the Secretary — no thread list, no sessions to
+pick. History is journaled; resume on launch is automatic.
+
+```
+┌─ You ────────────────────────────────┐  user: right-aligned, panel-raised
+│ ship the rate-limit fix …            │
+└──────────────────────────────────────┘
+ ▸ list_tasks ok · 5 tasks              tool rows: mono, muted, collapsed by default
+┌─ Secretary ──────────────────────────┐  assistant: left, panel + border
+│ Codex has headroom — delegated …     │
+└──────────────────────────────────────┘
+ ● Secretary is working — query_inbox…  working row: amber dot + latest tool
+[🎙] [textarea — grows to 140px] [🔊 voice] [Send]
+```
+
+- **Composer**: Enter sends, Shift+Enter newline. Mic = dictation
+  (Codex-style): live partial transcript previews above the input
+  (`accent` left border), final text inserts at the cursor **editable**
+  — never auto-sends. `🔊 voice` toggles two-way voice mode (§5).
+- **Tool activity** renders as collapsed mono rows between messages —
+  progressive disclosure: presence is honest, detail stays in the
+  inspector.
+- **No optimistic bubbles**: a sent message renders only after the
+  journal confirms it (`chat:message`) — same rule as approvals.
+- **Actions needed mid-turn** still route to the inbox — chat replies
+  never replace attention items.
+- `Clear` (header) archives the thread via journaled `chat-clear` —
+  confirmation first; history is never destroyed.
+
 ## 4. Interaction model
 
 - **Keyboard-first**: `j/k` move selection, `Enter` drills, `Esc` pops,
-  `g i/t/f/p` jump to views, `a` applies the card's primary action,
-  `Space` (global, held) = push-to-talk.
+  `g c/i/t/f/d/p/s` jump to views, `a` applies the card's primary action,
+  `Space` (global) = push-to-talk dictation.
+- **Composer keys** (chat): `Enter` sends, `Shift+Enter` newline, mic
+  button or `Ctrl+Space` toggles dictation.
 - **Pointer**: single click selects; double/`Enter` drills. Cards show
   hover at `panel-raised` — no other hover effects.
 - **Focus**: visible 1px `accent` outline. Everything reachable by keyboard.
@@ -195,6 +230,10 @@ Status word + 5 actions max (`Start/Stop daemon`, `Open inbox`,
   the inbox and waits for visual confirm.
 - Spoken replies never exceed what fits on two HUD lines; longer answers
   end with "— in the inbox."
+- **Dictation ≠ voice mode.** Dictation (default) only fills the composer
+  — the user reviews and sends; the model never acts on unreviewed speech.
+  Voice mode is an explicit toggle for two-way turns; spoken Secretary
+  replies also append to the chat thread so the visual record stays whole.
 
 ## 6. Accessibility
 
