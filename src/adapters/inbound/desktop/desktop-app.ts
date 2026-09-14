@@ -511,6 +511,20 @@ export class DesktopApp {
   }
 
   /**
+   * Re-push the current daemon status — status changes fire only on
+   * transition, so a connect that lands before the renderer finishes
+   * loading leaves the sidebar stuck on its initial "connecting…"
+   * (#133 found this via screenshots). Call on `did-finish-load`.
+   */
+  replayDaemonStatus(): void {
+    const snap = this.state.snapshot();
+    this.bridge.sendToRenderer('daemon:status', {
+      status: snap.daemonStatus,
+      error: snap.error,
+    });
+  }
+
+  /**
    * Wire incoming daemon WebSocket messages to renderer-state updates.
    * The daemon pushes typed state updates (inbox, task, metrics, etc.) which
    * the app mirrors into the renderer state and forwards to the renderer over

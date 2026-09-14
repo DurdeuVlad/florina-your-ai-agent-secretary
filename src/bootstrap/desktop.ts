@@ -132,9 +132,15 @@ async function main(): Promise<void> {
   desktopApp.start();
   if (window.contents !== null) {
     ipc.attachContents(window.contents);
-    // Re-push once the page finishes loading — the initial hud:state push
-    // can race the renderer's listener registration.
-    window.contents.once('did-finish-load', () => hud.refresh());
+    // Re-push once the page finishes loading — the initial hud:state,
+    // daemon:status, and view-tree pushes can all land before the
+    // renderer's listeners attach (#133 screenshots caught the sidebar
+    // stuck on "connecting…" and the inbox never mounting).
+    window.contents.once('did-finish-load', () => {
+      hud.refresh();
+      desktopApp.replayDaemonStatus();
+      void desktopApp.refreshNow();
+    });
   }
   window.loadFile(RENDERER_HTML);
   hud.start();

@@ -18,6 +18,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "desktop": "node scripts/desktop.mjs",
+    "visual-qa": "node scripts/visual-qa.mjs",
     "postinstall": "node scripts/ensure-electron.mjs"
   },
   "keywords": [
