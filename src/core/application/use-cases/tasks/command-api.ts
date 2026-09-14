@@ -907,6 +907,12 @@ export interface FleetResponse {
 export interface ChatSendResponse {
   readonly ok: boolean;
   readonly message?: ConversationMessage;
+  /**
+   * Turn status (issue #158): `started` = a Secretary turn is running
+   * (reply arrives via `chat:message` pushes); `unavailable` = no model
+   * is wired, so the message was journaled with no reply coming.
+   */
+  readonly turn?: 'started' | 'unavailable';
   readonly error?: string;
 }
 
@@ -989,6 +995,20 @@ export interface SecretaryOpsPort {
   confirmMemoryWrite(writeId: string): boolean;
   /** Drop a proposed memory write; false when the id is unknown. */
   rejectMemoryWrite(writeId: string): boolean;
+}
+
+/**
+ * The Secretary conversation's turn runner (issue #158). Defined
+ * structurally here — the concrete {@link ChatService} lives in
+ * `use-cases/chat/` and is attached after construction because it
+ * depends on the command executor itself (tools route back through
+ * this API — same capability surface as a local client).
+ */
+export interface ChatTurnPort {
+  /** Start a turn over the journaled history. No-ops when one is in flight. */
+  startTurn(): void;
+  /** Whether a turn is currently running. */
+  turnInFlight(): boolean;
 }
 
 /**
@@ -1162,6 +1182,7 @@ export class CommandApi {
   private readonly quotaLedger?: QuotaLedger;
   private readonly chatStore?: ChatMessageRepositoryPort;
   private readonly chatMessageSink?: (message: ConversationMessage) => void;
+  private chatService?: ChatTurnPort;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -1195,6 +1216,15 @@ export class CommandApi {
   /** Whether a `shutdown` command has been received. */
   get isShutdownRequested(): boolean {
     return this.shutdownRequested;
+  }
+
+  /**
+   * Attach the chat turn runner (issue #158). Separate from the
+   * constructor because the service's tools route back through this
+   * executor — the daemon wires it after construction.
+   */
+  setChatService(service: ChatTurnPort): void {
+    this.chatService = service;
   }
 
   /**
@@ -2267,6 +2297,9 @@ export class CommandApi {
     if (this.chatStore === undefined) {
       return { ok: false, error: 'chat store is not wired into this daemon' };
     }
+    if (this.chatService?.turnInFlight() === true) {
+      return { ok: false, error: 'a Secretary turn is already in flight' };
+    }
     const text = cmd.text.trim();
     if (text.length === 0) {
       return { ok: false, error: 'text is required' };
@@ -2283,7 +2316,14 @@ export class CommandApi {
       return { ok: false, error: `failed to journal message: ${errorMessage(err)}` };
     }
     this.chatMessageSink?.(message);
-    return { ok: true, message };
+    // The assistant turn runs async — its messages arrive as journaled
+    // `chat:message` pushes (issue #158). When no model is wired the
+    // message still lands honestly with `turn: 'unavailable'`.
+    if (this.chatService === undefined) {
+      return { ok: true, message, turn: 'unavailable' };
+    }
+    this.chatService.startTurn();
+    return { ok: true, message, turn: 'started' };
   }
 
   /** chat-read (issue #157): visible history + the latest clear mark. */

@@ -149,6 +149,17 @@ export interface DaemonOptions {
     readonly preferProvider?: string;
     readonly authToken?: string;
   }[];
+  /**
+   * Model connector config for Secretary chat turns (issue #158,
+   * DEC-034): an OpenAI-compatible endpoint (LiteLLM proxy or direct).
+   * When absent, `chat-send` still journals the user message but no
+   * turn runs — the response says `turn: 'unavailable'`.
+   */
+  readonly chatModel?: {
+    readonly baseUrl: string;
+    readonly model: string;
+    readonly apiKey?: string;
+  };
 }
 
 /** Daemon lifecycle states. */
@@ -184,6 +195,7 @@ export class FlorinaDaemon extends EventEmitter {
     authToken?: string;
     allowedCommands?: readonly string[];
     remoteProviders?: NonNullable<DaemonOptions['remoteProviders']>;
+    chatModel?: DaemonOptions['chatModel'];
   };
   private state: DaemonState = 'stopped';
   private server: WebSocketControlPlaneServer | null = null;
@@ -232,6 +244,7 @@ export class FlorinaDaemon extends EventEmitter {
       ...(options.remoteProviders !== undefined
         ? { remoteProviders: options.remoteProviders }
         : {}),
+      ...(options.chatModel !== undefined ? { chatModel: options.chatModel } : {}),
     };
   }
 
@@ -589,6 +602,29 @@ export class FlorinaDaemon extends EventEmitter {
           void this.stop();
         },
       });
+
+      // Secretary chat turns (issue #158): the single conversation runs
+      // the Florina loop on the configured model connector. Constructed
+      // after the command API because its tools route back through it;
+      // attached via setChatService. Without chatModel config, chat-send
+      // still journals — the turn simply reports unavailable.
+      if (this.options.chatModel !== undefined) {
+        const { LiteLLMConnector } =
+          await import('../adapters/outbound/model/litellm-connector.js');
+        const { ChatService } = await import('../core/application/use-cases/chat/chat-service.js');
+        const chatService = new ChatService({
+          store: repos.chatMessages,
+          connector: new LiteLLMConnector(this.options.chatModel),
+          commandApi: this.commandApi,
+          onMessage: (message) => {
+            this.stream?.broadcast({ type: 'chat:message', message });
+          },
+          onEvent: (event) => {
+            this.stream?.broadcast({ type: 'chat:event', event });
+          },
+        });
+        this.commandApi.setChatService(chatService);
+      }
 
       // Wire cross-provider failover (issue #64): freezes a task's session,
       // blocks it, re-routes through a freshly-built CapacityRouter (so

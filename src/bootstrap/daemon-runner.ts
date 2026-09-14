@@ -110,6 +110,22 @@ export class DaemonRunner {
     // Clean up a stale PID file before starting.
     this.removePidFile();
 
+    // Secretary chat turns (issue #158): an OpenAI-compatible endpoint
+    // (LiteLLM proxy or api.openai.com) from the same env vars the voice
+    // surface uses. Absent config → chat still journals, turns report
+    // unavailable.
+    const chatModel =
+      typeof process.env['FLORINA_LITELLM_URL'] === 'string' &&
+      typeof process.env['FLORINA_MODEL'] === 'string'
+        ? {
+            baseUrl: process.env['FLORINA_LITELLM_URL']!,
+            model: process.env['FLORINA_MODEL']!,
+            ...(typeof process.env['FLORINA_LITELLM_KEY'] === 'string'
+              ? { apiKey: process.env['FLORINA_LITELLM_KEY']! }
+              : {}),
+          }
+        : undefined;
+
     this.daemon = new FlorinaDaemon({
       port: this.port,
       dbPath: this.dbPath,
@@ -119,6 +135,7 @@ export class DaemonRunner {
       // Local control-plane auth (#118): provision a token so the socket
       // rejects unauthenticated commands. Surfaces read the same file.
       ...(this.authTokenDir !== null ? { authToken: ensureLocalAuthToken(this.authTokenDir) } : {}),
+      ...(chatModel !== undefined ? { chatModel } : {}),
     });
     await this.daemon.start();
     this.writePid(process.pid);
