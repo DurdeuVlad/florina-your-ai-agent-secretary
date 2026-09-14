@@ -17,6 +17,7 @@
   --orange: #e2814f;
   --purple: #a98af0;
   --slate: #7d7d87;
+  --border-hover: #3a3a40;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -167,7 +168,7 @@ header .spacer {
   transition: border-color 0.12s ease;
 }
 .card:hover {
-  border-color: #3a3a40;
+  border-color: var(--border-hover);
 }
 .card.Critical {
   border-left-color: var(--red);
