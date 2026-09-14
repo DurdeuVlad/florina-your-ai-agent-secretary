@@ -23,7 +23,9 @@ import { DesktopApp } from '../adapters/inbound/desktop/desktop-app.js';
 import { HudController } from '../adapters/inbound/desktop/hud-controller.js';
 import { ElectronWindowBackend } from '../adapters/inbound/desktop/electron/window-backend.js';
 import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-transport.js';
+import { ElectronKeyboardBackend } from '../adapters/inbound/desktop/electron/keyboard-backend.js';
 import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-backend.js';
+import { HotkeyManager, DEFAULT_HOTKEYS } from '../adapters/inbound/desktop/hotkeys.js';
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
 import { readLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
@@ -120,6 +122,27 @@ async function main(): Promise<void> {
     // race the renderer, and dedup would leave the default offline frame.
     hudWindow.contents.once('did-finish-load', () => hud.refresh());
   }
+
+  // Global push-to-talk hotkey (issue #124): OS-level via Electron's
+  // globalShortcut — works with no window focused and the main window
+  // closed. The accelerator is configurable (env until #128 lands the
+  // preferences editor); registration failure = conflict, surfaced on the
+  // HUD's idle hint.
+  const keyboard = new ElectronKeyboardBackend();
+  const hotkeys = new HotkeyManager(keyboard);
+  keyboard.setFireHandler((accelerator) => hotkeys.dispatch(accelerator));
+  const pttAccelerator = process.env['FLORINA_PTT_HOTKEY'] ?? DEFAULT_HOTKEYS.PTT_HOLD;
+  const hintAccel = pttAccelerator.replace(
+    'CommandOrControl',
+    process.platform === 'darwin' ? 'Cmd' : 'Ctrl',
+  );
+  if (hotkeys.register(pttAccelerator, () => hud.toggleLocalListening())) {
+    hud.viewModel.setHotkeyHint(`${hintAccel} to talk — or click`);
+  } else {
+    hud.viewModel.setHotkeyHint(`Hotkey conflict: ${pttAccelerator} — set FLORINA_PTT_HOTKEY`);
+    console.warn(`[desktop] global hotkey "${pttAccelerator}" could not be registered (conflict)`);
+  }
+  app.on('will-quit', () => hotkeys.unregisterAll());
 
   // Renderer → daemon commands (approve, preferences, …) route through the
   // main process socket so the sandboxed page never holds a connection.

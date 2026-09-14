@@ -58,6 +58,8 @@ export class HudController {
   private readonly bridge: IpcBridge;
   private readonly vm: PttHudViewModel;
   private readonly hudHtmlPath?: string;
+  private lastRendererState: RendererStateData | null = null;
+  private localListening = false;
   private started = false;
 
   constructor(options: HudControllerOptions) {
@@ -74,6 +76,24 @@ export class HudController {
   /** The underlying view model (test/inspection access). */
   get viewModel(): PttHudViewModel {
     return this.vm;
+  }
+
+  /**
+   * Local PTT toggle (issue #124): the global hotkey flips the HUD into
+   * `listening` even before the voice pipeline emits real session events
+   * (#131). A second press releases — the capture is "sent" and the HUD
+   * returns to idle. Takes precedence over the mirrored voice state.
+   * @returns `true` when the HUD is now listening.
+   */
+  toggleLocalListening(): boolean {
+    this.localListening = !this.localListening;
+    this.refreshFromCurrent();
+    return this.localListening;
+  }
+
+  /** Whether a local PTT capture is currently held open. */
+  get isLocallyListening(): boolean {
+    return this.localListening;
   }
 
   /**
@@ -101,17 +121,29 @@ export class HudController {
    * change — the view model only notifies on real transitions.
    */
   applyRendererState(state: RendererStateData): void {
+    this.lastRendererState = state;
+    this.refreshFromCurrent();
+  }
+
+  /** Recompute the view model from the last renderer state + local PTT flag. */
+  private refreshFromCurrent(): void {
+    const state = this.lastRendererState;
+    if (state === null) return;
     const mode: VoicePipelineMode =
       state.daemonStatus !== 'connected'
         ? 'offline'
         : state.voiceState.mode === 'whisper'
           ? 'whisper'
           : 'realtime';
-    const realtimeState = state.voiceState.listening
-      ? VoiceSessionState.Listening
-      : state.voiceState.speaking
-        ? VoiceSessionState.Responding
-        : VoiceSessionState.Idle;
+    // A dropped daemon can't hold a capture — clear the local flag so it
+    // doesn't resurface on reconnect.
+    if (mode === 'offline') this.localListening = false;
+    const realtimeState =
+      this.localListening || state.voiceState.listening
+        ? VoiceSessionState.Listening
+        : state.voiceState.speaking
+          ? VoiceSessionState.Responding
+          : VoiceSessionState.Idle;
     this.vm.update({
       mode,
       realtimeState,

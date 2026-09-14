@@ -120,3 +120,40 @@ describe('HudController (issue #123)', () => {
     expect(window.isClosed()).toBe(true);
   });
 });
+
+describe('HudController local PTT (issue #124)', () => {
+  it('toggleLocalListening flips the HUD into listening while connected', () => {
+    const transport = new MockIpcTransport();
+    const hud = new HudController({ window: new MockWindowBackend(), ipc: transport });
+    hud.start();
+    hud.applyRendererState(makeState({ daemonStatus: 'connected' }));
+    expect(hud.toggleLocalListening()).toBe(true);
+    expect(lastHudPush(transport)!.isListening).toBe(true);
+    expect(hud.toggleLocalListening()).toBe(false);
+    expect(lastHudPush(transport)!.isListening).toBe(false);
+  });
+
+  it('a dropped daemon clears local listening instead of resurfacing on reconnect', () => {
+    const transport = new MockIpcTransport();
+    const hud = new HudController({ window: new MockWindowBackend(), ipc: transport });
+    hud.start();
+    hud.applyRendererState(makeState({ daemonStatus: 'connected' }));
+    hud.toggleLocalListening();
+    expect(hud.isLocallyListening).toBe(true);
+    hud.applyRendererState(makeState({ daemonStatus: 'disconnected' }));
+    expect(hud.isLocallyListening).toBe(false);
+    expect(lastHudPush(transport)!.voiceMode).toBe('offline');
+    hud.applyRendererState(makeState({ daemonStatus: 'connected' }));
+    expect(lastHudPush(transport)!.isListening).toBe(false);
+  });
+
+  it('cannot listen while the daemon is offline', () => {
+    const transport = new MockIpcTransport();
+    const hud = new HudController({ window: new MockWindowBackend(), ipc: transport });
+    hud.start();
+    hud.applyRendererState(makeState({ daemonStatus: 'disconnected' }));
+    hud.toggleLocalListening();
+    expect(lastHudPush(transport)!.isListening).toBe(false);
+    expect(lastHudPush(transport)!.voiceMode).toBe('offline');
+  });
+});
