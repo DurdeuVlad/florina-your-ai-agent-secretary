@@ -570,6 +570,7 @@ export class FlorinaDaemon extends EventEmitter {
         ideas: this.ideaService,
         preferences: this.preferenceStore,
         delegation,
+        quotaLedger: this.quotaLedger ?? undefined,
         onShutdown: () => {
           void this.stop();
         },

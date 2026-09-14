@@ -22,6 +22,7 @@ const PUSH_CHANNELS = new Set([
   'daemon:status',
   'inspector:update',
   'view:show',
+  'fleet:update',
   'hud:state',
   'command:result',
 ]);

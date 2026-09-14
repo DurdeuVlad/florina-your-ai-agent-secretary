@@ -61,6 +61,7 @@ import {
   type PreferenceProfilePort,
 } from '../../ports/outbound/preference-profile.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
+import type { QuotaLedger } from '../routing/quota-ledger.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
 import type { ContextHealthSnapshot } from '../context/context-health-monitor.js';
 import type {
@@ -253,6 +254,17 @@ export interface QueryEventsCommand {
   readonly taskId: string;
 }
 
+/**
+ * Query the fleet/quota view (issue #127): per-provider quota windows
+ * from the {@link QuotaLedger}, parked tasks with resume times, and
+ * recent routing decisions — all derived from the journaled events
+ * (TaskFailedOver / TaskParked / TaskResumed) so nothing is inferred
+ * that the journal cannot prove.
+ */
+export interface QueryFleetCommand {
+  readonly kind: 'query-fleet';
+}
+
 /** List tasks, optionally filtered by status. */
 export interface ListTasksCommand {
   readonly kind: 'list-tasks';
@@ -440,6 +452,7 @@ export type Command =
   | QueryMetricsCommand
   | QueryTaskCommand
   | QueryEventsCommand
+  | QueryFleetCommand
   | ListTasksCommand
   | PruneWorktreeCommand
   | ShutdownCommand
@@ -469,6 +482,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'query-metrics',
   'query-task',
   'query-events',
+  'query-fleet',
   'list-tasks',
   'prune-worktree',
   'shutdown',
@@ -669,9 +683,51 @@ export interface EventsResponse {
   readonly error?: string;
 }
 
+/** One provider's quota line for the fleet view (issue #127). */
+export interface FleetProviderView {
+  readonly provider: string;
+  /** False while any known window is exhausted and not yet reset. */
+  readonly available: boolean;
+  /** When the provider next regains capacity (earliest exhausted reset). */
+  readonly exhaustedUntil: string | null;
+  /** Highest usedPct across the provider's windows, 0..1. */
+  readonly usedPct: number;
+  /** Soonest window reset across all known windows. */
+  readonly resetsAt: string | null;
+  /** Most recent observation, or null when never observed. */
+  readonly lastObservedAt: string | null;
+}
+
+/** A task currently parked waiting for quota (issue #127). */
+export interface ParkedTaskView {
+  readonly taskId: string;
+  readonly objective: string;
+  readonly reason: string;
+  readonly resumeAt: string | null;
+}
+
+/** One journaled routing decision for the fleet view (issue #127). */
+export interface RoutingDecisionView {
+  readonly taskId: string;
+  readonly objective: string;
+  readonly kind: string;
+  /** Human-readable one-liner, e.g. "image-pipeline → codex: gemini exhausted". */
+  readonly summary: string;
+  readonly timestamp: string;
+}
+
+/** query-fleet response (issue #127). */
+export interface FleetResponse {
+  readonly ok: boolean;
+  readonly providers: readonly FleetProviderView[];
+  readonly parked: readonly ParkedTaskView[];
+  readonly routingDecisions: readonly RoutingDecisionView[];
+}
+
 export type Response =
   | StartTaskResponse
   | EventsResponse
+  | FleetResponse
   | StopTaskResponse
   | ApproveResponse
   | InboxResponse
@@ -800,6 +856,12 @@ export interface CommandApiDeps {
    * when absent the command fails cleanly — this daemon is not a child.
    */
   readonly delegation?: DelegationService;
+  /**
+   * Provider quota ledger (DEC-029, issue #127). When wired, `query-fleet`
+   * returns per-provider windows; when absent providers are reported
+   * optimistically-available with no observations.
+   */
+  readonly quotaLedger?: QuotaLedger;
 }
 
 /* ================================================================== *
@@ -844,6 +906,7 @@ export class CommandApi {
   private readonly ideas?: IdeaService;
   private readonly preferences?: PreferenceProfilePort;
   private readonly delegation?: DelegationService;
+  private readonly quotaLedger?: QuotaLedger;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -867,6 +930,7 @@ export class CommandApi {
     this.ideas = deps.ideas;
     this.preferences = deps.preferences;
     this.delegation = deps.delegation;
+    this.quotaLedger = deps.quotaLedger;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -905,6 +969,8 @@ export class CommandApi {
         return this.handleQueryTask(command);
       case 'query-events':
         return this.handleQueryEvents(command);
+      case 'query-fleet':
+        return this.handleQueryFleet();
       case 'list-tasks':
         return this.handleListTasks(command);
       case 'prune-worktree':
@@ -1425,6 +1491,84 @@ export class CommandApi {
       return { ok: false, taskId: cmd.taskId, events: [], error: `Task not found: ${cmd.taskId}` };
     }
     return { ok: true, taskId: cmd.taskId, events: this.eventRepository.listByTask(cmd.taskId) };
+  }
+
+  /**
+   * query-fleet (issue #127): provider quota windows + parked tasks +
+   * recent routing decisions. Everything here is journaled or observed —
+   * no inferred state (DG-01: observed vs inferred).
+   */
+  private handleQueryFleet(): FleetResponse {
+    // Providers: every registered adapter plus every observed provider.
+    const names = new Set<string>([
+      ...(this.adapterRegistry?.list() ?? []),
+      ...(this.quotaLedger?.providers() ?? []),
+    ]);
+    const providers: FleetProviderView[] = [...names].sort().map((p) => {
+      const state = this.quotaLedger?.providerState(p);
+      const windows = state?.windows ?? [];
+      const resets = windows
+        .map((w) => w.resetsAt)
+        .filter((r): r is string => r !== null)
+        .sort();
+      return {
+        provider: p,
+        available: state?.available ?? true,
+        exhaustedUntil: state?.exhaustedUntil ?? null,
+        usedPct: windows.reduce((m, w) => Math.max(m, w.usedPct), 0),
+        resetsAt: resets[0] ?? null,
+        lastObservedAt: state?.lastObservedAt ?? null,
+      };
+    });
+
+    // Routing history: last 24h of failover/park/resume events.
+    const now = new Date();
+    const since = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
+    const routing = this.eventRepository
+      .listByTimestampRange(since, now.toISOString())
+      .filter(
+        (e) => e.kind === 'TaskFailedOver' || e.kind === 'TaskParked' || e.kind === 'TaskResumed',
+      );
+    const objectiveOf = (taskId: string): string =>
+      this.taskStore.getById(taskId)?.objective ?? taskId;
+
+    const routingDecisions: RoutingDecisionView[] = routing.map((e) => {
+      const objective = objectiveOf(e.taskId);
+      const p = e.payload;
+      const summary =
+        e.kind === 'TaskFailedOver'
+          ? `${objective} → ${String(p['toProvider'] ?? '?')}: ${String(p['reason'] ?? 'failover')}`
+          : e.kind === 'TaskParked'
+            ? `${objective} parked: ${String(p['reason'] ?? 'no provider capacity')}`
+            : `${objective} resumed on ${String(p['provider'] ?? '?')}`;
+      return { taskId: e.taskId, objective, kind: e.kind, summary, timestamp: e.timestamp };
+    });
+
+    // Parked tasks: latest routing event per task is TaskParked and the
+    // task itself is not in a terminal state.
+    const parked: ParkedTaskView[] = [];
+    const seen = new Set<string>();
+    for (const e of [...routing].reverse()) {
+      if (seen.has(e.taskId)) continue;
+      seen.add(e.taskId);
+      if (e.kind !== 'TaskParked') continue;
+      const task = this.taskStore.getById(e.taskId);
+      if (task === null) continue;
+      // A parked task that later completed/reviewed/terminated isn't
+      // waiting on quota anymore.
+      if (isTerminalState(task.state) || task.state === 'completed' || task.state === 'reviewed') {
+        continue;
+      }
+      const resumeAt = e.payload['resumeAt'];
+      parked.push({
+        taskId: e.taskId,
+        objective: task.objective,
+        reason: String(e.payload['reason'] ?? 'no provider capacity'),
+        resumeAt: typeof resumeAt === 'string' ? resumeAt : null,
+      });
+    }
+
+    return { ok: true, providers, parked, routingDecisions };
   }
 
   /** list-tasks: list all tasks, optionally filtered by status. */

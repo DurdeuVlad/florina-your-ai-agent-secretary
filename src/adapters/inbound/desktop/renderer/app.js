@@ -49,6 +49,9 @@ if (bridge) {
     if (TITLES[name]) showView(name);
   });
 
+  /* fleet/quota screen (issue #127) */
+  bridge.on('fleet:update', (tree) => mount(tree, $('fleet')));
+
   /* PTT pill in the header — same states as the old overlay (issue #123) */
   bridge.on('hud:state', renderHud);
 }
