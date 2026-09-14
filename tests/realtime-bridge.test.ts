@@ -704,6 +704,37 @@ describe('RealtimeBridge', () => {
       }
     });
 
+    it('sendToolCallOutput follows the output item with response.create (issue #162)', async () => {
+      const socket = await connect();
+      bridge.sendToolCallOutput('call_1', '{"ok":true}');
+
+      const sent = allSent(socket);
+      const createIdx = sent.findIndex((m) => m.type === 'conversation.item.create');
+      const respondIdx = sent.findIndex((m, i) => m.type === 'response.create' && i > createIdx);
+      // Without the continuation the session idles at `processing` — the
+      // GA API never resumes the turn after a tool output on its own.
+      expect(createIdx).toBeGreaterThanOrEqual(0);
+      expect(respondIdx).toBeGreaterThan(createIdx);
+    });
+
+    it('fires onToolCall via the GA conversation.item.added/.done events', async () => {
+      const socket = await connect();
+      const calls: { callId: string; name: string }[] = [];
+      bridge.onToolCall((e) => calls.push({ callId: e.callId, name: e.name }));
+      const item = {
+        type: 'function_call',
+        call_id: 'call_ga',
+        name: 'list_tasks',
+        arguments: '{}',
+      };
+
+      socket.emitMessage({ type: 'conversation.item.added', item });
+      socket.emitMessage({ type: 'conversation.item.done', item });
+      socket.emitMessage({ type: 'response.output_item.done', item });
+
+      expect(calls).toEqual([{ callId: 'call_ga', name: 'list_tasks' }]);
+    });
+
     it('sendUserMessage creates a user message item then requests a response', async () => {
       const socket = await connect();
       bridge.sendUserMessage('The research finished: quota resets hourly.');
@@ -918,7 +949,7 @@ describe('RealtimeBridge', () => {
         transcript: 'dictated sentence',
       });
 
-      expect(transcripts).toEqual([{ partial: false, text: 'dictated sentence' }]);
+      expect(transcripts).toEqual([{ partial: false, text: 'dictated sentence', source: 'user' }]);
       expect(bridge.currentState).toBe(VoiceSessionState.Idle);
       expect(states.at(-1)).toBe(VoiceSessionState.Idle);
     });

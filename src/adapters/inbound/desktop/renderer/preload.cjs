@@ -30,6 +30,7 @@ const PUSH_CHANNELS = new Set([
   'dictation:capture',
   'dictation:audio-out',
   'dictation:update',
+  'voice:update',
   'hud:state',
   'command:result',
 ]);

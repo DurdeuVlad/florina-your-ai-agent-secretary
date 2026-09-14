@@ -101,6 +101,12 @@ export interface TranscriptEvent {
   readonly partial: boolean;
   /** The transcribed text. */
   readonly text: string;
+  /**
+   * Who spoke (issue #162): `user` for input-audio transcription,
+   * `assistant` for the model's reply transcript. Absent when the
+   * engine can't attribute the text.
+   */
+  readonly source?: 'user' | 'assistant';
 }
 
 /**

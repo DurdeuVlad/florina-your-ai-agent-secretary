@@ -35,9 +35,19 @@ export function createMicCapture() {
   let source = null;
 
   return {
-    async start(onChunk) {
+    /**
+     * @param {(pcm: string) => void} onChunk Base64 PCM16 chunk callback.
+     * @param {string | null} [deviceId] preferred mic device (issue #162
+     *   micDeviceId preference); falsy → OS default input.
+     */
+    async start(onChunk, deviceId) {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        },
       });
       ctx = new AudioContext({ sampleRate: 24000 });
       await ctx.audioWorklet.addModule('audio-worklet.js');

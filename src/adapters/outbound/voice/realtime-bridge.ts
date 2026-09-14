@@ -421,6 +421,10 @@ export class RealtimeBridge implements RealtimeSessionPort {
       type: 'conversation.item.create',
       item: { type: 'function_call_output', call_id: callId, output },
     });
+    // The GA API does not continue the turn on its own — after the tool
+    // output lands, an explicit response.create makes the model speak the
+    // result (issue #162: without it the session hung at `processing`).
+    this.sendMessage({ type: 'response.create' });
   }
 
   /**
@@ -508,9 +512,12 @@ export class RealtimeBridge implements RealtimeSessionPort {
         // Audio acknowledged; remain in Processing until response arrives.
         break;
 
-      case 'conversation.item.created': {
+      case 'conversation.item.created':
+      case 'conversation.item.added':
+      case 'conversation.item.done': {
         // A function_call item means the model wants a tool executed.
-        // Dedupe: GA also reports the same call via response.output_item.done.
+        // Dedupe: GA reports the same call via conversation.item.added,
+        // conversation.item.done, and response.output_item.done.
         if (isFunctionCallItem(msg.item) && !this.seenToolCalls.has(msg.item.call_id)) {
           this.seenToolCalls.add(msg.item.call_id);
           this.emitToolCall({
@@ -527,11 +534,11 @@ export class RealtimeBridge implements RealtimeSessionPort {
         break;
 
       case 'conversation.item.input_audio_transcription.delta':
-        this.emitTranscript({ partial: true, text: msg.delta });
+        this.emitTranscript({ partial: true, text: msg.delta, source: 'user' });
         break;
 
       case 'conversation.item.input_audio_transcription.completed':
-        this.emitTranscript({ partial: false, text: msg.transcript });
+        this.emitTranscript({ partial: false, text: msg.transcript, source: 'user' });
         // Dictation: no response follows the transcript — return to Idle.
         if (this.options.transcriptionOnly && this.state === State.Processing) {
           this.setState(State.Idle);
@@ -541,22 +548,22 @@ export class RealtimeBridge implements RealtimeSessionPort {
       case 'response.output_text.delta':
         this.transitionToResponding();
         this.emitResponse({ partial: true, text: msg.delta });
-        this.emitTranscript({ partial: true, text: msg.delta });
+        this.emitTranscript({ partial: true, text: msg.delta, source: 'assistant' });
         break;
 
       case 'response.output_text.done':
         this.emitResponse({ partial: false, text: msg.text });
-        this.emitTranscript({ partial: false, text: msg.text });
+        this.emitTranscript({ partial: false, text: msg.text, source: 'assistant' });
         this.maybeReturnToIdle();
         break;
 
       case 'response.output_audio_transcript.delta':
         // Assistant speech transcript — drives captions in voice mode.
-        this.emitTranscript({ partial: true, text: msg.delta });
+        this.emitTranscript({ partial: true, text: msg.delta, source: 'assistant' });
         break;
 
       case 'response.output_audio_transcript.done':
-        this.emitTranscript({ partial: false, text: msg.transcript });
+        this.emitTranscript({ partial: false, text: msg.transcript, source: 'assistant' });
         break;
 
       case 'response.output_item.done': {

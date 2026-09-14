@@ -15,6 +15,11 @@ import type {
 import type { VoiceSessionManager } from '../adapters/inbound/voice/voice-session-manager.js';
 import type { AsyncVoiceToolRunner } from '../adapters/inbound/voice/voice-session-manager.js';
 import type { ModelPort } from '../core/application/ports/outbound/model.js';
+import type {
+  AudioTransport,
+  RealtimeSessionPort,
+  TranscriptionPort,
+} from '../core/application/ports/outbound/voice.js';
 import { isProfileEmpty } from '../core/application/ports/outbound/preference-profile.js';
 
 /**
@@ -27,6 +32,25 @@ import { isProfileEmpty } from '../core/application/ports/outbound/preference-pr
 export async function createStdinVoiceSession(options: {
   readonly apiKey: string;
   readonly commandApi: CommandExecutor;
+  /**
+   * Audio transport override (issue #162): the desktop main process passes
+   * its IPC transport so the renderer mic/speakers back the session;
+   * absent → the stdin/stdout transport (CLI `florina voice`).
+   */
+  readonly audioTransport?: AudioTransport;
+  /**
+   * Pre-initialized transcription engine for the offline fallback
+   * (issue #162): the desktop initializes whisper.cpp only when a model
+   * file is configured. Absent → an uninitialized adapter (the pipeline
+   * treats it as unavailable).
+   */
+  readonly whisperAdapter?: TranscriptionPort;
+  /**
+   * Prebuilt realtime session (issue #162): the desktop composes its own
+   * bridge so it can subscribe for transcript journaling before the
+   * manager starts. Absent → a {@link RealtimeBridge} over the transport.
+   */
+  readonly bridge?: RealtimeSessionPort;
   /**
    * Runner for long-lived voice tools (issue #73) — e.g. `research`.
    * {@link createResearchRunner} builds one from a model connector; when
@@ -51,18 +75,24 @@ export async function createStdinVoiceSession(options: {
    */
   readonly instructions?: string;
 }): Promise<VoiceSessionManager> {
-  const { StdinAudioTransport } =
-    await import('../adapters/outbound/voice/stdin-audio-transport.js');
-  const { WhisperCppBackend } = await import('../adapters/outbound/voice/whisper-backend.js');
-  const { WhisperAdapter } = await import('../adapters/outbound/voice/whisper-adapter.js');
   const { RealtimeBridge, defaultSocketFactory } =
     await import('../adapters/outbound/voice/realtime-bridge.js');
   const { VoiceSessionManager: Manager } =
     await import('../adapters/inbound/voice/voice-session-manager.js');
 
-  const audioTransport = new StdinAudioTransport();
-  const bridge = new RealtimeBridge(audioTransport, defaultSocketFactory);
-  const whisperAdapter = new WhisperAdapter(new WhisperCppBackend());
+  let audioTransport = options.audioTransport;
+  if (audioTransport === undefined) {
+    const { StdinAudioTransport } =
+      await import('../adapters/outbound/voice/stdin-audio-transport.js');
+    audioTransport = new StdinAudioTransport();
+  }
+  const bridge = options.bridge ?? new RealtimeBridge(audioTransport, defaultSocketFactory);
+  let whisperAdapter = options.whisperAdapter;
+  if (whisperAdapter === undefined) {
+    const { WhisperCppBackend } = await import('../adapters/outbound/voice/whisper-backend.js');
+    const { WhisperAdapter } = await import('../adapters/outbound/voice/whisper-adapter.js');
+    whisperAdapter = new WhisperAdapter(new WhisperCppBackend());
+  }
 
   let asyncToolRunner = options.asyncToolRunner;
   if (asyncToolRunner === undefined && options.litellm !== undefined) {

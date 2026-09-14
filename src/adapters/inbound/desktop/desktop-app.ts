@@ -33,6 +33,27 @@ import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
 import { renderSecretaryScreen } from './views/secretary-screen.js';
 import type { DictationService } from '../../../core/application/use-cases/voice/dictation-service.js';
+import type { VoiceSessionState } from '../../../core/application/ports/outbound/voice.js';
+
+/**
+ * The voice-mode surface the desktop needs (issue #162) — satisfied by
+ * `VoiceSessionManager`. Two-way turns: mic audio in, tools executed
+ * against the daemon, AI audio back out through the same transport.
+ */
+export interface DesktopVoiceSession {
+  /** Connect the realtime session (tools + instructions wired). */
+  start(): Promise<void>;
+  /** Disconnect and release the session. */
+  stop(): Promise<void>;
+  /** Begin a talk turn (push-to-talk within voice mode). */
+  startListening(): void;
+  /** End the turn — commits audio, the model responds. */
+  stopListening(): void;
+  /** Engine state stream (idle/listening/processing/responding/error). */
+  onStateChange(cb: (state: VoiceSessionState) => void): () => void;
+  /** Transcript stream — user and assistant speech, partials + finals. */
+  onTranscript(cb: (text: string, partial: boolean) => void): () => void;
+}
 import type { SecretaryResponse } from '../../../core/application/use-cases/tasks/command-api.js';
 import type {
   BriefListResponse,
@@ -110,6 +131,19 @@ export interface DesktopAppOptions {
    * `dictation:update`). Absent → the verbs fail honestly.
    */
   readonly dictation?: DictationService;
+  /**
+   * Voice-mode session (issue #162): `voicemode:start/stop` drive the
+   * session lifecycle and `voice:talk` toggles a push-to-talk turn.
+   * Mutually exclusive with dictation — starting one ends the other.
+   * Absent → the verbs fail honestly.
+   */
+  readonly voiceSession?: DesktopVoiceSession;
+  /**
+   * Voice-mode preference/config pushed to the renderer on load
+   * (issue #162): `micDeviceId` constrains getUserMedia;
+   * `voiceModeDefault: true` auto-engages voice mode.
+   */
+  readonly voiceConfig?: { readonly micDeviceId?: string; readonly voiceModeDefault?: boolean };
 }
 
 /**
@@ -161,6 +195,11 @@ export class DesktopApp {
   private readonly onPttToggle?: () => void;
   private readonly onDaemonMissing?: () => void;
   private readonly dictation: DictationService | undefined;
+  private readonly voiceSession: DesktopVoiceSession | undefined;
+  private readonly voiceConfig: DesktopAppOptions['voiceConfig'];
+  /** Voice-mode on/off + whether a talk turn is capturing (issue #162). */
+  private voiceActive = false;
+  private voiceListening = false;
   /** True once the current connect intent has linked at least once (#132). */
   private everConnected = false;
   private started = false;
@@ -190,6 +229,21 @@ export class DesktopApp {
     this.onPttToggle = options.onPttToggle;
     this.onDaemonMissing = options.onDaemonMissing;
     this.dictation = options.dictation;
+    this.voiceSession = options.voiceSession;
+    this.voiceConfig = options.voiceConfig;
+    // Voice-mode state + live transcript captions reach the renderer on
+    // voice:update (issue #162). Finals ALSO journal into the chat thread
+    // via chat-append (wired in the composition root) — the preview is
+    // ephemeral, the bubble is journaled (DEC-012).
+    this.voiceSession?.onStateChange((state) => {
+      this.bridge.sendToRenderer('voice:update', { state });
+      if (state !== 'listening') {
+        this.voiceListening = false;
+      }
+    });
+    this.voiceSession?.onTranscript((text, partial) => {
+      this.bridge.sendToRenderer('voice:update', partial ? { partial: text } : { final: text });
+    });
     this.windowOptions = options.windowOptions ?? {};
     if (options.trayBackend !== undefined) {
       this.tray = new SystemTrayManager(options.trayBackend);
@@ -577,6 +631,14 @@ export class DesktopApp {
    * §4) and schedule the next attempt with exponential backoff.
    */
   private handleSocketDrop(): void {
+    // Daemon loss suspends an in-flight voice turn (issue #162): tools and
+    // chat journaling route through the daemon — committing more audio
+    // would produce an unanswerable turn.
+    if (this.voiceListening && this.voiceSession !== undefined) {
+      this.voiceListening = false;
+      this.voiceSession.stopListening();
+      this.bridge.sendToRenderer('voice:update', { listening: false, suspended: true });
+    }
     if (this.wantsConnection) {
       this.scheduleReconnect();
     } else {
@@ -745,6 +807,9 @@ export class DesktopApp {
       return;
     }
     if (typeof m.cmd === 'string' && (await this.handleDictationCommand(m.cmd, m.id))) {
+      return;
+    }
+    if (typeof m.cmd === 'string' && (await this.handleVoiceCommand(m.cmd, m.id))) {
       return;
     }
     const cmd = this.resolveRendererCommand(m.cmd);
@@ -985,12 +1050,78 @@ export class DesktopApp {
       ack({ ok: true });
       return true;
     }
+    if (verb === 'start' && this.voiceActive) {
+      ack({ ok: false, error: 'voice mode is active — turn it off to dictate' });
+      return true;
+    }
     const run = verb === 'start' ? this.dictation.start() : this.dictation.stop();
     await run.then(
       () => ack({ ok: true }),
       (err: unknown) => ack({ ok: false, error: err instanceof Error ? err.message : String(err) }),
     );
     return true;
+  }
+
+  /**
+   * Voice-mode verbs (issue #162). `voicemode:start` opens the realtime
+   * session (tools + HUD state reporting); `voicemode:stop` closes it;
+   * `voice:talk` toggles a push-to-talk turn inside the session — the mic
+   * button's role while voice mode is on. Mutually exclusive with
+   * dictation: starting voice mode cancels an in-flight dictation round.
+   */
+  private async handleVoiceCommand(raw: string, id: unknown): Promise<boolean> {
+    if (raw !== 'voicemode:start' && raw !== 'voicemode:stop' && raw !== 'voice:talk') {
+      return false;
+    }
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      this.bridge.sendToRenderer('command:result', { id, res });
+    };
+    if (this.voiceSession === undefined) {
+      ack({ ok: false, error: 'voice mode is not configured' });
+      return true;
+    }
+    try {
+      if (raw === 'voicemode:start') {
+        this.dictation?.cancel(); // one audio pipeline at a time
+        await this.voiceSession.start();
+        this.voiceActive = true;
+        this.bridge.sendToRenderer('voice:update', { active: true });
+      } else if (raw === 'voicemode:stop') {
+        this.voiceListening = false;
+        this.voiceSession.stopListening();
+        await this.voiceSession.stop();
+        this.voiceActive = false;
+        this.bridge.sendToRenderer('voice:update', { active: false });
+      } else {
+        // voice:talk — PTT inside voice mode.
+        if (!this.voiceActive) {
+          ack({ ok: false, error: 'voice mode is off' });
+          return true;
+        }
+        if (this.voiceListening) {
+          this.voiceSession.stopListening();
+          this.voiceListening = false;
+        } else {
+          this.voiceSession.startListening();
+          this.voiceListening = true;
+        }
+        this.bridge.sendToRenderer('voice:update', { listening: this.voiceListening });
+      }
+      ack({ ok: true });
+    } catch (err) {
+      ack({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+    return true;
+  }
+
+  /**
+   * Push the voice preference/config to the renderer (issue #162) —
+   * called on `did-finish-load` like the other state replays (#133).
+   */
+  replayVoiceConfig(): void {
+    if (this.voiceConfig !== undefined) {
+      this.bridge.sendToRenderer('voice:update', { config: this.voiceConfig });
+    }
   }
 
   /**

@@ -323,6 +323,22 @@ export interface ConversationItemCreatedMessage {
   readonly item: RealtimeConversationItem;
 }
 
+/** GA alias for `conversation.item.created` (issue #162). */
+export interface ConversationItemAddedMessage {
+  readonly type: 'conversation.item.added';
+  readonly item: RealtimeConversationItem;
+}
+
+/**
+ * A conversation item completed (issue #162): GA delivers the finished
+ * `function_call` item here — with the full `arguments` — as well as in
+ * `response.output_item.done`. The bridge dedupes by `call_id`.
+ */
+export interface ConversationItemDoneMessage {
+  readonly type: 'conversation.item.done';
+  readonly item: RealtimeConversationItem;
+}
+
 /** A conversation item was deleted. */
 export interface ConversationItemDeletedMessage {
   readonly type: 'conversation.item.deleted';
@@ -358,6 +374,8 @@ export type ServerMessage =
   | InputAudioTranscriptionDeltaMessage
   | InputAudioTranscriptionCompletedMessage
   | ConversationItemCreatedMessage
+  | ConversationItemAddedMessage
+  | ConversationItemDoneMessage
   | ConversationItemDeletedMessage
   | ErrorMessage;
 
@@ -377,6 +395,8 @@ export const SERVER_MESSAGE_TYPES: readonly string[] = [
   'conversation.item.input_audio_transcription.delta',
   'conversation.item.input_audio_transcription.completed',
   'conversation.item.created',
+  'conversation.item.added',
+  'conversation.item.done',
   'conversation.item.deleted',
   'error',
 ] as const;
