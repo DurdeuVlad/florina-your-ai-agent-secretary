@@ -222,6 +222,73 @@ CREATE TABLE IF NOT EXISTS context_capsules (
 `;
 
 /* ------------------------------------------------------------------ *
+ * Table: chat_messages — the single Secretary conversation (issue #157)
+ *
+ * The conversation is append-only like the events journal (DEC-012): the
+ * stored history IS the FlorinaLoop's memory, replayed verbatim into each
+ * turn. `tool_calls`/`tool_call_id`/`name`/`is_error` carry tool-call
+ * records so assistant + tool turns round-trip losslessly.
+ * ------------------------------------------------------------------ */
+export const CREATE_TABLE_CHAT_MESSAGES = /* sql */ `
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id            TEXT PRIMARY KEY NOT NULL,
+  role          TEXT NOT NULL,          -- 'system' | 'user' | 'assistant' | 'tool'
+  content       TEXT,
+  tool_calls    TEXT,                    -- JSON: ConversationToolCall[] (assistant)
+  tool_call_id  TEXT,                    -- which call a 'tool' message answers
+  name          TEXT,                    -- tool name for 'tool' messages
+  is_error      INTEGER,                 -- boolean as 0/1 (tool results)
+  created_at    TEXT NOT NULL
+);
+`;
+
+/**
+ * Table: chat_clears — append-only record of `chat-clear` commands.
+ * `chat-read` returns only messages after the latest clear, so clearing
+ * never destroys history (DEC-012): the rows survive, the window moves.
+ */
+export const CREATE_TABLE_CHAT_CLEARS = /* sql */ `
+CREATE TABLE IF NOT EXISTS chat_clears (
+  id            TEXT PRIMARY KEY NOT NULL,
+  cleared_at    TEXT NOT NULL,
+  before_rowid  INTEGER NOT NULL  -- last chat_messages rowid at clear time
+);
+`;
+
+/** Append-only enforcement for the conversation journal (DEC-012). */
+export const CREATE_CHAT_NO_UPDATE_TRIGGER = /* sql */ `
+CREATE TRIGGER IF NOT EXISTS chat_messages_no_update
+BEFORE UPDATE ON chat_messages
+BEGIN
+  SELECT RAISE(ABORT, 'chat_messages table is append-only: UPDATE is not allowed');
+END;
+`;
+
+export const CREATE_CHAT_NO_DELETE_TRIGGER = /* sql */ `
+CREATE TRIGGER IF NOT EXISTS chat_messages_no_delete
+BEFORE DELETE ON chat_messages
+BEGIN
+  SELECT RAISE(ABORT, 'chat_messages table is append-only: DELETE is not allowed');
+END;
+`;
+
+export const CREATE_CHAT_CLEARS_NO_UPDATE_TRIGGER = /* sql */ `
+CREATE TRIGGER IF NOT EXISTS chat_clears_no_update
+BEFORE UPDATE ON chat_clears
+BEGIN
+  SELECT RAISE(ABORT, 'chat_clears table is append-only: UPDATE is not allowed');
+END;
+`;
+
+export const CREATE_CHAT_CLEARS_NO_DELETE_TRIGGER = /* sql */ `
+CREATE TRIGGER IF NOT EXISTS chat_clears_no_delete
+BEFORE DELETE ON chat_clears
+BEGIN
+  SELECT RAISE(ABORT, 'chat_clears table is append-only: DELETE is not allowed');
+END;
+`;
+
+/* ------------------------------------------------------------------ *
  * Indexes for common access patterns
  * ------------------------------------------------------------------ */
 

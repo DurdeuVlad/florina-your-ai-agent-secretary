@@ -31,6 +31,7 @@ import {
   ApprovalRepository,
   AttentionItemRepository,
   CapabilityGrantRepository,
+  ChatMessageRepository,
   CompletionDigestRepository,
   ContextCapsuleRepository,
   DecisionRepository,
@@ -577,6 +578,13 @@ export class FlorinaDaemon extends EventEmitter {
         voiceStateSink: (report) => {
           this.stream?.broadcast({ type: 'voice:state', ...report });
         },
+        // Secretary conversation (issue #157): the append-only store plus
+        // a broadcast sink so every subscribed surface sees new journaled
+        // messages no matter which client sent them.
+        chatStore: repos.chatMessages,
+        chatMessageSink: (message) => {
+          this.stream?.broadcast({ type: 'chat:message', message });
+        },
         onShutdown: () => {
           void this.stop();
         },
@@ -708,6 +716,7 @@ export class FlorinaDaemon extends EventEmitter {
       completionDigests: new CompletionDigestRepository(raw),
       capabilityGrants: new CapabilityGrantRepository(raw),
       briefs: new BriefRepository(raw),
+      chatMessages: new ChatMessageRepository(raw),
     };
   }
 

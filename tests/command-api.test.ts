@@ -23,6 +23,9 @@ import type {
   SecretaryResponse,
   MemoryWriteResponse,
   UnknownCommandResponse,
+  ChatSendResponse,
+  ChatReadResponse,
+  ChatClearResponse,
 } from '../src/daemon/command-api.js';
 import { EventBus } from '../src/daemon/event-stream.js';
 import { QuotaLedger } from '../src/core/application/use-cases/routing/quota-ledger.js';
@@ -36,6 +39,7 @@ import {
   ApprovalRepository,
   SessionRepository,
   CompletionDigestRepository,
+  ChatMessageRepository,
 } from '../src/storage/index.js';
 import {
   TaskState,
@@ -142,6 +146,8 @@ interface Fixture {
   onShutdown: ReturnType<typeof vi.fn>;
   db: StorageDatabase;
   completionDigestRepository: CompletionDigestRepository;
+  chatStore: ChatMessageRepository;
+  chatMessageSink: ReturnType<typeof vi.fn>;
   /** The project ID created in the fixture (for task creation). */
   projectId: string;
   /** Helper: insert a task into both the task store and the SQLite repo. */
@@ -203,6 +209,9 @@ function createFixture(): Fixture {
   const metricsCollector = new MetricsCollector();
   const worktreeManager = new MockWorktreeManager();
 
+  const chatStore = new ChatMessageRepository(raw);
+  const chatMessageSink = vi.fn();
+
   const taskStore = new SqliteBackedTaskStore(taskRepo, db);
   const approvalStore = new InMemoryApprovalStore();
   const sessionStore: SessionStore = sessionRepo;
@@ -219,6 +228,8 @@ function createFixture(): Fixture {
     approvalStore,
     sessionStore,
     completionDigestRepository: completionDigestRepo,
+    chatStore,
+    chatMessageSink,
     onShutdown,
   };
 
@@ -248,6 +259,8 @@ function createFixture(): Fixture {
     onShutdown,
     db,
     completionDigestRepository: completionDigestRepo,
+    chatStore,
+    chatMessageSink,
     projectId: project.id,
     insertTask,
     insertApproval,
@@ -1543,5 +1556,74 @@ describe('voice-state (issue #131)', () => {
     const fixture = createFixture();
     const res = await fixture.api.execute({ kind: 'voice-state', state: 'idle' });
     expect(res.ok).toBe(true);
+  });
+});
+
+/* ================================================================== *
+ * chat-send / chat-read / chat-clear (issue #157)
+ * ================================================================== */
+
+describe('chat commands (issue #157)', () => {
+  it('chat-send journals a user message and notifies subscribers', async () => {
+    const { api, chatStore, chatMessageSink } = createFixture();
+
+    const res = (await api.execute({
+      kind: 'chat-send',
+      text: '  check on the image pipeline  ',
+    })) as ChatSendResponse;
+
+    expect(res.ok).toBe(true);
+    expect(res.message?.role).toBe('user');
+    expect(res.message?.content).toBe('check on the image pipeline');
+    expect(chatStore.listVisible()).toHaveLength(1);
+    expect(chatMessageSink).toHaveBeenCalledOnce();
+    expect(chatMessageSink.mock.calls[0]?.[0].id).toBe(res.message?.id);
+  });
+
+  it('chat-send rejects empty text', async () => {
+    const { api } = createFixture();
+    const res = (await api.execute({ kind: 'chat-send', text: '   ' })) as ChatSendResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('text is required');
+  });
+
+  it('chat-read returns the visible history in order', async () => {
+    const { api } = createFixture();
+    await api.execute({ kind: 'chat-send', text: 'first' });
+    await api.execute({ kind: 'chat-send', text: 'second' });
+
+    const res = (await api.execute({ kind: 'chat-read' })) as ChatReadResponse;
+    expect(res.ok).toBe(true);
+    expect(res.messages.map((m) => m.content)).toEqual(['first', 'second']);
+    expect(res.clearedAt).toBeUndefined();
+  });
+
+  it('chat-clear moves the read window but keeps the rows', async () => {
+    const { api, chatStore } = createFixture();
+    await api.execute({ kind: 'chat-send', text: 'before' });
+
+    const cleared = (await api.execute({ kind: 'chat-clear' })) as ChatClearResponse;
+    expect(cleared.ok).toBe(true);
+
+    await api.execute({ kind: 'chat-send', text: 'after' });
+
+    const res = (await api.execute({ kind: 'chat-read' })) as ChatReadResponse;
+    expect(res.messages.map((m) => m.content)).toEqual(['after']);
+    expect(res.clearedAt).toBeDefined();
+    // History is never destroyed — the full journal still holds both.
+    expect(chatStore.listAll().map((m) => m.content)).toEqual(['before', 'after']);
+  });
+
+  it('chat commands fail cleanly when the store is not wired', async () => {
+    const { deps } = createFixture();
+    const bare = new CommandApi({ ...deps, chatStore: undefined });
+
+    const send = (await bare.execute({ kind: 'chat-send', text: 'hi' })) as ChatSendResponse;
+    const read = (await bare.execute({ kind: 'chat-read' })) as ChatReadResponse;
+    const clear = (await bare.execute({ kind: 'chat-clear' })) as ChatClearResponse;
+    expect(send.ok).toBe(false);
+    expect(read.ok).toBe(false);
+    expect(read.messages).toEqual([]);
+    expect(clear.ok).toBe(false);
   });
 });

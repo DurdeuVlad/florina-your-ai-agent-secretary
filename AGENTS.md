@@ -149,14 +149,17 @@ there are uncommitted (staged, unstaged, or untracked) changes.
 snapshot that the attention engine can use to surface a dirty
 completed/cancelled worktree for human review.
 
-## Desktop Skeleton Status (DEC-028, issue #43)
+## Desktop App Status (DEC-028, issue #43)
 
-The `src/desktop/` module is a **skeleton only** — it defines the view
-components, IPC bridge, keyboard nav, system tray, and hotkey interfaces with
-pluggable backends (`WindowBackend`, `IpcTransport`, `TrayBackend`), but no
-production Electron/Tauri backend is shipped yet. There is no `electron` or
-`@tauri-apps/*` dependency in `package.json`.
+The desktop module is a **runnable Electron app** — `npm run desktop` launches
+`src/bootstrap/desktop.ts` on the real Electron backends
+(`ElectronWindowBackend`, `ElectronIpcTransport`, `ElectronTrayBackend`,
+`ElectronKeyboardBackend`). Screens (inbox, inspector, fleet, ideas,
+preferences, secretary) render live daemon data; the PTT HUD is inline in the
+main window with a global hotkey; tray, close-to-tray, auto-reconnect, and
+daemon auto-start are wired. Visual parity is checked via `npm run visual-qa`
+(see `docs/VISUAL_QA.md`).
 
-**Do not** move desktop from "Planned" to "Works today" in the README until a
-real OS-native backend is implemented and a `npm run desktop` entrypoint
-exists. The view components are well-tested but cannot run without a backend.
+**Remaining gaps** (issue #43 stays open for these): OS-native packaging /
+distribution (DEC-028 milestone) and a real audio transport for PTT — the
+hotkey toggles HUD state, but no `AudioTransport` is wired into the app yet.

@@ -13,10 +13,12 @@ import type {
   Approval,
   AttentionItem as DomainAttentionItem,
   ContextCapsule,
+  ConversationMessage,
   Decision,
   Deliverable,
   EntityId,
   Event,
+  ISODateString,
   Project,
   Session,
   Task,
@@ -143,4 +145,24 @@ export interface CompletionDigestRepositoryPort<TDigest> {
   findByTaskId(taskId: string): TDigest | null;
   findBySessionId(sessionId: string): TDigest | null;
   list(options?: { readonly limit?: number }): TDigest[];
+}
+
+/**
+ * Secretary conversation store (issue #157). The single chat thread is
+ * append-only like the events journal (DEC-012): the stored history IS
+ * the FlorinaLoop's memory. `chat-clear` records a clear mark instead of
+ * deleting rows — {@link listVisible} returns only messages after the
+ * latest mark.
+ */
+export interface ChatMessageRepositoryPort {
+  /** Append a message to the conversation journal. */
+  append(message: ConversationMessage): void;
+  /** Messages after the latest clear mark, oldest first. */
+  listVisible(): ConversationMessage[];
+  /** Full history including pre-clear messages (audit/inspection). */
+  listAll(): ConversationMessage[];
+  /** Record a clear mark; later `listVisible` calls exclude prior rows. */
+  recordClear(at: ISODateString): void;
+  /** The latest clear mark, if any. */
+  latestClear(): ISODateString | null;
 }

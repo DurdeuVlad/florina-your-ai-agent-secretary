@@ -15,7 +15,15 @@
  */
 import type Database from 'better-sqlite3';
 
-import { SCHEMA_STATEMENTS } from './schema.js';
+import {
+  CREATE_CHAT_CLEARS_NO_DELETE_TRIGGER,
+  CREATE_CHAT_CLEARS_NO_UPDATE_TRIGGER,
+  CREATE_CHAT_NO_DELETE_TRIGGER,
+  CREATE_CHAT_NO_UPDATE_TRIGGER,
+  CREATE_TABLE_CHAT_CLEARS,
+  CREATE_TABLE_CHAT_MESSAGES,
+  SCHEMA_STATEMENTS,
+} from './schema.js';
 
 /**
  * A single forward-only migration.
@@ -107,6 +115,27 @@ export const MIGRATION_003_BRIEFS: Migration = {
 };
 
 /**
+ * Migration 4 (issue #157): the single Secretary conversation —
+ * `chat_messages` is the conversation's append-only journal (DEC-012;
+ * the stored history IS the FlorinaLoop's memory), `chat_clears` records
+ * `chat-clear` marks so clearing moves the read window instead of
+ * destroying rows.
+ */
+export const MIGRATION_004_CHAT: Migration = {
+  version: 4,
+  description: 'Create chat_messages + chat_clears tables with append-only triggers',
+  run: (db: Database.Database) => {
+    db.exec(CREATE_TABLE_CHAT_MESSAGES);
+    db.exec(CREATE_TABLE_CHAT_CLEARS);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages (created_at)');
+    db.exec(CREATE_CHAT_NO_UPDATE_TRIGGER);
+    db.exec(CREATE_CHAT_NO_DELETE_TRIGGER);
+    db.exec(CREATE_CHAT_CLEARS_NO_UPDATE_TRIGGER);
+    db.exec(CREATE_CHAT_CLEARS_NO_DELETE_TRIGGER);
+  },
+};
+
+/**
  * The ordered list of all known migrations. New migrations are appended here
  * with an incrementing version number; the framework applies only those not
  * yet recorded in the `_migrations` table.
@@ -115,6 +144,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_001_INITIAL,
   MIGRATION_002_CAPABILITY_GRANTS,
   MIGRATION_003_BRIEFS,
+  MIGRATION_004_CHAT,
 ];
 
 /**
