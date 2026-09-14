@@ -8,7 +8,7 @@ import type { PttHudState } from '../src/desktop/index.js';
 function makeState(patch: Partial<RendererStateData>): RendererStateData {
   return {
     ...DEFAULT_RENDERER_STATE,
-    voiceState: { listening: false, speaking: false, muted: false },
+    voiceState: { listening: false, speaking: false, muted: false, processing: false },
     ...patch,
   };
 }
@@ -60,7 +60,7 @@ describe('HudController (issue #123)', () => {
     hud.applyRendererState(
       makeState({
         daemonStatus: 'connected',
-        voiceState: { listening: true, speaking: false, muted: false },
+        voiceState: { listening: true, speaking: false, muted: false, processing: false },
       }),
     );
     let pushed = lastHudPush(transport)!;
@@ -70,7 +70,7 @@ describe('HudController (issue #123)', () => {
     hud.applyRendererState(
       makeState({
         daemonStatus: 'connected',
-        voiceState: { listening: false, speaking: true, muted: false },
+        voiceState: { listening: false, speaking: true, muted: false, processing: false },
       }),
     );
     pushed = lastHudPush(transport)!;
@@ -168,5 +168,98 @@ describe('HudController local PTT (issue #124)', () => {
     expect(pushed).toBeDefined();
     expect(pushed!.isListening).toBe(true);
     hud.stop();
+  });
+});
+
+describe('HudController voice pipeline mapping (issue #131)', () => {
+  function makeHud() {
+    const transport = new MockIpcTransport();
+    const hud = new HudController({ window: new MockWindowBackend(), ipc: transport });
+    hud.start();
+    return { transport, hud };
+  }
+
+  it('maps processing to the processing HUD activity state', () => {
+    const { transport, hud } = makeHud();
+    hud.applyRendererState(
+      makeState({
+        daemonStatus: 'connected',
+        voiceState: { listening: false, speaking: false, muted: false, processing: true },
+      }),
+    );
+    const pushed = lastHudPush(transport)!;
+    expect(pushed.isProcessing).toBe(true);
+    expect(pushed.isListening).toBe(false);
+    expect(pushed.isResponding).toBe(false);
+  });
+
+  it('listening beats processing beats responding; offline beats all', () => {
+    const { transport, hud } = makeHud();
+    hud.applyRendererState(
+      makeState({
+        daemonStatus: 'connected',
+        voiceState: {
+          listening: true,
+          speaking: true,
+          muted: false,
+          processing: true,
+        },
+      }),
+    );
+    expect(lastHudPush(transport)!.isListening).toBe(true);
+
+    hud.applyRendererState(
+      makeState({
+        daemonStatus: 'connected',
+        voiceState: { listening: false, speaking: true, muted: false, processing: true },
+      }),
+    );
+    expect(lastHudPush(transport)!.isProcessing).toBe(true);
+
+    hud.applyRendererState(
+      makeState({
+        daemonStatus: 'disconnected',
+        voiceState: { listening: false, speaking: true, muted: false, processing: true },
+      }),
+    );
+    expect(lastHudPush(transport)!.voiceMode).toBe('offline');
+  });
+
+  it('maps whisper mode and partial/final transcripts into the two-line area', () => {
+    const { transport, hud } = makeHud();
+    hud.applyRendererState(
+      makeState({
+        daemonStatus: 'connected',
+        voiceState: {
+          listening: true,
+          speaking: false,
+          muted: false,
+          processing: false,
+          mode: 'whisper',
+          transcript: 'par',
+        },
+      }),
+    );
+    let pushed = lastHudPush(transport)!;
+    expect(pushed.voiceMode).toBe('whisper');
+    expect(pushed.currentTranscript).toBe('par');
+
+    hud.applyRendererState(
+      makeState({
+        daemonStatus: 'connected',
+        voiceState: {
+          listening: false,
+          speaking: false,
+          muted: false,
+          processing: false,
+          mode: 'whisper',
+          transcript: 'partial final',
+          responsePreview: 'Acknowledged.',
+        },
+      }),
+    );
+    pushed = lastHudPush(transport)!;
+    expect(pushed.currentTranscript).toBe('partial final');
+    expect(pushed.responsePreview).toBe('Acknowledged.');
   });
 });

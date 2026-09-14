@@ -10,6 +10,7 @@
 import type {
   CommandExecutor,
   PreferenceResponse,
+  ReportVoiceStateCommand,
 } from '../core/application/use-cases/tasks/command-api.js';
 import type { VoiceSessionManager } from '../adapters/inbound/voice/voice-session-manager.js';
 import type { AsyncVoiceToolRunner } from '../adapters/inbound/voice/voice-session-manager.js';
@@ -97,7 +98,7 @@ export async function createStdinVoiceSession(options: {
     }
   }
 
-  return new Manager({
+  const manager = new Manager({
     apiKey: options.apiKey,
     audioTransport,
     bridge,
@@ -105,6 +106,44 @@ export async function createStdinVoiceSession(options: {
     commandApi: options.commandApi,
     ...(asyncToolRunner !== undefined ? { asyncToolRunner } : {}),
     ...(instructions !== undefined ? { bridgeOptions: { instructions } } : {}),
+  });
+
+  attachVoiceStateReporting(manager, options.commandApi);
+
+  return manager;
+}
+
+/**
+ * Issue #131: mirror session state onto the daemon so subscribed
+ * surfaces (the desktop HUD) track the five-state model live. Reports
+ * are ephemeral pushes, not journaled events — fire-and-forget so a
+ * dead daemon never blocks the voice turn.
+ */
+export function attachVoiceStateReporting(
+  manager: Pick<VoiceSessionManager, 'onStateChange' | 'onModeChange' | 'onTranscript'>,
+  commandApi: CommandExecutor,
+): void {
+  let lastState: 'idle' | 'listening' | 'processing' | 'responding' = 'idle';
+  let lastMode: 'realtime' | 'whisper' = 'realtime';
+  const report = (fields: Partial<ReportVoiceStateCommand>): void => {
+    void commandApi
+      .execute({ kind: 'voice-state', state: lastState, mode: lastMode, ...fields })
+      .catch(() => undefined);
+  };
+  manager.onStateChange((s) => {
+    if (s === 'listening' || s === 'processing' || s === 'responding') {
+      lastState = s;
+    } else {
+      lastState = 'idle'; // connecting/error collapse to idle — daemon loss is what reads offline
+    }
+    report({});
+  });
+  manager.onModeChange((mode) => {
+    lastMode = mode === 'whisper' ? 'whisper' : 'realtime';
+    report({});
+  });
+  manager.onTranscript((text) => {
+    report({ transcript: text });
   });
 }
 

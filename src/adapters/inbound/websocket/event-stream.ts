@@ -99,6 +99,21 @@ export class EventStream {
     }
   }
 
+  /**
+   * Broadcast a raw (non-event) message to every subscriber — ephemeral
+   * pushes like `voice:state` that are intentionally not journaled
+   * (issue #131). The payload is serialized verbatim.
+   */
+  broadcast(message: unknown): void {
+    if (this.subscribers.size === 0) return;
+    const text = JSON.stringify(message);
+    for (const socket of this.subscribers.keys()) {
+      if (socket.readyState === socket.OPEN) {
+        socket.send(text);
+      }
+    }
+  }
+
   /** Number of currently subscribed clients. */
   get subscriberCount(): number {
     return this.subscribers.size;

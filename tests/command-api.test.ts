@@ -1493,3 +1493,55 @@ describe('query-secretary (issue #130)', () => {
     expect(confirm.error).toContain('not wired');
   });
 });
+
+describe('voice-state (issue #131)', () => {
+  it('forwards a valid report to the wired sink', async () => {
+    const fixture = createFixture();
+    const reports: unknown[] = [];
+    const api = new CommandApi({
+      ...fixture.deps,
+      voiceStateSink: (report) => reports.push(report),
+    });
+
+    const res = await api.execute({
+      kind: 'voice-state',
+      state: 'processing',
+      transcript: 'ship it',
+      responsePreview: 'On it.',
+      mode: 'realtime',
+    });
+    expect(res.ok).toBe(true);
+    expect(reports).toEqual([
+      {
+        state: 'processing',
+        transcript: 'ship it',
+        responsePreview: 'On it.',
+        mode: 'realtime',
+      },
+    ]);
+  });
+
+  it('rejects an unknown state without touching the sink', async () => {
+    const fixture = createFixture();
+    const reports: unknown[] = [];
+    const api = new CommandApi({
+      ...fixture.deps,
+      voiceStateSink: (report) => reports.push(report),
+    });
+
+    const res = await api.execute({
+      kind: 'voice-state',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      state: 'singing' as any,
+    });
+    expect(res.ok).toBe(false);
+    expect((res as { error?: string }).error).toContain('invalid voice state');
+    expect(reports).toEqual([]);
+  });
+
+  it('accepts a report when no sink is wired', async () => {
+    const fixture = createFixture();
+    const res = await fixture.api.execute({ kind: 'voice-state', state: 'idle' });
+    expect(res.ok).toBe(true);
+  });
+});

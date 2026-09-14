@@ -595,11 +595,19 @@ export class DesktopApp {
         break;
       }
       case 'voice:state': {
+        // The daemon's report carries `state` ('listening' | 'processing'
+        // | 'responding' | 'idle'); legacy pushes carry bare flags —
+        // accept both (#131).
+        const reported = typeof record['state'] === 'string' ? record['state'] : undefined;
         const voiceState: VoiceState = {
-          listening: Boolean(record['listening']),
-          speaking: Boolean(record['speaking']),
+          listening: reported === 'listening' || Boolean(record['listening']),
+          speaking: reported === 'responding' || Boolean(record['speaking']),
+          processing: reported === 'processing' || Boolean(record['processing']),
           muted: Boolean(record['muted']),
           mode: typeof record['mode'] === 'string' ? record['mode'] : undefined,
+          transcript: typeof record['transcript'] === 'string' ? record['transcript'] : undefined,
+          responsePreview:
+            typeof record['responsePreview'] === 'string' ? record['responsePreview'] : undefined,
         };
         this.state.update({ voiceState });
         this.bridge.sendToRenderer('voice:state', record);

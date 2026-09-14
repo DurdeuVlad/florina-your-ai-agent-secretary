@@ -439,6 +439,71 @@ describe('daemon: live event stream', () => {
     daemon.publishEvent(sampleEvent());
     await expect(nextEvent(client, 300)).rejects.toThrow('timed out');
   });
+
+  it('broadcasts voice-state reports to subscribed clients (issue #131)', async () => {
+    client.send(JSON.stringify({ type: 'subscribe' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const reporter = await openClient(daemon.port);
+    try {
+      // Attach the subscriber's listener BEFORE sending the command — the
+      // broadcast fires inside command execution, so the push can land
+      // before the response does.
+      const push = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no voice:state push')), 2000);
+        const onMessage = (data: unknown): void => {
+          const parsed = JSON.parse(
+            typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+          ) as Record<string, unknown>;
+          if (parsed['type'] === 'voice:state') {
+            clearTimeout(timer);
+            client.off('message', onMessage);
+            resolve(parsed);
+          }
+        };
+        client.on('message', onMessage);
+      });
+
+      // Commands take the {kind: ...} dispatch path; the response is the
+      // first non-push reply on that socket.
+      const response = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no command response')), 2000);
+        reporter.once('message', (data: unknown) => {
+          clearTimeout(timer);
+          resolve(
+            JSON.parse(
+              typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+            ) as Record<string, unknown>,
+          );
+        });
+      });
+      reporter.send(
+        JSON.stringify({
+          kind: 'voice-state',
+          state: 'processing',
+          transcript: 'ship it',
+          mode: 'whisper',
+        }),
+      );
+      expect((await response)['ok']).toBe(true);
+
+      expect(await push).toMatchObject({
+        type: 'voice:state',
+        state: 'processing',
+        transcript: 'ship it',
+        mode: 'whisper',
+      });
+    } finally {
+      reporter.close();
+    }
+  });
+
+  it('does not broadcast voice-state to unsubscribed clients', async () => {
+    client.send(JSON.stringify({ kind: 'voice-state', state: 'listening' }));
+    // The reporting client isn't subscribed — no push arrives; only the
+    // command response (which nextEvent ignores since it lacks type:'event').
+    await expect(nextEvent(client, 300)).rejects.toThrow('timed out');
+  });
 });
 
 describe('daemon: health check', () => {

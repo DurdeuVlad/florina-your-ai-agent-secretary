@@ -347,6 +347,25 @@ export interface RejectMemoryWriteCommand {
 }
 
 /**
+ * Report live voice-session state (issue #131, DEC-021). The voice
+ * session process is a daemon client; this command reports its session
+ * state so the daemon can broadcast it to subscribed surfaces (the
+ * desktop HUD) as an ephemeral `{type:'voice:state'}` push — session
+ * ephemera is deliberately NOT journaled (DEC-012 covers meaningful
+ * transitions; listening toggles and partial transcripts are not).
+ */
+export interface ReportVoiceStateCommand {
+  readonly kind: 'voice-state';
+  readonly state: 'idle' | 'listening' | 'processing' | 'responding';
+  /** Live transcript (partial or final) for the HUD's two-line area. */
+  readonly transcript?: string;
+  /** Streaming reply preview for the HUD's two-line area. */
+  readonly responsePreview?: string;
+  /** Engine mode the session is running. */
+  readonly mode?: 'realtime' | 'whisper';
+}
+
+/**
  * Append a titled section to a ledger — research notes, open questions,
  * decisions in progress.
  */
@@ -504,6 +523,7 @@ export type Command =
   | QuerySecretaryCommand
   | ConfirmMemoryWriteCommand
   | RejectMemoryWriteCommand
+  | ReportVoiceStateCommand
   | UpdatePreferenceCommand
   | QueryPreferencesCommand
   | GetDigestCommand
@@ -539,6 +559,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'query-secretary',
   'memory-confirm',
   'memory-reject',
+  'voice-state',
   'update-preference',
   'query-preferences',
   'get-digest',
@@ -715,6 +736,12 @@ export interface MemoryWriteResponse {
   readonly error?: string;
 }
 
+/** Response to `voice-state` — the report was accepted for broadcast. */
+export interface VoiceStateResponse {
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
 /** Response to `query-secretary` — the whole Secretary working surface. */
 export interface SecretaryResponse {
   readonly ok: boolean;
@@ -862,6 +889,7 @@ export type Response =
   | BriefListResponse
   | SecretaryResponse
   | MemoryWriteResponse
+  | VoiceStateResponse
   | PreferenceResponse
   | DelegateTaskResponse
   | UnknownCommandResponse;
@@ -981,6 +1009,12 @@ export interface CommandApiDeps {
    */
   readonly secretaryOps?: SecretaryOpsPort;
   /**
+   * Sink for live voice-session reports (issue #131). The composition
+   * root wires this to the event stream so `voice-state` reports reach
+   * subscribed surfaces as ephemeral `voice:state` pushes.
+   */
+  readonly voiceStateSink?: (report: Omit<ReportVoiceStateCommand, 'kind'>) => void;
+  /**
    * Idea ledger + Brief service (DEC-033, issue #69). When wired, the
    * `idea-*`/`brief-*` commands are served; when absent they return a
    * clear `ok: false` rather than pretending to succeed.
@@ -1046,6 +1080,7 @@ export class CommandApi {
   private readonly metricsQueryService?: MetricsQueryService;
   private readonly contextHealth?: ContextHealthReadPort;
   private readonly secretaryOps?: SecretaryOpsPort;
+  private readonly voiceStateSink?: (report: Omit<ReportVoiceStateCommand, 'kind'>) => void;
   private readonly ideas?: IdeaService;
   private readonly preferences?: PreferenceProfilePort;
   private readonly delegation?: DelegationService;
@@ -1071,6 +1106,7 @@ export class CommandApi {
     this.metricsQueryService = deps.metricsQueryService;
     this.contextHealth = deps.contextHealth;
     this.secretaryOps = deps.secretaryOps;
+    this.voiceStateSink = deps.voiceStateSink;
     this.ideas = deps.ideas;
     this.preferences = deps.preferences;
     this.delegation = deps.delegation;
@@ -1144,6 +1180,8 @@ export class CommandApi {
       case 'memory-confirm':
       case 'memory-reject':
         return this.handleMemoryWrite(command);
+      case 'voice-state':
+        return this.handleVoiceState(command);
       case 'update-preference':
         return this.handleUpdatePreference(command);
       case 'query-preferences':
@@ -1890,6 +1928,24 @@ export class CommandApi {
     return { ok: true };
   }
 
+  /**
+   * voice-state (issue #131): a voice session reports its live state;
+   * the sink broadcasts it to subscribed surfaces. Missing sink = no
+   * subscribers can see it — still ok (the report itself is valid).
+   */
+  private async handleVoiceState(cmd: ReportVoiceStateCommand): Promise<VoiceStateResponse> {
+    if (!VOICE_SESSION_STATES.has(cmd.state)) {
+      return { ok: false, error: `invalid voice state: ${cmd.state}` };
+    }
+    this.voiceStateSink?.({
+      state: cmd.state,
+      ...(cmd.transcript !== undefined ? { transcript: cmd.transcript } : {}),
+      ...(cmd.responsePreview !== undefined ? { responsePreview: cmd.responsePreview } : {}),
+      ...(cmd.mode !== undefined ? { mode: cmd.mode } : {}),
+    });
+    return { ok: true };
+  }
+
   private async handleAppendIdea(cmd: AppendIdeaCommand): Promise<IdeaResponse> {
     if (this.ideas === undefined) return { ...this.ideasUnavailable(), idea: null };
     try {
@@ -2134,6 +2190,8 @@ function isTerminalState(state: TaskStateType): boolean {
   return TERMINAL_STATES.has(state);
 }
 
+const VOICE_SESSION_STATES = new Set(['idle', 'listening', 'processing', 'responding']);
+
 /**
  * Summarize a ledger's markdown body for the ideas list (issue #129):
  * `entryCount` = the `## ` sections (each append lands as a section), and
@@ -2286,14 +2344,16 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                       ? BriefResponse
                                       : C extends ConfirmBriefCommand
                                         ? BriefConfirmResponse
-                                        : C extends
-                                              UpdatePreferenceCommand | QueryPreferencesCommand
-                                          ? PreferenceResponse
-                                          : C extends GetDigestCommand
-                                            ? DigestResponse
-                                            : C extends CreatePrCommand
-                                              ? CreatePrResponse
-                                              : Response;
+                                        : C extends ReportVoiceStateCommand
+                                          ? VoiceStateResponse
+                                          : C extends
+                                                UpdatePreferenceCommand | QueryPreferencesCommand
+                                            ? PreferenceResponse
+                                            : C extends GetDigestCommand
+                                              ? DigestResponse
+                                              : C extends CreatePrCommand
+                                                ? CreatePrResponse
+                                                : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the
