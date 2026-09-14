@@ -27,6 +27,9 @@ const PUSH_CHANNELS = new Set([
   'ideas:update',
   'secretary:update',
   'chat:update',
+  'dictation:capture',
+  'dictation:audio-out',
+  'dictation:update',
   'hud:state',
   'command:result',
 ]);
@@ -55,5 +58,11 @@ contextBridge.exposeInMainWorld('florina', {
       pending.set(id, resolve);
       ipcRenderer.send('command', { id, cmd });
     });
+  },
+  /* dictation (issue #161): PCM16 chunks from the renderer mic → main. */
+  dictationAudio(pcm) {
+    if (typeof pcm === 'string' && pcm.length > 0) {
+      ipcRenderer.send('dictation:audio', { pcm });
+    }
   },
 });

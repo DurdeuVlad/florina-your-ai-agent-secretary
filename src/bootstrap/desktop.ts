@@ -17,9 +17,11 @@ import { fileURLToPath } from 'node:url';
 // require('electron') in the main process resolves to the real API object;
 // named ESM imports can hit the npm shim (issue #114).
 const require = createRequire(import.meta.url);
-const { app } = require('electron') as typeof import('electron');
+const { app, session } = require('electron') as typeof import('electron');
 
 import { DesktopApp } from '../adapters/inbound/desktop/desktop-app.js';
+import { DictationService } from '../core/application/use-cases/voice/dictation-service.js';
+import { IpcAudioTransport } from '../adapters/inbound/desktop/ipc-audio-transport.js';
 import { HudController } from '../adapters/inbound/desktop/hud-controller.js';
 import { ElectronWindowBackend } from '../adapters/inbound/desktop/electron/window-backend.js';
 import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-transport.js';
@@ -79,6 +81,60 @@ async function main(): Promise<void> {
   const window = new ElectronWindowBackend(PRELOAD);
   const ipc = new ElectronIpcTransport();
 
+  // Mic permission (issue #161): the renderer's getUserMedia asks the
+  // default session — grant `media` for our own window, deny the rest.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
+    cb(permission === 'media');
+  });
+
+  // Dictation pipeline (issue #161): renderer mic → dictation:audio IPC
+  // → Realtime transcription (key stays in this process — the sandboxed
+  // page never sees it). Whisper is the offline fallback when a model
+  // file is configured (FLORINA_WHISPER_MODEL). No engine → the mic
+  // button reports the honest error via dictation:update.
+  const dictationTransport = new IpcAudioTransport(ipc);
+  const openaiKey = process.env['OPENAI_API_KEY'];
+  let dictation: DictationService | undefined;
+  const whisperModel = process.env['FLORINA_WHISPER_MODEL'];
+  if (openaiKey !== undefined || whisperModel !== undefined) {
+    const { RealtimeBridge, defaultSocketFactory } =
+      await import('../adapters/outbound/voice/realtime-bridge.js');
+    const { WhisperAdapter } = await import('../adapters/outbound/voice/whisper-adapter.js');
+    const { WhisperCppBackend } = await import('../adapters/outbound/voice/whisper-backend.js');
+    let whisper;
+    if (whisperModel !== undefined) {
+      const adapter = new WhisperAdapter(new WhisperCppBackend());
+      try {
+        await adapter.initialize(whisperModel);
+        whisper = adapter;
+      } catch {
+        // Model missing/unreadable — realtime-only dictation.
+      }
+    }
+    dictation = new DictationService({
+      transport: dictationTransport,
+      ...(openaiKey !== undefined
+        ? {
+            session: new RealtimeBridge(dictationTransport, defaultSocketFactory),
+            apiKey: openaiKey,
+          }
+        : {}),
+      ...(whisper !== undefined ? { whisper } : {}),
+      onUpdate: (u) =>
+        ipc.sendToRenderer(
+          'dictation:update',
+          u.error !== undefined ? { state: u.state, error: u.error } : { state: u.state },
+        ),
+      onTranscript: (t) =>
+        ipc.sendToRenderer(
+          'dictation:update',
+          t.partial
+            ? { state: 'listening', partial: t.text }
+            : { state: 'listening', final: t.text },
+        ),
+    });
+  }
+
   // PTT HUD (issue #123, merged into the main window per user feedback):
   // no separate overlay — hud:state pushes go over the main window's IPC
   // transport and the pill renders in the app header.
@@ -105,6 +161,7 @@ async function main(): Promise<void> {
     // start` once; the existing reconnect loop picks it up when it
     // listens. Mid-session drops never reach this hook.
     onDaemonMissing: () => runCli('start'),
+    ...(dictation !== undefined ? { dictation } : {}),
     onTrayAction: (action: TrayAction) => {
       switch (action) {
         case 'show-window':

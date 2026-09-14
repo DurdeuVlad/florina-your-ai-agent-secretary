@@ -39,26 +39,46 @@ export interface RealtimeTool {
 /**
  * Turn-detection strategy. `server_vad` lets the server detect speech
  * boundaries automatically; `none` is manual / push-to-talk (the bridge
- * commits the input buffer explicitly on `stopListening`).
+ * commits the input buffer explicitly on `stopListening`). `null`
+ * disables turn detection entirely (GA shape for manual commit).
  */
 export type TurnDetection =
   { readonly type: 'none' } | { readonly type: 'server_vad'; readonly threshold?: number };
 
+/** PCM audio format descriptor (GA realtime API). */
+export interface RealtimeAudioFormat {
+  readonly type: 'audio/pcm';
+  /** Sample rate in Hz — the bridge runs at 24 kHz. */
+  readonly rate: number;
+}
+
 /**
- * Realtime session configuration sent in `session.update` and echoed back in
- * `session.created` / `session.updated`.
+ * Realtime session configuration sent in `session.update` and echoed back
+ * in `session.created` / `session.updated` — GA shape (issue #161). The
+ * retired beta API used flat `modalities`/`input_audio_format` fields; GA
+ * nests audio under `audio.input` / `audio.output` and requires the
+ * session `type` discriminant (`realtime` speech-to-speech or
+ * `transcription` dictation-only).
  */
 export interface RealtimeSessionConfig {
+  /** GA session kind — `realtime` for two-way turns, `transcription` for dictation. */
+  readonly type?: 'realtime' | 'transcription';
+  readonly model?: string;
   readonly instructions?: string;
-  readonly voice?: string;
-  readonly turn_detection?: TurnDetection;
   readonly tools?: readonly RealtimeTool[];
   readonly tool_choice?: 'auto' | 'none' | 'required';
-  readonly modalities?: readonly ('text' | 'audio')[];
-  readonly input_audio_format?: 'pcm16' | 'g711_ulaw' | 'g711_alaw';
-  readonly output_audio_format?: 'pcm16' | 'g711_ulaw' | 'g711_alaw';
-  /** Enable server-side transcription of the user's input audio. */
-  readonly input_audio_transcription?: { readonly model?: string };
+  readonly audio?: {
+    readonly input?: {
+      readonly format?: RealtimeAudioFormat;
+      /** Server-side transcription of input audio (user speech). */
+      readonly transcription?: { readonly model?: string };
+      readonly turn_detection?: TurnDetection | null;
+    };
+    readonly output?: {
+      readonly format?: RealtimeAudioFormat;
+      readonly voice?: string;
+    };
+  };
 }
 
 /** A session config plus the server-assigned session id. */
@@ -242,22 +262,45 @@ export interface ResponseOutputAudioDoneMessage {
   readonly content_index?: number;
 }
 
-/** A delta of AI response text. */
+/** A delta of AI response text (GA name — beta was `response.text.delta`). */
 export interface ResponseTextDeltaMessage {
-  readonly type: 'response.text.delta';
+  readonly type: 'response.output_text.delta';
   readonly delta: string;
   readonly item_id?: string;
   readonly output_index?: number;
   readonly content_index?: number;
 }
 
-/** The AI response text stream completed. */
+/** The AI response text stream completed (GA name — beta was `response.text.done`). */
 export interface ResponseTextDoneMessage {
-  readonly type: 'response.text.done';
+  readonly type: 'response.output_text.done';
   readonly text: string;
   readonly item_id?: string;
   readonly output_index?: number;
   readonly content_index?: number;
+}
+
+/** A delta of the AI's spoken-audio transcript (GA `response.output_audio_transcript.*`). */
+export interface ResponseAudioTranscriptDeltaMessage {
+  readonly type: 'response.output_audio_transcript.delta';
+  readonly delta: string;
+}
+
+/** The AI's spoken-audio transcript completed. */
+export interface ResponseAudioTranscriptDoneMessage {
+  readonly type: 'response.output_audio_transcript.done';
+  readonly transcript: string;
+}
+
+/** A response output item completed — GA delivers function calls here too. */
+export interface ResponseOutputItemDoneMessage {
+  readonly type: 'response.output_item.done';
+  readonly item: RealtimeConversationItem;
+}
+
+/** The whole response finished — terminal state regardless of modality. */
+export interface ResponseDoneMessage {
+  readonly type: 'response.done';
 }
 
 /** A streaming delta of the user's input-audio transcription. */
@@ -308,6 +351,10 @@ export type ServerMessage =
   | ResponseOutputAudioDoneMessage
   | ResponseTextDeltaMessage
   | ResponseTextDoneMessage
+  | ResponseAudioTranscriptDeltaMessage
+  | ResponseAudioTranscriptDoneMessage
+  | ResponseOutputItemDoneMessage
+  | ResponseDoneMessage
   | InputAudioTranscriptionDeltaMessage
   | InputAudioTranscriptionCompletedMessage
   | ConversationItemCreatedMessage
@@ -321,8 +368,12 @@ export const SERVER_MESSAGE_TYPES: readonly string[] = [
   'input_audio_buffer.committed',
   'response.output_audio.delta',
   'response.output_audio.done',
-  'response.text.delta',
-  'response.text.done',
+  'response.output_text.delta',
+  'response.output_text.done',
+  'response.output_audio_transcript.delta',
+  'response.output_audio_transcript.done',
+  'response.output_item.done',
+  'response.done',
   'conversation.item.input_audio_transcription.delta',
   'conversation.item.input_audio_transcription.completed',
   'conversation.item.created',

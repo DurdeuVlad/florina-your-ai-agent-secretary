@@ -239,6 +239,12 @@ export interface RealtimeSessionOptions {
   readonly maxReconnectAttempts?: number;
   /** Reconnect backoff base delay in ms. */
   readonly reconnectBaseDelayMs?: number;
+  /**
+   * Transcription-only session (dictation, issue #161): commits produce
+   * `input_audio_transcription` results with no `response.create` — the
+   * model never generates a reply.
+   */
+  readonly transcriptionOnly?: boolean;
 }
 
 /**

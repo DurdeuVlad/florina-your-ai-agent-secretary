@@ -192,12 +192,12 @@ describe('RealtimeBridge', () => {
 
     it('decodes a known server message', () => {
       const raw = JSON.stringify({
-        type: 'response.text.done',
+        type: 'response.output_text.done',
         text: 'hello',
       });
       const msg = decodeServerMessage(raw);
       expect(msg).not.toBeNull();
-      expect(msg?.type).toBe('response.text.done');
+      expect(msg?.type).toBe('response.output_text.done');
     });
 
     it('decodes a Buffer payload', () => {
@@ -240,10 +240,15 @@ describe('RealtimeBridge', () => {
       expect(update).toBeDefined();
       expect(update?.type).toBe('session.update');
       if (update?.type === 'session.update') {
+        // GA realtime session shape (issue #161 migration).
+        expect(update.session.type).toBe('realtime');
         expect(update.session.instructions).toBe('You are the Florina');
-        expect(update.session.voice).toBe('shimmer');
-        expect(update.session.turn_detection).toEqual({ type: 'none' });
-        expect(update.session.input_audio_format).toBe('pcm16');
+        expect(update.session.audio?.input?.turn_detection).toBeNull();
+        expect(update.session.audio?.input?.format).toEqual({
+          type: 'audio/pcm',
+          rate: 24000,
+        });
+        expect(update.session.audio?.output?.voice).toBe('shimmer');
       }
     });
 
@@ -444,8 +449,8 @@ describe('RealtimeBridge', () => {
 
       bridge.startListening();
       bridge.stopListening(); // -> Processing
-      socket.emitMessage({ type: 'response.text.delta', delta: 'Hi' });
-      socket.emitMessage({ type: 'response.text.done', text: 'Hi there' });
+      socket.emitMessage({ type: 'response.output_text.delta', delta: 'Hi' });
+      socket.emitMessage({ type: 'response.output_text.done', text: 'Hi there' });
 
       expect(responses).toEqual([
         { partial: true, text: 'Hi' },
@@ -512,10 +517,10 @@ describe('RealtimeBridge', () => {
       bridge.stopListening();
       expect(bridge.currentState).toBe(VoiceSessionState.Processing);
 
-      sockets[0].emitMessage({ type: 'response.text.delta', delta: 'x' });
+      sockets[0].emitMessage({ type: 'response.output_text.delta', delta: 'x' });
       expect(bridge.currentState).toBe(VoiceSessionState.Responding);
 
-      sockets[0].emitMessage({ type: 'response.text.done', text: 'x' });
+      sockets[0].emitMessage({ type: 'response.output_text.done', text: 'x' });
       expect(bridge.currentState).toBe(VoiceSessionState.Idle);
 
       expect(states).toEqual([
@@ -802,7 +807,7 @@ describe('RealtimeBridge', () => {
       const socket = await connect();
       bridge.startListening();
       bridge.stopListening(); // -> Processing
-      socket.emitMessage({ type: 'response.text.delta', delta: 'x' });
+      socket.emitMessage({ type: 'response.output_text.delta', delta: 'x' });
       expect(bridge.currentState).toBe(VoiceSessionState.Responding);
 
       bridge.interrupt();
@@ -847,6 +852,93 @@ describe('RealtimeBridge', () => {
 
       const updates = allSent(sockets[0]).filter((m) => m.type === 'session.update');
       expect(updates).toHaveLength(1);
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * transcriptionOnly mode (dictation, issue #161)
+   * ---------------------------------------------------------------- */
+
+  describe('transcriptionOnly mode', () => {
+    async function connect(): Promise<MockSocket> {
+      const p = bridge.connect('sk-test', { transcriptionOnly: true });
+      sockets[0].emitOpen();
+      await p;
+      sockets[0].emitMessage({ type: 'session.created', session: { id: 's1' } });
+      return sockets[0];
+    }
+
+    it('opens a GA transcription session (type: transcription)', async () => {
+      const socket = await connect();
+      const update = allSent(socket).find((m) => m.type === 'session.update');
+      if (update?.type === 'session.update') {
+        expect(update.session.type).toBe('transcription');
+        expect(update.session.audio?.input?.transcription?.model).toBe('gpt-4o-transcribe');
+        expect(update.session.audio?.input?.turn_detection).toBeNull();
+        // No output/tool config — a transcription session never replies.
+        expect(update.session.audio?.output).toBeUndefined();
+        expect(update.session.tools).toBeUndefined();
+      } else {
+        expect.unreachable('session.update was sent');
+      }
+    });
+
+    it('commits the audio buffer WITHOUT response.create', async () => {
+      const socket = await connect();
+      bridge.startListening();
+      audio.feedChunk(makeChunk('SPEECH'));
+      bridge.stopListening();
+
+      const messages = allSent(socket);
+      expect(messages.some((m) => m.type === 'input_audio_buffer.commit')).toBe(true);
+      expect(messages.some((m) => m.type === 'response.create')).toBe(false);
+    });
+
+    it('still sends response.create in normal mode', async () => {
+      const p = bridge.connect('sk-test');
+      sockets[0].emitOpen();
+      await p;
+      const socket = sockets[0];
+      bridge.startListening();
+      bridge.stopListening();
+      expect(allSent(socket).some((m) => m.type === 'response.create')).toBe(true);
+    });
+
+    it('emits the final transcript and returns to idle (no response expected)', async () => {
+      await connect();
+      const transcripts: Array<{ partial: boolean; text: string }> = [];
+      const states: string[] = [];
+      bridge.onTranscript((t) => transcripts.push(t));
+      bridge.onStateChange((s) => states.push(s.to));
+
+      bridge.startListening();
+      bridge.stopListening();
+      sockets[0].emitMessage({
+        type: 'conversation.item.input_audio_transcription.completed',
+        transcript: 'dictated sentence',
+      });
+
+      expect(transcripts).toEqual([{ partial: false, text: 'dictated sentence' }]);
+      expect(bridge.currentState).toBe(VoiceSessionState.Idle);
+      expect(states.at(-1)).toBe(VoiceSessionState.Idle);
+    });
+
+    it('still streams partial transcription deltas', async () => {
+      await connect();
+      const partials: string[] = [];
+      bridge.onTranscript((t) => {
+        if (t.partial) partials.push(t.text);
+      });
+      bridge.startListening();
+      sockets[0].emitMessage({
+        type: 'conversation.item.input_audio_transcription.delta',
+        delta: 'dic',
+      });
+      sockets[0].emitMessage({
+        type: 'conversation.item.input_audio_transcription.delta',
+        delta: 'tated',
+      });
+      expect(partials).toEqual(['dic', 'tated']);
     });
   });
 });

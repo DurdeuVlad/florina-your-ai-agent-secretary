@@ -7,6 +7,7 @@
  * the socket and pushes trees/status; commands travel the other way.
  */
 import { mount } from './tree-renderer.js';
+import { createMicCapture } from './audio-capture.js';
 
 const $ = (id) => document.getElementById(id);
 const bridge = window.florina;
@@ -67,6 +68,39 @@ if (bridge) {
     mount(tree, $('chatmsgs'));
     const wrap = $('chatwrap');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
+  });
+
+  /* dictation (issue #161): main drives the mic via dictation:capture;
+     transcripts arrive on dictation:update — partials preview above the
+     composer, the final inserts as editable text (never auto-sends). */
+  bridge.on('dictation:capture', (d) => {
+    if (d && d.capturing) startMic();
+    else stopMic();
+  });
+  bridge.on('dictation:update', (d) => {
+    if (!d) return;
+    if (typeof d.partial === 'string') {
+      $('dictation').hidden = false;
+      $('dictationText').textContent = d.partial;
+    }
+    if (typeof d.final === 'string' && d.final.trim() !== '') {
+      insertDictated(d.final.trim());
+      $('dictation').hidden = true;
+      $('dictationText').textContent = '';
+    }
+    if (d.state === 'error') {
+      toast(d.error || 'dictation failed');
+      $('dictation').hidden = true;
+      setMicListening(false);
+    }
+    if (d.state === 'listening') setMicListening(true);
+    if (d.state === 'idle') setMicListening(false);
+    if (d.state === 'transcribing') {
+      $('dictation').querySelector('b').textContent = 'transcribing…';
+    }
+    if (d.state === 'listening') {
+      $('dictation').querySelector('b').textContent = 'listening…';
+    }
   });
 
   /* PTT pill in the header — same states as the old overlay (issue #123) */
@@ -410,6 +444,61 @@ function sendChat() {
     input.focus();
   });
 }
+
+/* ---------- dictation (issue #161) ---------- */
+
+const mic = createMicCapture();
+let micOn = false;
+
+/** Start the renderer mic; chunks flow to main as dictation:audio IPC. */
+function startMic() {
+  if (micOn) return;
+  micOn = true;
+  mic
+    .start((pcm) => bridge.dictationAudio(pcm))
+    .then(() => {
+      // A capture:false arrived while getUserMedia was still pending —
+      // the round is over; tear the freshly-built chain straight down.
+      if (!micOn) mic.stop();
+    })
+    .catch((err) => {
+      // getUserMedia denied / no device — tell main to abort the round so
+      // it doesn't wait on chunks that will never arrive.
+      micOn = false;
+      toast(err && err.name === 'NotAllowedError' ? 'microphone access denied' : 'no microphone');
+      void bridge.command('dictation:cancel');
+    });
+}
+
+function stopMic() {
+  if (!micOn) return;
+  micOn = false;
+  mic.stop();
+}
+
+function setMicListening(on) {
+  $('chatMic').classList.toggle('listening', on);
+  if (!on) {
+    $('dictation').hidden = true;
+  }
+}
+
+/** Insert dictated text at the composer cursor — editable, not sent. */
+function insertDictated(text) {
+  const input = $('chatInput');
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? start;
+  const needsSpace = start > 0 && !/\s$/.test(input.value.slice(0, start));
+  input.setRangeText((needsSpace ? ' ' : '') + text + ' ', start, end, 'end');
+  input.focus();
+}
+
+$('chatMic').addEventListener('click', () => {
+  if (!bridge) return;
+  void bridge.command(micOn ? 'dictation:stop' : 'dictation:start').then((res) => {
+    if (res && res.ok === false) toast(res.error || 'dictation failed');
+  });
+});
 
 $('chatSend').addEventListener('click', sendChat);
 $('chatInput').addEventListener('keydown', (e) => {

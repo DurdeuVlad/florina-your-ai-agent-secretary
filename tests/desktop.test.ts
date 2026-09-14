@@ -16,6 +16,7 @@ import {
   DEFAULT_WINDOW_BOUNDS,
 } from '../src/desktop/index.js';
 import type { IpcChannel, WindowOptions } from '../src/desktop/index.js';
+import { DictationService } from '../src/core/application/use-cases/voice/dictation-service.js';
 
 /* ------------------------------------------------------------------ *
  * Mock daemon WebSocket server (pushes state updates to the desktop app)
@@ -283,6 +284,10 @@ describe('IpcBridge', () => {
       'ideas:update',
       'secretary:update',
       'chat:update',
+      'dictation:capture',
+      'dictation:audio',
+      'dictation:audio-out',
+      'dictation:update',
       'hud:state',
       'command',
       'command:result',
@@ -2254,6 +2259,175 @@ describe('chat screen wiring', () => {
     const text = lastChatTree(transport);
     expect(text).toContain('earlier context');
     expect(text).toContain('still here');
+    await app.disconnect();
+  });
+});
+
+/* ================================================================== *
+ * Dictation verbs (issue #161)
+ * ================================================================== */
+
+describe('dictation verbs', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  class StubDictationSession {
+    isConnected = false;
+    currentState = 'idle' as const;
+    connected: Array<{ apiKey: string; options?: { transcriptionOnly?: boolean } }> = [];
+    listening = false;
+    private cbs = new Set<(e: { partial: boolean; text: string }) => void>();
+    async connect(apiKey: string, options?: { transcriptionOnly?: boolean }): Promise<void> {
+      this.connected.push({ apiKey, options });
+      this.isConnected = true;
+    }
+    async disconnect(): Promise<void> {
+      this.isConnected = false;
+    }
+    startListening(): void {
+      this.listening = true;
+    }
+    stopListening(): void {
+      this.listening = false;
+    }
+    sendToolCallOutput(): void {}
+    sendUserMessage(): void {}
+    onToolCall(): () => void {
+      return () => undefined;
+    }
+    onTranscript(cb: (e: { partial: boolean; text: string }) => void): () => void {
+      this.cbs.add(cb);
+      return () => this.cbs.delete(cb);
+    }
+    onStateChange(): () => void {
+      return () => undefined;
+    }
+    emitTranscript(e: { partial: boolean; text: string }): void {
+      for (const cb of this.cbs) cb(e);
+    }
+  }
+
+  class StubAudioTransport {
+    private cb: ((c: { pcm: string; sampleRate: number; channels: number }) => void) | null = null;
+    startCapture(cb: (c: { pcm: string; sampleRate: number; channels: number }) => void): void {
+      this.cb = cb;
+    }
+    stopCapture(): void {
+      this.cb = null;
+    }
+    play(): void {}
+    stopPlayback(): void {}
+    close(): void {}
+  }
+
+  function dictationApp(transport: MockIpcTransport): {
+    app: DesktopApp;
+    session: StubDictationSession;
+  } {
+    const session = new StubDictationSession();
+    const dictation = new DictationService({
+      transport: new StubAudioTransport(),
+      session,
+      apiKey: 'sk-test',
+      finalTimeoutMs: 50,
+      onUpdate: (u) =>
+        transport.sendToRenderer('dictation:update', {
+          state: u.state,
+          ...(u.error ? { error: u.error } : {}),
+        }),
+      onTranscript: (t) =>
+        transport.sendToRenderer(
+          'dictation:update',
+          t.partial
+            ? { state: 'listening', partial: t.text }
+            : { state: 'listening', final: t.text },
+        ),
+    });
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      dictation,
+    });
+    app.start();
+    return { app, session };
+  }
+
+  it('dictation:start drives the realtime session in transcriptionOnly mode', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = dictationApp(transport);
+    await app.handleRendererCommand({ id: 'd1', cmd: 'dictation:start' });
+    expect(session.connected[0]?.options?.transcriptionOnly).toBe(true);
+    expect(session.listening).toBe(true);
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 'd1',
+      res: { ok: true },
+    });
+    // State pushes reach the renderer on dictation:update.
+    const states = transport.toRenderer
+      .filter((m) => m.channel === 'dictation:update')
+      .map((m) => (m.data as { state: string }).state);
+    expect(states).toEqual(['connecting', 'listening']);
+    await app.disconnect();
+  });
+
+  it('dictation:stop emits the final transcript as editable text (never a chat-send)', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = dictationApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    let sentToDaemon = false;
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'chat-send') sentToDaemon = true;
+      socket.send(JSON.stringify({ ok: true, items: [], tasks: [], messages: [] }));
+    });
+
+    await app.handleRendererCommand({ id: 'd2', cmd: 'dictation:start' });
+    const stopping = app.handleRendererCommand({ id: 'd3', cmd: 'dictation:stop' });
+    session.emitTranscript({ partial: false, text: 'ship the fix' });
+    await stopping;
+
+    const final = transport.toRenderer.find(
+      (m) => m.channel === 'dictation:update' && (m.data as { final?: string }).final !== undefined,
+    );
+    expect((final?.data as { final: string }).final).toBe('ship the fix');
+    expect(sentToDaemon).toBe(false); // dictated text is never auto-sent
+    await app.disconnect();
+  });
+
+  it('dictation verbs fail honestly when no service is wired', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    await app.handleRendererCommand({ id: 'd4', cmd: 'dictation:start' });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 'd4',
+      res: { ok: false, error: 'dictation is not configured' },
+    });
+    await app.disconnect();
+  });
+
+  it('dictation:cancel acks without a final transcript', async () => {
+    const transport = new MockIpcTransport();
+    const { app, session } = dictationApp(transport);
+    await app.handleRendererCommand({ id: 'd5', cmd: 'dictation:start' });
+    await app.handleRendererCommand({ id: 'd6', cmd: 'dictation:cancel' });
+    session.emitTranscript({ partial: false, text: 'late words' });
+    expect(
+      transport.toRenderer.some(
+        (m) =>
+          m.channel === 'dictation:update' && (m.data as { final?: string }).final !== undefined,
+      ),
+    ).toBe(false);
     await app.disconnect();
   });
 });
