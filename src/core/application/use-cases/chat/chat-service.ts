@@ -99,7 +99,7 @@ export function toWireMessage(m: ConversationMessage): ChatMessage {
 export function toConversationMessage(
   m: ChatMessage,
   createdAt: ISODateString,
-): Omit<ConversationMessage, 'id'> & { role: ConversationMessage['role'] } {
+): Omit<ConversationMessage, 'id'> {
   const base = { createdAt };
   switch (m.role) {
     case 'assistant':
@@ -208,8 +208,7 @@ export class ChatService implements ChatTurnPort {
 
     // Journal everything the loop produced beyond the input, in order.
     for (const wire of result.messages.slice(input.length)) {
-      const record = toConversationMessage(wire, this.now());
-      this.journal({ ...record, role: record.role } as Omit<ConversationMessage, 'id'>);
+      this.journal(toConversationMessage(wire, this.now()));
     }
   }
 
