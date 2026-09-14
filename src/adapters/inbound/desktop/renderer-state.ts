@@ -27,6 +27,12 @@ export interface VoiceState {
   readonly speaking: boolean;
   /** Whether the microphone is muted. */
   readonly muted: boolean;
+  /** Whether a request is in flight (issue #131 — HUD processing state). */
+  readonly processing: boolean;
+  /** Live transcript for the HUD's two-line area. */
+  readonly transcript?: string;
+  /** Streaming reply preview for the HUD's two-line area. */
+  readonly responsePreview?: string;
   /** Currently-active wake-word/transport mode label, if any. */
   readonly mode?: string;
 }
@@ -62,6 +68,7 @@ export const DEFAULT_VOICE_STATE: VoiceState = {
   listening: false,
   speaking: false,
   muted: false,
+  processing: false,
 };
 
 /** The initial / reset state for {@link RendererState}. */

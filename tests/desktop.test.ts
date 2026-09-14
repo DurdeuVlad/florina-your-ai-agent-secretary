@@ -527,7 +527,10 @@ describe('DesktopApp', () => {
       listening: true,
       speaking: false,
       muted: false,
+      processing: false,
       mode: 'wake-word',
+      transcript: undefined,
+      responsePreview: undefined,
     });
 
     // Unknown push type is ignored. ws frames are ordered, so once a
@@ -1765,6 +1768,140 @@ describe('ideas screen', () => {
     await new Promise((r) => setTimeout(r, 100));
     const cleared = transport.toRenderer.filter((m) => m.channel === 'ideas:update').pop();
     expect(JSON.stringify(cleared!.data)).not.toContain('notes here');
+    await app.disconnect();
+  });
+});
+
+/* ================================================================== *
+ * Voice session → HUD/inbox wiring (issue #131)
+ * ================================================================== */
+
+describe('voice session events → HUD state (issue #131)', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('mirrors the daemon voice:state report into renderer voiceState', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    await conn;
+    server.autoRespond();
+
+    server.push({
+      type: 'voice:state',
+      state: 'processing',
+      transcript: 'ship the branch',
+      responsePreview: 'On it.',
+      mode: 'whisper',
+    });
+    await waitFor(() => app.getState().voiceState.processing === true);
+    expect(app.getState().voiceState).toEqual({
+      listening: false,
+      speaking: false,
+      processing: true,
+      muted: false,
+      mode: 'whisper',
+      transcript: 'ship the branch',
+      responsePreview: 'On it.',
+    });
+    // Forwarded verbatim to the renderer for any UI consumers.
+    const fwd = transport.toRenderer.filter((m) => m.channel === 'voice:state').pop();
+    expect(fwd?.data).toMatchObject({ state: 'processing', mode: 'whisper' });
+    await app.disconnect();
+  });
+
+  it('maps listening/responding/idle reported states onto the flags', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    await conn;
+    server.autoRespond();
+
+    server.push({ type: 'voice:state', state: 'listening' });
+    await waitFor(() => app.getState().voiceState.listening === true);
+
+    server.push({ type: 'voice:state', state: 'responding' });
+    await waitFor(() => app.getState().voiceState.speaking === true);
+    expect(app.getState().voiceState.listening).toBe(false);
+
+    server.push({ type: 'voice:state', state: 'idle' });
+    await waitFor(
+      () =>
+        app.getState().voiceState.speaking === false &&
+        app.getState().voiceState.listening === false,
+    );
+    await app.disconnect();
+  });
+
+  it('voice-staged approvals arrive via the event stream and surface in the inbox', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    const approvalItem = {
+      id: 'att-voice-1',
+      taskId: 'task_voice',
+      kind: 'ApprovalRequest',
+      priority: 'High',
+      status: 'Pending',
+      createdAt: '2026-01-01T12:00:00Z',
+      payload: {
+        summary: 'Voice-staged: delete build output',
+        capability: 'fs.delete',
+        destination: 'dist/**',
+        approvalId: 'appr-v1',
+      },
+    };
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-inbox') {
+        socket.send(JSON.stringify({ ok: true, items: [approvalItem] }));
+      } else {
+        socket.send(JSON.stringify({ ok: true, items: [], tasks: [] }));
+      }
+    });
+
+    // A voice tool call above low-risk scope stages an approval — the
+    // daemon journals + publishes it as a SupervisorEvent, which the
+    // desktop receives as an {type:'event'} push that triggers a refresh.
+    server.push({
+      type: 'event',
+      event: {
+        type: 'ApprovalRequested',
+        timestamp: '2026-01-01T12:00:00Z',
+        taskId: 'task_voice',
+        sessionId: 'sess_v1',
+        agentId: 'voice',
+        adapterFidelityTier: 'A',
+        approvalId: 'appr-v1',
+        capability: 'fs.delete',
+        destination: 'dist/**',
+        reason: 'voice: delete build output',
+      },
+      seq: 42,
+    });
+
+    await waitFor(() =>
+      transport.toRenderer.some(
+        (m) => m.channel === 'inbox:update' && JSON.stringify(m.data).includes('att-voice-1'),
+      ),
+    );
+    expect(app.getState().inboxItems.map((i) => i.id)).toContain('att-voice-1');
     await app.disconnect();
   });
 });

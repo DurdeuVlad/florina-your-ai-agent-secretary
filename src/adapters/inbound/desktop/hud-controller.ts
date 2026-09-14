@@ -149,18 +149,27 @@ export class HudController {
     // A dropped daemon can't hold a capture — clear the local flag so it
     // doesn't resurface on reconnect.
     if (mode === 'offline') this.localListening = false;
+    // Five-state mapping (issue #131): offline < daemon drop; listening <
+    // capture held (local PTT or reported); processing < request in
+    // flight; responding < reply streaming; idle otherwise.
     const realtimeState =
       this.localListening || state.voiceState.listening
         ? VoiceSessionState.Listening
-        : state.voiceState.speaking
-          ? VoiceSessionState.Responding
-          : VoiceSessionState.Idle;
+        : state.voiceState.processing
+          ? VoiceSessionState.Processing
+          : state.voiceState.speaking
+            ? VoiceSessionState.Responding
+            : VoiceSessionState.Idle;
     this.vm.update({
       mode,
       realtimeState,
       realtimeConnected: state.daemonStatus === 'connected',
       whisperAvailable: mode === 'whisper',
     });
+    // Transcript partials/finals and reply previews stream into the
+    // HUD's two-line area.
+    this.vm.setTranscript(state.voiceState.transcript ?? '');
+    this.vm.setResponsePreview(state.voiceState.responsePreview ?? '');
   }
 
   /** Update the daemon status directly (shortcut for {@link applyRendererState}). */

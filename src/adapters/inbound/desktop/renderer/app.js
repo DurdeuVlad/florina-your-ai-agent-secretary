@@ -286,7 +286,7 @@ function makeInput(placeholder, textarea) {
   return el;
 }
 
-function formActions(onSave) {
+function formActions() {
   const actions = document.createElement('div');
   actions.className = 'actions';
   const save = document.createElement('button');
@@ -372,6 +372,7 @@ function openIdeaCompiler(card, ideaId) {
       });
   });
   cancel.addEventListener('click', () => form.remove());
+  form.appendChild(actions);
   card.appendChild(form);
   project.focus();
 }

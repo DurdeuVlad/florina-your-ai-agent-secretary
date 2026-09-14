@@ -571,6 +571,12 @@ export class FlorinaDaemon extends EventEmitter {
         preferences: this.preferenceStore,
         delegation,
         quotaLedger: this.quotaLedger ?? undefined,
+        // Voice sessions report live state here (issue #131); it is
+        // broadcast to subscribed surfaces as an ephemeral voice:state
+        // push — session ephemera is not journaled.
+        voiceStateSink: (report) => {
+          this.stream?.broadcast({ type: 'voice:state', ...report });
+        },
         onShutdown: () => {
           void this.stop();
         },
