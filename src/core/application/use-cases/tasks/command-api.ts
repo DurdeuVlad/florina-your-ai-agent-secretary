@@ -2382,6 +2382,11 @@ export class CommandApi {
     if (this.chatStore === undefined) {
       return { ok: false, error: 'chat store is not wired into this daemon' };
     }
+    // The role narrowing in ChatAppendCommand is compile-time only — a
+    // forged command could inject system/tool rows without this check.
+    if (cmd.role !== 'user' && cmd.role !== 'assistant') {
+      return { ok: false, error: 'role must be user or assistant' };
+    }
     const text = cmd.text.trim();
     if (text.length === 0) {
       return { ok: false, error: 'text is required' };
