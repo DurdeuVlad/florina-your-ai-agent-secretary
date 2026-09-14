@@ -251,6 +251,11 @@ export interface RealtimeSessionOptions {
    * model never generates a reply.
    */
   readonly transcriptionOnly?: boolean;
+  /**
+   * Language hint for input-audio transcription (issue #163), e.g. `en`.
+   * Absent → the engine auto-detects.
+   */
+  readonly transcriptionLanguage?: string;
 }
 
 /**

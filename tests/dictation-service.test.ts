@@ -311,4 +311,42 @@ describe('DictationService', () => {
     await svc.start();
     expect(session.connectCalls).toHaveLength(1);
   });
+
+  it('setSessionLanguage drops an idle session so the next round renegotiates', async () => {
+    const svc = makeService();
+    await svc.start();
+    const stopping = svc.stop();
+    session.emitTranscript({ partial: false, text: 'done' });
+    await stopping;
+    expect(session.isConnected).toBe(true);
+    svc.setSessionLanguage('ro');
+    expect(session.isConnected).toBe(false);
+    await svc.start();
+    expect(session.connectCalls).toHaveLength(2);
+    expect(session.connectCalls[1]?.options?.transcriptionLanguage).toBe('ro');
+    expect(session.connectCalls[1]?.options?.transcriptionOnly).toBe(true);
+  });
+
+  it('setSessionLanguage mid-round drops the session when the round ends', async () => {
+    const svc = makeService();
+    await svc.start();
+    svc.setSessionLanguage('fr');
+    // The in-flight round is undisturbed.
+    expect(session.isConnected).toBe(true);
+    expect(svc.currentState).toBe('listening');
+    const stopping = svc.stop();
+    session.emitTranscript({ partial: false, text: 'done' });
+    await stopping;
+    expect(session.isConnected).toBe(false);
+    await svc.start();
+    expect(session.connectCalls).toHaveLength(2);
+    expect(session.connectCalls[1]?.options?.transcriptionLanguage).toBe('fr');
+  });
+
+  it('setSessionLanguage before any session is a no-op on the transport', () => {
+    const svc = makeService();
+    svc.setSessionLanguage('de');
+    expect(session.isConnected).toBe(false);
+    expect(session.connectCalls).toHaveLength(0);
+  });
 });

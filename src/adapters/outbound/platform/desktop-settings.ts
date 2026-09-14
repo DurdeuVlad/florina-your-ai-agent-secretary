@@ -28,6 +28,12 @@ export interface DesktopSettings {
    * conservative default; voice mode is an explicit opt-in.
    */
   readonly voiceModeDefault: boolean;
+  /**
+   * BCP-47-ish language hint for speech transcription (issue #163) —
+   * applied to the realtime transcription session config and the
+   * whisper.cpp adapter. Undefined → auto-detect.
+   */
+  readonly dictationLanguage?: string;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -60,6 +66,9 @@ export function readDesktopSettings(dir?: string): DesktopSettings {
           : DEFAULT_DESKTOP_SETTINGS.voiceModeDefault,
       ...(typeof parsed['micDeviceId'] === 'string' && parsed['micDeviceId'].length > 0
         ? { micDeviceId: parsed['micDeviceId'] }
+        : {}),
+      ...(typeof parsed['dictationLanguage'] === 'string' && parsed['dictationLanguage'].length > 0
+        ? { dictationLanguage: parsed['dictationLanguage'] }
         : {}),
     };
   } catch {

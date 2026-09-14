@@ -128,6 +128,11 @@ export interface RealtimeBridgeOptions {
    * session returns to Idle on `input_audio_transcription.completed`.
    */
   readonly transcriptionOnly?: boolean;
+  /**
+   * Language hint for input-audio transcription (issue #163) — mapped
+   * onto the GA `audio.input.transcription.language` field.
+   */
+  readonly transcriptionLanguage?: string;
   /** Auto-reconnect on unexpected close (default true). */
   readonly autoReconnect?: boolean;
   /** Max reconnection attempts before giving up (default 3). */
@@ -171,12 +176,16 @@ export class RealtimeBridge implements RealtimeSessionPort {
   /** Stored connect args so reconnection can re-establish the session. */
   private apiKey = '';
   private options: Required<
-    Omit<RealtimeBridgeOptions, 'baseUrl' | 'tools' | 'instructions' | 'voice'>
+    Omit<
+      RealtimeBridgeOptions,
+      'baseUrl' | 'tools' | 'instructions' | 'voice' | 'transcriptionLanguage'
+    >
   > & {
     baseUrl: string;
     tools: readonly RealtimeTool[];
     instructions: string;
     voice: string;
+    transcriptionLanguage?: string;
   };
 
   /** Whether the user explicitly called disconnect() (suppresses reconnect). */
@@ -649,6 +658,14 @@ export class RealtimeBridge implements RealtimeSessionPort {
 
   private sendSessionUpdate(): void {
     const pcm = { type: 'audio/pcm' as const, rate: this.options.sampleRate };
+    // Optional dictation language hint (issue #163) — GA input
+    // transcription accepts a BCP-47-ish language code; absent = detect.
+    const transcription = {
+      model: DEFAULT_TRANSCRIPTION_MODEL,
+      ...(this.options.transcriptionLanguage !== undefined
+        ? { language: this.options.transcriptionLanguage }
+        : {}),
+    };
     // GA session shape (issue #161): dictation opens a `transcription`
     // session — commits produce transcript events and nothing else.
     if (this.options.transcriptionOnly) {
@@ -657,7 +674,7 @@ export class RealtimeBridge implements RealtimeSessionPort {
         audio: {
           input: {
             format: pcm,
-            transcription: { model: DEFAULT_TRANSCRIPTION_MODEL },
+            transcription,
             turn_detection: null, // manual commit on stopListening
           },
         },
@@ -673,7 +690,7 @@ export class RealtimeBridge implements RealtimeSessionPort {
       audio: {
         input: {
           format: pcm,
-          transcription: { model: DEFAULT_TRANSCRIPTION_MODEL },
+          transcription,
           turn_detection: null, // PTT — the bridge commits explicitly
         },
         output: { format: pcm, voice: this.options.voice },
@@ -756,6 +773,9 @@ export class RealtimeBridge implements RealtimeSessionPort {
       maxReconnectAttempts: opts.maxReconnectAttempts ?? 3,
       reconnectBaseDelayMs: opts.reconnectBaseDelayMs ?? 500,
       transcriptionOnly: opts.transcriptionOnly ?? false,
+      ...(opts.transcriptionLanguage !== undefined
+        ? { transcriptionLanguage: opts.transcriptionLanguage }
+        : {}),
     };
   }
 

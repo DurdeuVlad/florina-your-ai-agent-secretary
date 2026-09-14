@@ -38,7 +38,10 @@ import { HotkeyManager, DEFAULT_HOTKEYS } from '../adapters/inbound/desktop/hotk
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
 import { ensureLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
-import { readDesktopSettings } from '../adapters/outbound/platform/desktop-settings.js';
+import {
+  readDesktopSettings,
+  writeDesktopSettings,
+} from '../adapters/outbound/platform/desktop-settings.js';
 
 // Same `.env` convenience as the CLI (#116) — FLORINA_DAEMON_URL and friends
 // resolve from the project file when the caller didn't export them.
@@ -104,6 +107,7 @@ async function main(): Promise<void> {
   let dictation: DictationService | undefined;
   let whisper: TranscriptionPort | undefined;
   const whisperModel = process.env['FLORINA_WHISPER_MODEL'];
+  const settings = readDesktopSettings();
   if (openaiKey !== undefined || whisperModel !== undefined) {
     const { RealtimeBridge, defaultSocketFactory } =
       await import('../adapters/outbound/voice/realtime-bridge.js');
@@ -112,7 +116,12 @@ async function main(): Promise<void> {
     if (whisperModel !== undefined) {
       const adapter = new WhisperAdapter(new WhisperCppBackend());
       try {
-        await adapter.initialize(whisperModel);
+        await adapter.initialize(
+          whisperModel,
+          settings.dictationLanguage !== undefined
+            ? { language: settings.dictationLanguage }
+            : undefined,
+        );
         whisper = adapter;
       } catch {
         // Model missing/unreadable — realtime-only dictation.
@@ -125,6 +134,11 @@ async function main(): Promise<void> {
             session: new RealtimeBridge(dictationTransport, defaultSocketFactory),
             apiKey: openaiKey,
           }
+        : {}),
+      // Dictation language hint (issue #163) — flows into the realtime
+      // input-transcription config; whisper got it at initialize above.
+      ...(settings.dictationLanguage !== undefined
+        ? { sessionOptions: { transcriptionLanguage: settings.dictationLanguage } }
         : {}),
       ...(whisper !== undefined ? { whisper } : {}),
       onUpdate: (u) =>
@@ -149,7 +163,6 @@ async function main(): Promise<void> {
   // pay the connect cost when voice is never used. Spoken finals journal
   // into the canonical chat thread via `chat-append`; state reports flow
   // to the daemon HUD through attachVoiceStateReporting (#131).
-  const settings = readDesktopSettings();
   let voiceSession: DesktopVoiceSession | undefined;
   if (openaiKey !== undefined) {
     let manager: VoiceSessionManager | null = null;
@@ -244,6 +257,15 @@ async function main(): Promise<void> {
     voiceConfig: {
       ...(settings.micDeviceId !== undefined ? { micDeviceId: settings.micDeviceId } : {}),
       voiceModeDefault: settings.voiceModeDefault,
+      ...(settings.dictationLanguage !== undefined
+        ? { dictationLanguage: settings.dictationLanguage }
+        : {}),
+    },
+    // Desktop settings persistence for the prefs screen's "Desktop &
+    // voice" card (issue #163) — the renderer sends `deskset:` patches.
+    desktopSettings: {
+      read: () => readDesktopSettings(),
+      write: (s) => writeDesktopSettings(s),
     },
     onTrayAction: (action: TrayAction) => {
       switch (action) {

@@ -914,6 +914,21 @@ describe('RealtimeBridge', () => {
       }
     });
 
+    it('forwards the dictation language hint into session.update (issue #163)', async () => {
+      const p = bridge.connect('sk-test', {
+        transcriptionOnly: true,
+        transcriptionLanguage: 'ro',
+      });
+      sockets[0].emitOpen();
+      await p;
+      const update = allSent(sockets[0]).find((m) => m.type === 'session.update');
+      if (update?.type === 'session.update') {
+        expect(update.session.audio?.input?.transcription?.language).toBe('ro');
+      } else {
+        expect.unreachable('session.update was sent');
+      }
+    });
+
     it('commits the audio buffer WITHOUT response.create', async () => {
       const socket = await connect();
       bridge.startListening();
