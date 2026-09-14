@@ -64,6 +64,7 @@ import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { QuotaLedger } from '../routing/quota-ledger.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
 import type { ContextHealthSnapshot } from '../context/context-health-monitor.js';
+import type { TodoItem } from '../florina/todo-tool.js';
 import type {
   Brief,
   BriefDispatchResult,
@@ -325,6 +326,27 @@ export interface ListBriefsCommand {
 }
 
 /**
+ * Query the Secretary's working surface (issue #130, DESKTOP_UI.md):
+ * her plan/todo list, in-flight research, memory writes awaiting
+ * confirmation, and per-agent context health (DEC-035).
+ */
+export interface QuerySecretaryCommand {
+  readonly kind: 'query-secretary';
+}
+
+/** Confirm a proposed durable memory write (issue #130). */
+export interface ConfirmMemoryWriteCommand {
+  readonly kind: 'memory-confirm';
+  readonly writeId: string;
+}
+
+/** Reject a proposed durable memory write (issue #130). */
+export interface RejectMemoryWriteCommand {
+  readonly kind: 'memory-reject';
+  readonly writeId: string;
+}
+
+/**
  * Append a titled section to a ledger — research notes, open questions,
  * decisions in progress.
  */
@@ -479,6 +501,9 @@ export type Command =
   | CompileBriefCommand
   | ConfirmBriefCommand
   | ListBriefsCommand
+  | QuerySecretaryCommand
+  | ConfirmMemoryWriteCommand
+  | RejectMemoryWriteCommand
   | UpdatePreferenceCommand
   | QueryPreferencesCommand
   | GetDigestCommand
@@ -511,6 +536,9 @@ export const COMMAND_KINDS: readonly string[] = [
   'brief-compile',
   'brief-confirm',
   'brief-list',
+  'query-secretary',
+  'memory-confirm',
+  'memory-reject',
   'update-preference',
   'query-preferences',
   'get-digest',
@@ -657,6 +685,47 @@ export interface BriefListResponse {
   readonly error?: string;
 }
 
+/* ------------------------------------------------------------------ *
+ * Secretary surface (issue #130, DESKTOP_UI.md §Secretary, DEC-035)
+ * ------------------------------------------------------------------ */
+
+/** One in-flight research run reported by the Secretary ops surface. */
+export interface SecretaryResearchItem {
+  readonly id: string;
+  readonly query: string;
+  readonly startedAt: string;
+  /** Ledger the findings will append to, when targeted. */
+  readonly ideaId?: string;
+}
+
+/** A proposed durable memory write awaiting human confirmation. */
+export interface PendingMemoryWrite {
+  readonly id: string;
+  readonly summary: string;
+  readonly scope: 'user' | 'project';
+  readonly projectId?: string;
+  readonly proposedAt: string;
+  /** Where the proposal came from (e.g. 'voice'). */
+  readonly source?: string;
+}
+
+/** Response to `memory-confirm`/`memory-reject`. */
+export interface MemoryWriteResponse {
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
+/** Response to `query-secretary` — the whole Secretary working surface. */
+export interface SecretaryResponse {
+  readonly ok: boolean;
+  readonly plan: readonly TodoItem[];
+  readonly research: readonly SecretaryResearchItem[];
+  readonly memoryWrites: readonly PendingMemoryWrite[];
+  /** Per-continuous-agent context health (DEC-035). */
+  readonly health: readonly ContextHealthSnapshot[];
+  readonly error?: string;
+}
+
 /** Response to `brief-compile` — the persisted draft. */
 export interface BriefResponse {
   readonly ok: boolean;
@@ -791,6 +860,8 @@ export type Response =
   | BriefResponse
   | BriefConfirmResponse
   | BriefListResponse
+  | SecretaryResponse
+  | MemoryWriteResponse
   | PreferenceResponse
   | DelegateTaskResponse
   | UnknownCommandResponse;
@@ -807,6 +878,25 @@ export type Response =
 export interface ContextHealthReadPort {
   snapshot(agentId: string): ContextHealthSnapshot | undefined;
   listSnapshots(): ContextHealthSnapshot[];
+}
+
+/**
+ * Read/write surface for the Secretary's working state (issue #130).
+ * Hosted by whoever runs the Secretary loop — today the daemon wires a
+ * store only when a loop runs daemon-side; absent the port, queries
+ * return honest empty sections rather than fabricated activity.
+ */
+export interface SecretaryOpsPort {
+  /** The Secretary's current plan/todo items (DEC-034 todo tool). */
+  plan(): readonly TodoItem[];
+  /** In-flight research runs (the voice `research` async tool). */
+  inFlightResearch(): readonly SecretaryResearchItem[];
+  /** Durable memory writes proposed but not yet confirmed. */
+  pendingMemoryWrites(): readonly PendingMemoryWrite[];
+  /** Commit a proposed memory write; false when the id is unknown. */
+  confirmMemoryWrite(writeId: string): boolean;
+  /** Drop a proposed memory write; false when the id is unknown. */
+  rejectMemoryWrite(writeId: string): boolean;
 }
 
 /**
@@ -885,6 +975,12 @@ export interface CommandApiDeps {
    */
   readonly contextHealth?: ContextHealthReadPort;
   /**
+   * The Secretary's working surface (issue #130) — plan, research, and
+   * pending memory writes. Optional: without a daemon-hosted loop the
+   * sections query as honest empties.
+   */
+  readonly secretaryOps?: SecretaryOpsPort;
+  /**
    * Idea ledger + Brief service (DEC-033, issue #69). When wired, the
    * `idea-*`/`brief-*` commands are served; when absent they return a
    * clear `ok: false` rather than pretending to succeed.
@@ -949,6 +1045,7 @@ export class CommandApi {
   private readonly completionDigestRepository?: CompletionDigestRepositoryPort<CompletionDigest>;
   private readonly metricsQueryService?: MetricsQueryService;
   private readonly contextHealth?: ContextHealthReadPort;
+  private readonly secretaryOps?: SecretaryOpsPort;
   private readonly ideas?: IdeaService;
   private readonly preferences?: PreferenceProfilePort;
   private readonly delegation?: DelegationService;
@@ -973,6 +1070,7 @@ export class CommandApi {
     this.completionDigestRepository = deps.completionDigestRepository;
     this.metricsQueryService = deps.metricsQueryService;
     this.contextHealth = deps.contextHealth;
+    this.secretaryOps = deps.secretaryOps;
     this.ideas = deps.ideas;
     this.preferences = deps.preferences;
     this.delegation = deps.delegation;
@@ -1041,6 +1139,11 @@ export class CommandApi {
         return this.handleConfirmBrief(command);
       case 'brief-list':
         return this.handleListBriefs();
+      case 'query-secretary':
+        return this.handleQuerySecretary();
+      case 'memory-confirm':
+      case 'memory-reject':
+        return this.handleMemoryWrite(command);
       case 'update-preference':
         return this.handleUpdatePreference(command);
       case 'query-preferences':
@@ -1749,6 +1852,42 @@ export class CommandApi {
       return { ok: false, briefs: [], error: 'idea ledgers are not wired into this daemon' };
     }
     return { ok: true, briefs: this.ideas.listBriefs() };
+  }
+
+  /**
+   * query-secretary (issue #130): the whole working surface — plan,
+   * in-flight research, pending memory writes, context health. Every
+   * field is a real read; absent ports yield empty sections, never
+   * fabricated activity.
+   */
+  private async handleQuerySecretary(): Promise<SecretaryResponse> {
+    return {
+      ok: true,
+      plan: this.secretaryOps?.plan() ?? [],
+      research: this.secretaryOps?.inFlightResearch() ?? [],
+      memoryWrites: this.secretaryOps?.pendingMemoryWrites() ?? [],
+      health: this.contextHealth?.listSnapshots() ?? [],
+    };
+  }
+
+  /** memory-confirm / memory-reject: resolve a proposed memory write. */
+  private async handleMemoryWrite(
+    cmd: ConfirmMemoryWriteCommand | RejectMemoryWriteCommand,
+  ): Promise<MemoryWriteResponse> {
+    if (!cmd.writeId) {
+      return { ok: false, error: 'writeId is required' };
+    }
+    if (this.secretaryOps === undefined) {
+      return { ok: false, error: 'secretary ops are not wired into this daemon' };
+    }
+    const done =
+      cmd.kind === 'memory-confirm'
+        ? this.secretaryOps.confirmMemoryWrite(cmd.writeId)
+        : this.secretaryOps.rejectMemoryWrite(cmd.writeId);
+    if (!done) {
+      return { ok: false, error: `no pending memory write ${cmd.writeId}` };
+    }
+    return { ok: true };
   }
 
   private async handleAppendIdea(cmd: AppendIdeaCommand): Promise<IdeaResponse> {

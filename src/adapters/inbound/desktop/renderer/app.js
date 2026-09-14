@@ -58,6 +58,9 @@ if (bridge) {
   /* ideas screen (issue #129) */
   bridge.on('ideas:update', (tree) => mount(tree, $('ideas')));
 
+  /* secretary screen (issue #130) */
+  bridge.on('secretary:update', (tree) => mount(tree, $('secretary')));
+
   /* PTT pill in the header — same states as the old overlay (issue #123) */
   bridge.on('hud:state', renderHud);
 }
@@ -389,6 +392,7 @@ const TITLES = {
   fleet: ['Fleet', 'provider capacity and routing'],
   ideas: ['Ideas', 'ledger entries — compile a Brief when one is ready'],
   prefs: ['Preferences', 'durable routing rules and denies'],
+  secretary: ['Secretary', 'her plan, research, and memory — context health is first-class'],
 };
 
 let currentView = 'inbox';
@@ -477,7 +481,7 @@ document.addEventListener('keydown', (e) => {
     return;
   if (gPending) {
     gPending = false;
-    const map = { i: 'inbox', t: 'tasks', f: 'fleet', d: 'ideas', p: 'prefs' };
+    const map = { i: 'inbox', t: 'tasks', f: 'fleet', d: 'ideas', p: 'prefs', s: 'secretary' };
     if (map[e.key]) showView(map[e.key]);
     return;
   }
