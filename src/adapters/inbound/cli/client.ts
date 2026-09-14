@@ -165,8 +165,7 @@ export class DaemonClient {
       let authenticated = this.authToken === undefined;
 
       socket.on('message', (data: unknown) => {
-        const rawText =
-          typeof data === 'string' ? data : (data as Buffer).toString('utf8');
+        const rawText = typeof data === 'string' ? data : (data as Buffer).toString('utf8');
         if (!authenticated) {
           // First message after our handshake must be the auth ack.
           let ack: unknown;

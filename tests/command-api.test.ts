@@ -15,6 +15,7 @@ import type {
   MetricsResponse,
   TaskResponse,
   TaskListResponse,
+  EventsResponse,
   PruneResponse,
   ShutdownResponse,
   DigestResponse,
@@ -978,6 +979,65 @@ describe('CommandApi', () => {
       const r = res as TaskResponse;
       expect(r.ok).toBe(false);
       expect(r.task).toBeNull();
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * query-events (issue #126 — session inspector drill-down)
+   * ---------------------------------------------------------------- */
+  describe('query-events', () => {
+    it('returns the journaled events for a task', async () => {
+      const { task, sessionId, agentId } = createTaskWithSession(fixture);
+      fixture.taskStateMachine.transition(task.id, TaskState.Created, TaskState.Delegated, {
+        sessionId,
+        agentId,
+      });
+
+      const res = (await fixture.api.execute({
+        kind: 'query-events',
+        taskId: task.id,
+      })) as EventsResponse;
+
+      expect(res.ok).toBe(true);
+      expect(res.taskId).toBe(task.id);
+      expect(res.events.length).toBeGreaterThan(0);
+      const e = res.events[0];
+      expect(e.taskId).toBe(task.id);
+      expect(typeof e.kind).toBe('string');
+      expect(e.payload).toBeTypeOf('object');
+      expect(typeof e.timestamp).toBe('string');
+    });
+
+    it('returns an empty list for a task with no journaled events', async () => {
+      const { task } = createTaskWithSession(fixture);
+
+      const res = (await fixture.api.execute({
+        kind: 'query-events',
+        taskId: task.id,
+      })) as EventsResponse;
+
+      expect(res.ok).toBe(true);
+      expect(res.events).toEqual([]);
+    });
+
+    it('fails when the task does not exist', async () => {
+      const res = (await fixture.api.execute({
+        kind: 'query-events',
+        taskId: 'nonexistent',
+      })) as EventsResponse;
+
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('nonexistent');
+    });
+
+    it('fails when taskId is missing', async () => {
+      const res = (await fixture.api.execute({
+        kind: 'query-events',
+        taskId: '',
+      })) as EventsResponse;
+
+      expect(res.ok).toBe(false);
+      expect(res.events).toEqual([]);
     });
   });
 

@@ -9,30 +9,137 @@
     <title>Florina</title>
     <link rel="stylesheet" href="tokens.css" />
     <style>
-      body { height: 100vh; overflow: hidden; -webkit-user-select: none; }
-      .card.sel { outline: 1px solid var(--accent); }
-      .empty-big { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-      .empty-hint { color: var(--muted); font-size: 13px; }
-      .icon { font-size: 13px; }
-      .group-items { display: grid; gap: 8px; }
-      .filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
-      .chip-clear { margin-left: 6px; opacity: .7; }
-      .toast {
-        position: fixed; bottom: 20px; right: 20px;
-        background: var(--panel-raised); border: 1px solid var(--border);
-        border-radius: 9px; padding: 11px 18px; font-size: 13px;
-        display: none; max-width: 440px; z-index: 50;
+      body {
+        height: 100vh;
+        overflow: hidden;
+        -webkit-user-select: none;
       }
-      .toast.show { display: block; }
-      .dot.wait { background: var(--amber); }
-      .dot.err { background: var(--red); }
-      .w-semibold { font-weight: 600; }
-      .w-bold { font-weight: 700; }
-      .empty { padding: 48px 0; text-align: center; color: var(--muted); }
-      .sect-label { letter-spacing: 1.2px; }
-      .obj { font-weight: 600; }
-      .stat.done { color: var(--muted); }
-      .sect .n { margin-left: auto; }
+      .card.sel {
+        outline: 1px solid var(--accent);
+      }
+      .empty-big {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .empty-hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .icon {
+        font-size: 13px;
+      }
+      .group-items {
+        display: grid;
+        gap: 8px;
+      }
+      .filter-bar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .chip-clear {
+        margin-left: 6px;
+        opacity: 0.7;
+      }
+      .toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: var(--panel-raised);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 11px 18px;
+        font-size: 13px;
+        display: none;
+        max-width: 440px;
+        z-index: 50;
+      }
+      .toast.show {
+        display: block;
+      }
+      .dot.wait {
+        background: var(--amber);
+      }
+      .dot.err {
+        background: var(--red);
+      }
+      .w-semibold {
+        font-weight: 600;
+      }
+      .w-bold {
+        font-weight: 700;
+      }
+      .empty {
+        padding: 48px 0;
+        text-align: center;
+        color: var(--muted);
+      }
+      .sect-label {
+        letter-spacing: 1.2px;
+      }
+      .obj {
+        font-weight: 600;
+      }
+      .stat.done {
+        color: var(--muted);
+      }
+      .sect .n {
+        margin-left: auto;
+      }
+      /* view switching (#126) */
+      .view {
+        display: none;
+      }
+      .view.active {
+        display: block;
+      }
+      /* session inspector (#126): full-width, full-height 3 columns */
+      .column {
+        height: 100%;
+      }
+      .column:has(> #v-tasks.active) {
+        max-width: none;
+      }
+      #v-tasks.active {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      #inspector {
+        flex: 1;
+        min-height: 0;
+      }
+      .col .row.cond {
+        opacity: 0.62;
+      }
+      .col.colfocus {
+        border-color: var(--accent);
+      }
+      .col .row.kbsel {
+        outline: 1px solid var(--accent);
+        outline-offset: -1px;
+      }
+      .col .row .t {
+        display: block;
+      }
+      .col .row b {
+        display: block;
+        font-weight: 600;
+      }
+      .fidelity {
+        margin: 10px 14px 0;
+        padding: 7px 10px;
+        font-size: 11.5px;
+        color: var(--amber);
+        border: 1px dashed var(--amber);
+        border-radius: 6px;
+      }
+      .col .mono {
+        padding: 12px 14px;
+        line-height: 1.55;
+      }
     </style>
   </head>
   <body>
@@ -42,9 +149,7 @@
         <div class="navitem active" data-view="inbox">
           ◈ Inbox<span class="navbadge zero" id="navInbox">0</span>
         </div>
-        <div class="navitem" data-view="tasks">
-          ◧ Tasks<span class="navbadge zero">0</span>
-        </div>
+        <div class="navitem" data-view="tasks">◧ Tasks<span class="navbadge zero">0</span></div>
         <div class="navitem" data-view="fleet">◔ Fleet</div>
         <div class="navitem" data-view="prefs">◍ Preferences</div>
         <div class="sidefoot">
@@ -62,17 +167,18 @@
         <div class="content">
           <div class="column">
             <section class="view active" id="v-inbox"><div id="inbox"></div></section>
-            <section class="view" id="v-tasks">
-              <div class="empty"><div class="empty-big">Tasks</div>
-                <div class="empty-hint">Task list view lands with the session inspector (#126).</div></div>
-            </section>
+            <section class="view" id="v-tasks"><div id="inspector"></div></section>
             <section class="view" id="v-fleet">
-              <div class="empty"><div class="empty-big">Fleet</div>
-                <div class="empty-hint">Quota/capacity view lands in milestone 2 (#127).</div></div>
+              <div class="empty">
+                <div class="empty-big">Fleet</div>
+                <div class="empty-hint">Quota/capacity view lands in milestone 2 (#127).</div>
+              </div>
             </section>
             <section class="view" id="v-prefs">
-              <div class="empty"><div class="empty-big">Preferences</div>
-                <div class="empty-hint">Preference editor lands in milestone 2 (#128).</div></div>
+              <div class="empty">
+                <div class="empty-big">Preferences</div>
+                <div class="empty-hint">Preference editor lands in milestone 2 (#128).</div>
+              </div>
             </section>
           </div>
         </div>

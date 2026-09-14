@@ -118,9 +118,7 @@ export class DaemonRunner {
       installSignalHandlers: true,
       // Local control-plane auth (#118): provision a token so the socket
       // rejects unauthenticated commands. Surfaces read the same file.
-      ...(this.authTokenDir !== null
-        ? { authToken: ensureLocalAuthToken(this.authTokenDir) }
-        : {}),
+      ...(this.authTokenDir !== null ? { authToken: ensureLocalAuthToken(this.authTokenDir) } : {}),
     });
     await this.daemon.start();
     this.writePid(process.pid);
