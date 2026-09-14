@@ -24,22 +24,39 @@ canonical mapping. Tokens, not hex values, are the API.
 
 ### 1.1 Color
 
-| Token          | Hex       | Use                                      |
-| -------------- | --------- | ---------------------------------------- |
-| `bg`           | `#0f1115` | app background                           |
-| `surface`      | `#14171d` | sidebar, chrome                          |
-| `panel`        | `#1a1e27` | cards                                    |
-| `panel-raised` | `#20252f` | hovered/active card, popovers            |
-| `border`       | `#2a3040` | hairlines only — never decorative boxes  |
-| `text`         | `#e8ebf0` | primary copy                             |
-| `muted`        | `#8a93a6` | metadata, timestamps, secondary copy     |
-| `accent`       | `#6e9eff` | links, focused items, primary buttons    |
-| `green`        | `#4cc38a` | verified, connected, completed-ok        |
-| `amber`        | `#e0a84f` | approval required, parked, elevated risk |
-| `red`          | `#f06060` | critical, failed, sandbox violation      |
-| `orange`       | `#e07a4f` | degraded context, dirty worktree         |
-| `purple`       | `#b08cff` | digests, reviewed/accepted               |
-| `slate`        | `#8a93a6` | idle/stale — intentionally quiet         |
+Rebuilt for #180 to a warmer, Codex/ChatGPT-desktop-caliber neutral scale.
+`accent` was deliberately kept distinct from `green` (an earlier pass tried a
+green accent and it collided visually with the "verified" status color —
+priority and status must never share a hue).
+
+| Token             | Hex       | Use                                      |
+| ----------------- | --------- | ---------------------------------------- |
+| `bg`              | `#0b0b0c` | app background                           |
+| `surface`         | `#131315` | sidebar, chrome                          |
+| `panel`           | `#1c1c1f` | cards                                    |
+| `panel-raised`    | `#232327` | hovered/active card, popovers            |
+| `border`          | `#2d2d31` | hairlines only — never decorative boxes  |
+| `text`            | `#ececf1` | primary copy                             |
+| `muted`           | `#93939d` | metadata, timestamps, secondary copy     |
+| `accent`          | `#4f8dff` | links, focused items, primary buttons    |
+| `accent-contrast` | `#071022` | text/icons rendered on top of `accent`   |
+| `green`           | `#3fb984` | verified, connected, completed-ok        |
+| `amber`           | `#e3a94a` | approval required, parked, elevated risk |
+| `red`             | `#ef5959` | critical, failed, sandbox violation      |
+| `orange`          | `#e2814f` | degraded context, dirty worktree         |
+| `purple`          | `#a98af0` | digests, reviewed/accepted               |
+| `slate`           | `#7d7d87` | idle/stale — intentionally quiet         |
+
+Elevation/shape tokens introduced alongside the palette:
+
+| Token       | Value                         | Use                               |
+| ----------- | ----------------------------- | --------------------------------- |
+| `radius-sm` | `6px`                         | small controls                    |
+| `radius-md` | `10px`                        | buttons, nav items, task rows     |
+| `radius-lg` | `14px`                        | cards, columns, popovers, gallery |
+| `shadow-sm` | `0 1px 2px rgba(0,0,0,.4)`    | subtle lift                       |
+| `shadow-md` | `0 8px 24px rgba(0,0,0,.45)`  | popovers                          |
+| `shadow-lg` | `0 16px 48px rgba(0,0,0,.55)` | PTT HUD, floating overlays        |
 
 Rules:
 
@@ -66,8 +83,10 @@ fonts — the app must feel instant and native.
 ### 1.3 Space / radius / elevation
 
 - Grid base **4px**; spacing scale `xs=4 sm=8 md=12 lg=16 xl=24`.
-- Radius: `6` controls, `8` chips, `10` cards/popovers, `50%` status dots.
-- No drop shadows except the PTT HUD (floating overlay) and popovers.
+- Radius: `radius-sm` (6) controls, `8` chips, `radius-md` (10) buttons/nav
+  items, `radius-lg` (14) cards/columns/popovers, `50%` status dots.
+- No drop shadows except the PTT HUD (floating overlay) and popovers —
+  `shadow-lg`/`shadow-md` respectively (§1.1).
 - Density: default comfortable; inbox groups collapse to one line each when
   a group holds >3 items.
 
