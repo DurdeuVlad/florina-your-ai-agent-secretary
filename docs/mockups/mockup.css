@@ -620,10 +620,3 @@ button.danger {
   font-size: 11px;
   color: var(--muted);
 }
-.chatoffline {
-  background: var(--panel-raised);
-  border-bottom: 1px solid var(--border);
-  color: var(--amber);
-  font-size: 12px;
-  padding: 6px 20px;
-}
