@@ -21,7 +21,7 @@
 import type { AdapterFidelityTier } from '../../../domain/enums.js';
 import { TaskState } from '../../../domain/enums.js';
 import type { TaskState as TaskStateType } from '../../../domain/enums.js';
-import type { Approval, Session, Task } from '../../../domain/types.js';
+import type { Approval, Event, Session, Task } from '../../../domain/types.js';
 import type {
   AgentStartedEvent,
   AgentStoppedEvent,
@@ -242,6 +242,17 @@ export interface QueryTaskCommand {
   readonly taskId: string;
 }
 
+/**
+ * Query the journaled {@link Event}s for a task (session inspector,
+ * issue #126). Read-only — the event journal is the source of truth
+ * (DEC-012), including `ContextCondensed` rows that carry
+ * `forgottenEventIds` so condensation never hides history.
+ */
+export interface QueryEventsCommand {
+  readonly kind: 'query-events';
+  readonly taskId: string;
+}
+
 /** List tasks, optionally filtered by status. */
 export interface ListTasksCommand {
   readonly kind: 'list-tasks';
@@ -428,6 +439,7 @@ export type Command =
   | EscalateItemCommand
   | QueryMetricsCommand
   | QueryTaskCommand
+  | QueryEventsCommand
   | ListTasksCommand
   | PruneWorktreeCommand
   | ShutdownCommand
@@ -456,6 +468,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'escalate-item',
   'query-metrics',
   'query-task',
+  'query-events',
   'list-tasks',
   'prune-worktree',
   'shutdown',
@@ -648,8 +661,17 @@ export interface UnknownCommandResponse {
  * member of this union; the caller knows which variant to expect based on
  * the command `kind` they sent.
  */
+/** query-events response: journaled events for a task. */
+export interface EventsResponse {
+  readonly ok: boolean;
+  readonly taskId: string;
+  readonly events: readonly Event[];
+  readonly error?: string;
+}
+
 export type Response =
   | StartTaskResponse
+  | EventsResponse
   | StopTaskResponse
   | ApproveResponse
   | InboxResponse
@@ -881,6 +903,8 @@ export class CommandApi {
         return this.handleQueryMetrics(command);
       case 'query-task':
         return this.handleQueryTask(command);
+      case 'query-events':
+        return this.handleQueryEvents(command);
       case 'list-tasks':
         return this.handleListTasks(command);
       case 'prune-worktree':
@@ -1390,6 +1414,17 @@ export class CommandApi {
     }
     const eventCount = this.eventRepository.listByTask(cmd.taskId).length;
     return { ok: true, task: toTaskSnapshot(task, eventCount) };
+  }
+
+  /** query-events: return the journaled events for a task (read-only). */
+  private async handleQueryEvents(cmd: QueryEventsCommand): Promise<EventsResponse> {
+    if (!cmd.taskId) {
+      return { ok: false, taskId: '', events: [], error: 'taskId is required' };
+    }
+    if (this.taskStore.getById(cmd.taskId) === null) {
+      return { ok: false, taskId: cmd.taskId, events: [], error: `Task not found: ${cmd.taskId}` };
+    }
+    return { ok: true, taskId: cmd.taskId, events: this.eventRepository.listByTask(cmd.taskId) };
   }
 
   /** list-tasks: list all tasks, optionally filtered by status. */

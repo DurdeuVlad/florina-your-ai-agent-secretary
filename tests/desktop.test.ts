@@ -276,6 +276,8 @@ describe('IpcBridge', () => {
       'metrics:update',
       'voice:state',
       'daemon:status',
+      'inspector:update',
+      'view:show',
       'hud:state',
       'command',
       'command:result',
@@ -1101,5 +1103,209 @@ describe('close-to-tray', () => {
     app.start();
     window.close();
     expect(window.isClosed()).toBe(true);
+  });
+});
+
+/* ================================================================== *
+ * Session inspector (issue #126)
+ * ================================================================== */
+
+describe('session inspector', () => {
+  let server: MockDaemonServer;
+
+  const EVENTS = [
+    {
+      id: 'e1',
+      sessionId: 's1',
+      taskId: 'task_1',
+      timestamp: '2026-01-01T10:00:00Z',
+      kind: 'AgentStarted',
+      payload: { agentId: 'codex' },
+    },
+    {
+      id: 'e2',
+      sessionId: 's1',
+      taskId: 'task_1',
+      timestamp: '2026-01-01T10:00:05Z',
+      kind: 'ToolFinished',
+      payload: { toolName: 'bash' },
+    },
+  ];
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  /** Connect an app whose mock daemon answers query-events with EVENTS. */
+  async function connectedApp(transport: MockIpcTransport): Promise<DesktopApp> {
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-events') {
+        socket.send(JSON.stringify({ ok: true, taskId: cmd['taskId'], events: EVENTS }));
+      } else if (cmd['kind'] === 'list-tasks') {
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            tasks: [
+              {
+                id: 'task_1',
+                projectId: 'p1',
+                objective: 'do the thing',
+                state: 'running',
+                agentIds: ['codex'],
+                sessionIds: ['s1'],
+                createdAt: '2026-01-01T09:00:00Z',
+                updatedAt: '2026-01-01T09:30:00Z',
+                eventCount: 2,
+              },
+            ],
+          }),
+        );
+      } else if (cmd['kind'] === 'query-inbox') {
+        socket.send(JSON.stringify({ ok: true, items: [] }));
+      }
+    });
+    return app;
+  }
+
+  function findAll(node: unknown, tag: string): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    const walk = (n: unknown): void => {
+      if (typeof n !== 'object' || n === null) return;
+      const r = n as Record<string, unknown>;
+      if (r['tag'] === tag) out.push(r);
+      for (const c of (r['children'] as unknown[]) ?? []) walk(c);
+    };
+    walk(node);
+    return out;
+  }
+
+  it('inspect-task:<id> pulls query-events and pushes the 3-column tree', async () => {
+    const transport = new MockIpcTransport();
+    const app = await connectedApp(transport);
+    let sawQuery = false;
+    const socket = await new Promise<WebSocket>((resolve) => {
+      // the connected socket is already known; grab it via a fresh listener
+      resolve((server as unknown as { client: WebSocket }).client);
+    });
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-events' && cmd['taskId'] === 'task_1') sawQuery = true;
+    });
+
+    await app.handleRendererCommand({ id: 10, cmd: 'inspect-task:task_1' });
+
+    expect(sawQuery).toBe(true);
+    expect(transport.toRenderer.some((m) => m.channel === 'view:show' && m.data === 'tasks')).toBe(
+      true,
+    );
+    const push = transport.toRenderer.filter((m) => m.channel === 'inspector:update').pop();
+    expect(push).toBeDefined();
+    const tree = push!.data as Record<string, unknown>;
+    expect(tree['tag']).toBe('Inspector');
+    expect(findAll(tree, 'InspectorCol')).toHaveLength(3);
+    const timeline = findAll(tree, 'InspRow').filter((r) =>
+      String((r['props'] as Record<string, unknown>)['command'] ?? '').startsWith('inspect-event:'),
+    );
+    expect(timeline).toHaveLength(2);
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 10,
+      res: { ok: true },
+    });
+    await app.disconnect();
+  });
+
+  it('inspect-event:<i> selects the row locally and re-pushes detail', async () => {
+    const transport = new MockIpcTransport();
+    const app = await connectedApp(transport);
+    await app.handleRendererCommand({ id: 11, cmd: 'inspect-task:task_1' });
+    const before = transport.toRenderer.filter((m) => m.channel === 'inspector:update').length;
+
+    await app.handleRendererCommand({ id: 12, cmd: 'inspect-event:1' });
+
+    const pushes = transport.toRenderer.filter((m) => m.channel === 'inspector:update');
+    expect(pushes.length).toBe(before + 1);
+    const tree = pushes[pushes.length - 1].data as Record<string, unknown>;
+    const rows = findAll(tree, 'InspRow').filter((r) =>
+      String((r['props'] as Record<string, unknown>)['command'] ?? '').startsWith('inspect-event:'),
+    );
+    expect((rows[1]['props'] as Record<string, unknown>)['selected']).toBe(true);
+    const cols = findAll(tree, 'InspectorCol');
+    expect(String((cols[2]['props'] as Record<string, unknown>)['title'])).toContain(
+      'ToolFinished',
+    );
+    const results = transport.toRenderer.filter((m) => m.channel === 'command:result');
+    expect(results.map((m) => m.data)).toContainEqual({ id: 12, res: { ok: true } });
+    await app.disconnect();
+  });
+
+  it('inspect-event out of range returns an error result', async () => {
+    const transport = new MockIpcTransport();
+    const app = await connectedApp(transport);
+    await app.handleRendererCommand({ id: 13, cmd: 'inspect-task:task_1' });
+    await app.handleRendererCommand({ id: 14, cmd: 'inspect-event:9' });
+    const results = transport.toRenderer.filter((m) => m.channel === 'command:result');
+    expect(results.map((m) => m.data)).toContainEqual(
+      expect.objectContaining({ id: 14, res: expect.objectContaining({ ok: false }) }),
+    );
+    await app.disconnect();
+  });
+
+  it('approval:inspect:<cap>:<dest> resolves the matching inbox item', async () => {
+    const transport = new MockIpcTransport();
+    const app = await connectedApp(transport);
+    const socket = (server as unknown as { client: WebSocket }).client;
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_9',
+            taskId: 'task_1',
+            kind: 'ApprovalRequest',
+            priority: 'High',
+            status: 'Pending',
+            createdAt: '2026-01-01T10:00:00Z',
+            payload: { capability: 'net', destination: 'registry.npmjs.org', approvalId: 'ap_9' },
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+
+    await app.handleRendererCommand({
+      id: 15,
+      cmd: 'approval:inspect:net:registry.npmjs.org',
+    });
+
+    expect(transport.toRenderer.some((m) => m.channel === 'view:show' && m.data === 'tasks')).toBe(
+      true,
+    );
+    const push = transport.toRenderer.filter((m) => m.channel === 'inspector:update').pop();
+    expect(push).toBeDefined();
+    const results15 = transport.toRenderer.filter((m) => m.channel === 'command:result');
+    expect(results15.map((m) => m.data)).toContainEqual({ id: 15, res: { ok: true } });
+    await app.disconnect();
+  });
+
+  it('approval:inspect with no matching item returns an error', async () => {
+    const transport = new MockIpcTransport();
+    const app = await connectedApp(transport);
+    await app.handleRendererCommand({ id: 16, cmd: 'approval:inspect:net:nope.example' });
+    const result = transport.toRenderer.find((m) => m.channel === 'command:result')?.data as {
+      res: { ok: boolean; error?: string };
+    };
+    expect(result.res.ok).toBe(false);
+    await app.disconnect();
   });
 });

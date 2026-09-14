@@ -20,6 +20,8 @@ const PUSH_CHANNELS = new Set([
   'metrics:update',
   'voice:state',
   'daemon:status',
+  'inspector:update',
+  'view:show',
   'hud:state',
   'command:result',
 ]);

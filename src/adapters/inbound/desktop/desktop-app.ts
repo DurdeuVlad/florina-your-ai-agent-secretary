@@ -21,9 +21,11 @@ import type {
   AttentionItemSnapshot,
   TaskSnapshot,
 } from '../../../core/application/use-cases/tasks/command-api.js';
+import type { Event } from '../../../core/domain/types.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
 import { renderHomeView } from './views/home-view.js';
+import { renderInspectorView } from './views/inspector-view.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
@@ -120,6 +122,12 @@ export class DesktopApp {
   private readonly closeToTray: boolean;
   private started = false;
   private stopping = false;
+  /** Latest task list from the daemon (inspector column 1, #126). */
+  private tasks: TaskSnapshot[] = [];
+  /** Session inspector selection state (#126). */
+  private inspectorTaskId: string | null = null;
+  private inspectorEventIndex: number | null = null;
+  private inspectorEvents: readonly Event[] = [];
 
   constructor(options: DesktopAppOptions) {
     this.window = options.window;
@@ -576,6 +584,9 @@ export class DesktopApp {
    */
   async handleRendererCommand(message: unknown): Promise<void> {
     const m = message as { id?: unknown; cmd?: unknown };
+    if (typeof m.cmd === 'string' && (await this.handleInspectorCommand(m.cmd, m.id))) {
+      return;
+    }
     const cmd = this.resolveRendererCommand(m.cmd);
     if (cmd === null) {
       // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
@@ -622,6 +633,104 @@ export class DesktopApp {
   }
 
   /**
+   * Session-inspector verbs (#126). `inspect-task:<id>` and
+   * `approval:inspect:<cap>:<dest>` open the inspector on a task (daemon
+   * `query-events` pull + `inspector:update` push + `view:show`); the
+   * approval form resolves capability/destination against the mirrored
+   * inbox items so the renderer can't fabricate a task id.
+   * `inspect-event:<i>` selects a timeline row — local, no daemon call.
+   * Returns true when the command was claimed.
+   */
+  private async handleInspectorCommand(raw: string, id: unknown): Promise<boolean> {
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      this.bridge.sendToRenderer('command:result', { id, res });
+    };
+    if (raw.startsWith('inspect-task:')) {
+      ack(await this.openInspector(raw.slice('inspect-task:'.length)));
+      return true;
+    }
+    if (raw.startsWith('approval:inspect:')) {
+      const parts = raw.split(':');
+      const cap = parts[2];
+      const dest = parts[3];
+      const item = this.state
+        .snapshot()
+        .inboxItems.find(
+          (i) =>
+            i.kind === 'ApprovalRequest' &&
+            i.payload['capability'] === cap &&
+            i.payload['destination'] === dest,
+        );
+      if (item === undefined) {
+        ack({ ok: false, error: `No pending approval matches ${cap ?? '?'} → ${dest ?? '?'}` });
+        return true;
+      }
+      ack(await this.openInspector(item.taskId));
+      return true;
+    }
+    if (raw.startsWith('inspect-event:')) {
+      const idx = Number.parseInt(raw.slice('inspect-event:'.length), 10);
+      if (Number.isInteger(idx) && idx >= 0 && idx < this.inspectorEvents.length) {
+        this.inspectorEventIndex = idx;
+        this.pushInspector();
+        ack({ ok: true });
+      } else {
+        ack({ ok: false, error: `No event at index ${raw.slice(14)}` });
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Open the session inspector on `taskId`: switch the renderer to the
+   * Tasks view, pull the task's journaled events (`query-events`), and
+   * push the rendered three-column tree. Keeps last-known events when the
+   * daemon is unreachable (DG-01 §4).
+   */
+  private async openInspector(taskId: string): Promise<{ ok: boolean; error?: string }> {
+    this.inspectorTaskId = taskId;
+    this.inspectorEventIndex = null;
+    this.bridge.sendToRenderer('view:show', 'tasks');
+    const res = await this.sendCommand({ kind: 'query-events', taskId }).catch((e: unknown) => ({
+      ok: false as const,
+      error: e instanceof Error ? e.message : String(e),
+    }));
+    if (!res.ok) {
+      this.pushInspector();
+      return { ok: false, error: 'error' in res ? res.error : 'query-events failed' };
+    }
+    this.inspectorEvents = 'events' in res ? res.events : [];
+    this.pushInspector();
+    return { ok: true };
+  }
+
+  /** Re-pull events for the open inspector task (live timeline refresh). */
+  private async refreshInspectorEvents(): Promise<void> {
+    if (this.inspectorTaskId === null) return;
+    const res = await this.sendCommand({
+      kind: 'query-events',
+      taskId: this.inspectorTaskId,
+    }).catch(() => null);
+    if (res === null || !res.ok) return; // offline — keep last known events
+    this.inspectorEvents = 'events' in res ? res.events : [];
+    this.pushInspector();
+  }
+
+  /** Render and push the inspector tree on the `inspector:update` channel. */
+  private pushInspector(): void {
+    this.bridge.sendToRenderer(
+      'inspector:update',
+      renderInspectorView({
+        tasks: this.tasks,
+        selectedTaskId: this.inspectorTaskId,
+        events: this.inspectorEvents,
+        selectedEventIndex: this.inspectorEventIndex,
+      }),
+    );
+  }
+
+  /**
    * Re-query the daemon and push fresh RenderTrees to the renderer.
    * Debounced because daemon events can arrive in bursts.
    */
@@ -661,8 +770,13 @@ export class DesktopApp {
     const tasks =
       tasksRes !== null && tasksRes.ok && 'tasks' in tasksRes
         ? (tasksRes as { tasks: TaskSnapshot[] }).tasks
-        : [];
+        : this.tasks; // keep last-known task list when the query fails
+    this.tasks = tasks;
     this.state.update({ inboxItems: items });
     this.bridge.sendToRenderer('inbox:update', renderHomeView(items as AttentionItem[], tasks));
+    // Keep the inspector in sync: column 1 always shows the task list,
+    // and an open task's timeline re-pulls so events journal forward.
+    if (this.inspectorTaskId === null) this.pushInspector();
+    else void this.refreshInspectorEvents();
   }
 }

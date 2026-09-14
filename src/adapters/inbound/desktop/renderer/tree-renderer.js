@@ -12,9 +12,20 @@
  */
 
 const ICONS = {
-  shield: '🛡', alert: '⚠', branch: '⑂', pause: '⏸', clock: '◷',
-  document: '📄', gauge: '◔', info: 'ℹ', check: '✓', 'check-circle': '✓',
-  play: '▶', stop: '■', mic: '🎙', 'mic-off': '⌀',
+  shield: '🛡',
+  alert: '⚠',
+  branch: '⑂',
+  pause: '⏸',
+  clock: '◷',
+  document: '📄',
+  gauge: '◔',
+  info: 'ℹ',
+  check: '✓',
+  'check-circle': '✓',
+  play: '▶',
+  stop: '■',
+  mic: '🎙',
+  'mic-off': '⌀',
 };
 
 const TAG_CLASS = {
@@ -45,6 +56,14 @@ const TAG_CLASS = {
   FilterLabel: 'sect-label',
   FilterChip: 'chip',
   ChipClear: 'chip-clear',
+  /* session inspector (issue #126) */
+  Inspector: 'cols',
+  InspectorCol: 'col',
+  InspRow: 'row',
+  InspRowTitle: null, // <b>
+  InspRowSub: 't',
+  DetailMono: 'mono',
+  FidelityNotice: 'fidelity',
   Button: null, // <button>
   ClearAllButton: null,
   ActionButton: null,
@@ -70,9 +89,10 @@ function propsToClass(tag, props) {
 function renderNode(node) {
   if (typeof node === 'string') return document.createTextNode(node);
   const { tag, props, children } = node;
-  const isButton =
-    tag === 'Button' || tag === 'ClearAllButton' || tag === 'ActionButton';
-  const el = document.createElement(isButton ? 'button' : tag === 'Icon' ? 'span' : 'div');
+  const isButton = tag === 'Button' || tag === 'ClearAllButton' || tag === 'ActionButton';
+  const el = document.createElement(
+    isButton ? 'button' : tag === 'Icon' ? 'span' : tag === 'InspRowTitle' ? 'b' : 'div',
+  );
 
   const cls = propsToClass(tag, props || {});
   if (cls) el.className = cls;
@@ -87,10 +107,27 @@ function renderNode(node) {
   }
   if (props && props.command) el.dataset.command = String(props.command);
   if (tag === 'ChipClear') el.style.cursor = 'pointer';
-  if (tag === 'InboxItem' || tag === 'TaskRow') {
+  if (tag === 'InboxItem' || tag === 'TaskRow' || (props && props.selectable)) {
     el.dataset.selectable = 'true';
     el.style.cursor = 'pointer';
   }
+
+  /* --- session inspector rows (issue #126) --- */
+  if (tag === 'InspectorCol' && props && props.title) {
+    const head = document.createElement('div');
+    head.className = 'colhead';
+    head.textContent = String(props.title);
+    el.appendChild(head);
+  }
+  if (tag === 'InspRow') {
+    if (props && props.selected) el.classList.add('sel');
+    if (props && props.muted) el.classList.add('cond');
+  }
+  if (tag === 'InspRowTitle' && props && props.color) {
+    const c = { error: 'red', warn: 'amber', success: 'green', info: 'slate' }[props.color];
+    if (c) el.style.color = 'var(--' + c + ')';
+  }
+  if (tag === 'DetailMono') el.style.whiteSpace = 'pre-wrap';
   if (tag === 'SectionHeader' && props && props.label) {
     const label = document.createElement('span');
     label.className = 'sect-label';

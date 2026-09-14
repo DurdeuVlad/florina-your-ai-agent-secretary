@@ -36,6 +36,18 @@ if (bridge) {
     badge.className = 'navbadge' + (n ? '' : ' zero');
     sel = -1;
   });
+
+  /* session inspector (#126): main process pushes the 3-column tree */
+  bridge.on('inspector:update', (tree) => {
+    mount(tree, $('inspector'));
+    inspSel = -1;
+    markInspSel();
+  });
+
+  /* main process can switch views (e.g. Inspect on an approval card) */
+  bridge.on('view:show', (name) => {
+    if (TITLES[name]) showView(name);
+  });
 }
 
 /* ---------- command dispatch ---------- */
@@ -65,7 +77,10 @@ const TITLES = {
   prefs: ['Preferences', 'durable routing rules and denies'],
 };
 
+let currentView = 'inbox';
+
 function showView(name) {
+  currentView = name;
   document
     .querySelectorAll('.navitem')
     .forEach((x) => x.classList.toggle('active', x.dataset.view === name));
@@ -84,6 +99,9 @@ document
 
 let sel = -1;
 let gPending = false;
+/* inspector column focus (#126): 0 tasks, 1 timeline, 2 detail */
+let inspCol = 0;
+let inspSel = -1;
 
 function cards() {
   return [...document.querySelectorAll('.view.active [data-selectable]')];
@@ -97,6 +115,45 @@ function moveSel(d) {
   list[sel].scrollIntoView({ block: 'nearest' });
 }
 
+/* inspector keyboard model: h/l pick a column, j/k move inside it */
+function inspCols() {
+  return [...document.querySelectorAll('#inspector .col')];
+}
+
+function inspRows() {
+  const col = inspCols()[inspCol];
+  return col ? [...col.querySelectorAll('.row[data-selectable]')] : [];
+}
+
+function markInspSel() {
+  inspCols().forEach((c, i) => c.classList.toggle('colfocus', i === inspCol));
+  inspRows().forEach((r, i) => r.classList.toggle('kbsel', i === inspSel));
+  const rows = inspRows();
+  if (inspSel >= 0 && rows[inspSel]) rows[inspSel].scrollIntoView({ block: 'nearest' });
+}
+
+function inspMoveCol(d) {
+  inspCol = Math.max(0, Math.min(inspCols().length - 1, inspCol + d));
+  inspSel = -1;
+  markInspSel();
+}
+
+function inspMoveRow(d) {
+  const rows = inspRows();
+  if (!rows.length) return;
+  inspSel = Math.max(0, Math.min(rows.length - 1, inspSel + d));
+  markInspSel();
+}
+
+function inspActivate() {
+  const row = inspRows()[inspSel];
+  if (row && row.dataset.command && bridge) {
+    void bridge.command(row.dataset.command).then((res) => {
+      if (res && res.ok === false) toast(res.error || 'command failed');
+    });
+  }
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (gPending) {
@@ -107,18 +164,39 @@ document.addEventListener('keydown', (e) => {
   }
   switch (e.key) {
     case 'j':
-      moveSel(1);
+      if (currentView === 'tasks') inspMoveRow(1);
+      else moveSel(1);
       break;
     case 'k':
-      moveSel(-1);
+      if (currentView === 'tasks') inspMoveRow(-1);
+      else moveSel(-1);
+      break;
+    case 'h':
+      if (currentView === 'tasks') inspMoveCol(-1);
+      break;
+    case 'l':
+      if (currentView === 'tasks') inspMoveCol(1);
       break;
     case 'Enter': {
+      if (currentView === 'tasks') {
+        inspActivate();
+        break;
+      }
       const c = cards()[sel];
       const primary = c && c.querySelector('button:not(.ghost):not(.danger)');
       if (primary) primary.click();
+      else if (c && c.dataset.command && bridge) {
+        /* selectable rows (e.g. task rows) activate their command */
+        void bridge.command(c.dataset.command);
+      }
       break;
     }
     case 'Escape':
+      if (currentView === 'tasks') {
+        /* inspector → back to inbox (DG-01 §4) */
+        showView('inbox');
+        break;
+      }
       sel = -1;
       cards().forEach((c) => c.classList.remove('sel'));
       break;
