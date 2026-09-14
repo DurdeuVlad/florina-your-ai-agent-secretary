@@ -1627,3 +1627,33 @@ describe('chat commands (issue #157)', () => {
     expect(clear.ok).toBe(false);
   });
 });
+
+describe('chat turns (issue #158)', () => {
+  it('chat-send reports turn unavailable when no service is attached', async () => {
+    const { api } = createFixture();
+    const res = (await api.execute({ kind: 'chat-send', text: 'hi' })) as ChatSendResponse;
+    expect(res.ok).toBe(true);
+    expect(res.turn).toBe('unavailable');
+  });
+
+  it('chat-send starts a turn when the service is attached', async () => {
+    const { api } = createFixture();
+    const startTurn = vi.fn();
+    api.setChatService({ startTurn, turnInFlight: () => false });
+
+    const res = (await api.execute({ kind: 'chat-send', text: 'hi' })) as ChatSendResponse;
+    expect(res.ok).toBe(true);
+    expect(res.turn).toBe('started');
+    expect(startTurn).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a second send while a turn is in flight — nothing journaled', async () => {
+    const { api, chatStore } = createFixture();
+    api.setChatService({ startTurn: vi.fn(), turnInFlight: () => true });
+
+    const res = (await api.execute({ kind: 'chat-send', text: 'hi' })) as ChatSendResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('already in flight');
+    expect(chatStore.listVisible()).toHaveLength(0);
+  });
+});
