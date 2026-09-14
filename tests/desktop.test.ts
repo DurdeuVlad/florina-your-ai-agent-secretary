@@ -1309,3 +1309,27 @@ describe('session inspector', () => {
     await app.disconnect();
   });
 });
+
+/* ================================================================== *
+ * PTT pill toggle (HUD merged into the main window)
+ * ================================================================== */
+
+describe('ptt:toggle command', () => {
+  it('invokes the onPttToggle hook and acknowledges', async () => {
+    const transport = new MockIpcTransport();
+    const onPttToggle = vi.fn();
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      onPttToggle,
+    });
+    app.start();
+    await app.handleRendererCommand({ id: 20, cmd: 'ptt:toggle' });
+    expect(onPttToggle).toHaveBeenCalledTimes(1);
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 20,
+      res: { ok: true },
+    });
+    await app.stop();
+  });
+});

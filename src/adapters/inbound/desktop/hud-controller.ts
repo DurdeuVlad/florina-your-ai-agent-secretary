@@ -8,9 +8,14 @@
  *  - voice-session state mirrored in the renderer state (`voice:state`
  *    pushes → listening / processing / responding / idle).
  *
- * Every transition is event-driven — no timers, no polling. The HUD window
- * is independent of the main window so it keeps working while the inbox is
- * closed.
+ * Every transition is event-driven — no timers, no polling.
+ *
+ * The HUD can run in two modes:
+ *  - **overlay**: own frameless always-on-top window (`window` option), or
+ *  - **inline**: no window — `hud:state` pushes go over the supplied IPC
+ *    transport, which in the desktop composition is the main window's
+ *    transport, so the pill renders inside the app header (#126 feedback:
+ *    merged into the main app rather than a separate floating overlay).
  */
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
@@ -23,9 +28,14 @@ import type { VoicePipelineMode } from '../../../core/application/use-cases/voic
 
 /** Options for constructing a {@link HudController}. */
 export interface HudControllerOptions {
-  /** Window backend for the overlay (one window per backend instance). */
-  readonly window: WindowBackend;
-  /** IPC transport attached to the HUD window's contents. */
+  /**
+   * Window backend for a dedicated overlay window. When omitted the
+   * controller runs inline: it creates no window and `hud:state` pushes
+   * go over {@link HudControllerOptions.ipc} to whatever renderer is
+   * attached there (the main app window in the desktop composition).
+   */
+  readonly window?: WindowBackend;
+  /** IPC transport the `hud:state` pushes are sent over. */
   readonly ipc: IpcTransport;
   /**
    * Absolute path to the bundled `hud.html`. When omitted the window is
@@ -54,7 +64,7 @@ const HUD_WINDOW = {
  * over the `hud:state` channel.
  */
 export class HudController {
-  private readonly window: WindowBackend;
+  private readonly window: WindowBackend | null;
   private readonly bridge: IpcBridge;
   private readonly vm: PttHudViewModel;
   private readonly hudHtmlPath?: string;
@@ -63,7 +73,7 @@ export class HudController {
   private started = false;
 
   constructor(options: HudControllerOptions) {
-    this.window = options.window;
+    this.window = options.window ?? null;
     this.bridge = new IpcBridge(options.ipc);
     this.vm = new PttHudViewModel();
     this.hudHtmlPath = options.hudHtmlPath;
@@ -102,16 +112,17 @@ export class HudController {
    */
   start(): void {
     if (this.started) return;
+    this.started = true;
+    if (this.window === null) return; // inline mode — no overlay window
     // Register before createWindow — mock backends emit synchronously.
     this.window.on('ready-to-show', () => {
-      this.window.show();
+      this.window?.show();
       this.pushState(this.vm.getState());
     });
     this.window.createWindow({ ...HUD_WINDOW });
     if (this.hudHtmlPath !== undefined) {
       this.window.loadFile(this.hudHtmlPath);
     }
-    this.started = true;
   }
 
   /**
@@ -187,10 +198,10 @@ export class HudController {
     return this.vm.getState();
   }
 
-  /** Close the overlay and detach the IPC bridge. */
+  /** Close the overlay (if any) and detach the IPC bridge. */
   stop(): void {
     this.bridge.dispose();
-    this.window.close();
+    this.window?.close();
     this.started = false;
   }
 

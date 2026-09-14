@@ -46,11 +46,6 @@ const PRELOAD = fileURLToPath(
   new URL('../../src/adapters/inbound/desktop/renderer/preload.cjs', import.meta.url),
 );
 
-/** Absolute path to the PTT HUD overlay page (issue #123). */
-const HUD_HTML = fileURLToPath(
-  new URL('../../src/adapters/inbound/desktop/renderer/hud.html', import.meta.url),
-);
-
 /** Repo root — used to resolve the CLI entry for tray daemon actions. */
 const CLI_ENTRY = fileURLToPath(new URL('../cli/index.js', import.meta.url));
 
@@ -67,9 +62,21 @@ async function main(): Promise<void> {
 
   const window = new ElectronWindowBackend(PRELOAD);
   const ipc = new ElectronIpcTransport();
+
+  // PTT HUD (issue #123, merged into the main window per user feedback):
+  // no separate overlay — hud:state pushes go over the main window's IPC
+  // transport and the pill renders in the app header.
+  const hud = new HudController({
+    ipc,
+    hotkeyHint: 'Hold Space to talk',
+  });
+
   const desktopApp = new DesktopApp({
     window,
     ipcTransport: ipc,
+    onPttToggle: () => {
+      hud.toggleLocalListening();
+    },
     windowOptions: {
       width: 1180,
       height: 760,
@@ -98,32 +105,17 @@ async function main(): Promise<void> {
     },
   });
 
-  // PTT HUD overlay (issue #123): a second, frameless always-on-top window
-  // driven by app state changes — daemon status maps to the offline state,
-  // the mirrored voice session to listening/processing/responding.
-  const hudWindow = new ElectronWindowBackend(PRELOAD);
-  const hudIpc = new ElectronIpcTransport();
-  const hud = new HudController({
-    window: hudWindow,
-    ipc: hudIpc,
-    hudHtmlPath: HUD_HTML,
-    hotkeyHint: 'Hold Space to talk',
-  });
   desktopApp.onStateChange((s) => hud.applyRendererState(s));
 
   desktopApp.start();
   if (window.contents !== null) {
     ipc.attachContents(window.contents);
+    // Re-push once the page finishes loading — the initial hud:state push
+    // can race the renderer's listener registration.
+    window.contents.once('did-finish-load', () => hud.refresh());
   }
   window.loadFile(RENDERER_HTML);
-
   hud.start();
-  if (hudWindow.contents !== null) {
-    hudIpc.attachContents(hudWindow.contents);
-    // Re-push once the page finishes loading — the ready-to-show push can
-    // race the renderer, and dedup would leave the default offline frame.
-    hudWindow.contents.once('did-finish-load', () => hud.refresh());
-  }
 
   // Global push-to-talk hotkey (issue #124): OS-level via Electron's
   // globalShortcut — works with no window focused and the main window

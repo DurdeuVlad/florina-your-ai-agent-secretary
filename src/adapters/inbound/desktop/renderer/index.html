@@ -140,6 +140,28 @@
         padding: 12px 14px;
         line-height: 1.55;
       }
+      /* PTT pill merged into the header (was the floating overlay) */
+      .hud.pill {
+        width: auto;
+        padding: 6px 14px 6px 8px;
+        box-shadow: none;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .hud.pill .ring {
+        width: 30px;
+        height: 30px;
+        font-size: 13px;
+      }
+      .hud.pill .hudtext {
+        max-width: 240px;
+      }
+      .hud.pill .hudtext span {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
     </style>
   </head>
   <body>
@@ -163,6 +185,10 @@
           <h1 id="viewTitle">Attention Inbox</h1>
           <span class="sub" id="viewSub">what needs you right now</span>
           <span class="spacer"></span>
+          <div class="hud pill" id="hud" data-command="ptt:toggle" title="Push to talk">
+            <div class="ring" id="ring">🎙</div>
+            <div class="hudtext"><b id="hudTitle">Push to talk</b><span id="hudSub"></span></div>
+          </div>
         </header>
         <div class="content">
           <div class="column">
