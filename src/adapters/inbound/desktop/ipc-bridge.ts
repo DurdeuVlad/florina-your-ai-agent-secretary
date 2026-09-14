@@ -29,6 +29,7 @@ export const IPC_CHANNELS = [
   'inspector:update',
   'view:show',
   'fleet:update',
+  'prefs:update',
   'hud:state',
   'command',
   'command:result',
