@@ -71,6 +71,11 @@ if (bridge) {
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
   });
 
+  /* chat activity/diff drawer (#181): live task list, same data as the
+   * Fleet/Tasks screens — no new daemon query, just a second rendering
+   * of `tasks` alongside the transcript. */
+  bridge.on('chat:activity', (tree) => mount(tree, $('chatDrawerList')));
+
   /* dictation (issue #161): main drives the mic via dictation:capture;
      transcripts arrive on dictation:update — partials preview above the
      composer, the final inserts as editable text (never auto-sends). */
@@ -647,6 +652,30 @@ $('chatClear').addEventListener('click', () => {
   });
 });
 
+/* chat activity/diff drawer (#181): a per-viewer UI toggle, not a daemon
+ * preference — persisted to localStorage only (best-effort; a private
+ * window or blocked storage just falls back to closed). */
+let drawerOpen = false;
+try {
+  drawerOpen = window.localStorage.getItem('florina.chatDrawerOpen') === '1';
+} catch {
+  /* storage unavailable — default closed */
+}
+function applyDrawerState() {
+  $('chatDrawer').hidden = !drawerOpen;
+  $('chatDrawerToggle').classList.toggle('open', drawerOpen);
+}
+applyDrawerState();
+$('chatDrawerToggle').addEventListener('click', () => {
+  drawerOpen = !drawerOpen;
+  applyDrawerState();
+  try {
+    window.localStorage.setItem('florina.chatDrawerOpen', drawerOpen ? '1' : '0');
+  } catch {
+    /* best-effort only */
+  }
+});
+
 function toast(msg) {
   const t = $('toast');
   t.textContent = msg;
@@ -680,6 +709,7 @@ function showView(name) {
   $('viewTitle').textContent = TITLES[name][0];
   $('viewSub').textContent = TITLES[name][1];
   $('chatClear').style.display = name === 'chat' ? '' : 'none';
+  $('chatDrawerToggle').style.display = name === 'chat' ? '' : 'none';
   if (name === 'chat') $('chatInput').focus();
   // Enumerate mics whenever prefs opens — covers g p as well as clicks.
   if (name === 'prefs') void listMicrophones();

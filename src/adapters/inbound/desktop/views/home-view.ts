@@ -25,7 +25,9 @@ function el(
   return { tag, props, children };
 }
 
-const ACTIVE_STATES = new Set(['delegated', 'running', 'blocked', 'attention-needed']);
+/** Task states that count as "live" — shared with the chat activity drawer
+ * (#181) so the two surfaces can't silently diverge. */
+export const ACTIVE_STATES = new Set(['delegated', 'running', 'blocked', 'attention-needed']);
 const DONE_STATES = new Set(['completed', 'reviewed', 'accepted']);
 
 /** Display word for a task row's live status (plain language, DG-01 §3.3). */
@@ -46,7 +48,9 @@ function statusWord(task: TaskSnapshot): string {
   }
 }
 
-function renderTaskRow(task: TaskSnapshot): RenderTree {
+/** Shared task-row rendering (objective · provider chip · status word) —
+ * reused by the chat activity drawer (#181) so the two surfaces agree. */
+export function renderTaskRow(task: TaskSnapshot): RenderTree {
   const word = statusWord(task);
   const done = DONE_STATES.has(task.state);
   const provider = task.agentIds[0] ?? '';

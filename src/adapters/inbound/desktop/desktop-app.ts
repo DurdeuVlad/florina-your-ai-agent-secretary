@@ -31,6 +31,7 @@ import { renderPrefsScreen } from './views/prefs-screen.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
+import { renderChatActivityDrawer } from './views/chat-activity-drawer.js';
 import { renderSecretaryScreen } from './views/secretary-screen.js';
 import type { DictationService } from '../../../core/application/use-cases/voice/dictation-service.js';
 import type { VoiceSessionState } from '../../../core/application/ports/outbound/voice.js';
@@ -1413,6 +1414,9 @@ export class DesktopApp {
         ? (tasksRes as { tasks: TaskSnapshot[] }).tasks
         : this.tasks; // keep last-known task list when the query fails
     this.tasks = tasks;
+    // Chat activity/diff drawer (#181): same task list as Fleet/Tasks,
+    // pushed alongside them rather than on a separate query cycle.
+    this.bridge.sendToRenderer('chat:activity', renderChatActivityDrawer(tasks));
     this.state.update({ inboxItems: items });
     this.bridge.sendToRenderer('inbox:update', renderHomeView(items as AttentionItem[], tasks));
     // Keep the inspector in sync: column 1 always shows the task list,

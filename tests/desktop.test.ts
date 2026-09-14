@@ -289,6 +289,7 @@ describe('IpcBridge', () => {
       'ideas:update',
       'secretary:update',
       'chat:update',
+      'chat:activity',
       'dictation:capture',
       'dictation:audio',
       'dictation:audio-out',

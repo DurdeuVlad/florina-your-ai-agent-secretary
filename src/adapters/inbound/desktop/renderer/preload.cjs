@@ -27,6 +27,7 @@ const PUSH_CHANNELS = new Set([
   'ideas:update',
   'secretary:update',
   'chat:update',
+  'chat:activity',
   'dictation:capture',
   'dictation:audio-out',
   'dictation:update',
