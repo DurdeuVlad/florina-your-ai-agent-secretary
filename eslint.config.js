@@ -46,7 +46,7 @@ export default [
     },
   },
   {
-    files: ['eslint.config.js', 'scripts/**/*.mjs'],
+    files: ['eslint.config.js', 'scripts/**/*.mjs', 'scripts/**/*.cjs'],
     languageOptions: {
       globals: {
         ...globals.node,
