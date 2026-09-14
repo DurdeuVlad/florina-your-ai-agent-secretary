@@ -23,6 +23,7 @@ const PUSH_CHANNELS = new Set([
   'inspector:update',
   'view:show',
   'fleet:update',
+  'prefs:update',
   'hud:state',
   'command:result',
 ]);

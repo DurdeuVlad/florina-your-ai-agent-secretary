@@ -26,6 +26,38 @@
         color: var(--muted);
         font-size: 13px;
       }
+      /* preferences inline forms (issue #128) */
+      .pref-addbar {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 4px;
+      }
+      .pref-form {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .pref-addform {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .pref-form input,
+      .pref-addform input {
+        flex: 1;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .pref-form input:focus,
+      .pref-addform input:focus {
+        border-color: var(--accent);
+      }
       .icon {
         font-size: 13px;
       }
@@ -195,12 +227,7 @@
             <section class="view active" id="v-inbox"><div id="inbox"></div></section>
             <section class="view" id="v-tasks"><div id="inspector"></div></section>
             <section class="view" id="v-fleet"><div id="fleet"></div></section>
-            <section class="view" id="v-prefs">
-              <div class="empty">
-                <div class="empty-big">Preferences</div>
-                <div class="empty-hint">Preference editor lands in milestone 2 (#128).</div>
-              </div>
-            </section>
+            <section class="view" id="v-prefs"><div id="prefs"></div></section>
           </div>
         </div>
       </main>

@@ -73,6 +73,15 @@ const TAG_CLASS = {
   FleetRow: 'taskrow',
   Chip: 'chip',
   Bar: null, // handled specially (bar + inner fill)
+  /* preferences screen (issue #128) */
+  PrefsView: 'prefs-view',
+  PrefCard: 'card',
+  PrefTop: 'top',
+  PrefKind: 'kind mono',
+  PrefNote: 'summary',
+  PrefMeta: 'meta',
+  PrefActions: 'actions',
+  PrefAddBar: 'pref-addbar',
   Button: null, // <button>
   ClearAllButton: null,
   ActionButton: null,

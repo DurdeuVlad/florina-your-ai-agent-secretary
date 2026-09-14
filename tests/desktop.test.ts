@@ -279,6 +279,7 @@ describe('IpcBridge', () => {
       'inspector:update',
       'view:show',
       'fleet:update',
+      'prefs:update',
       'hud:state',
       'command',
       'command:result',
@@ -1421,6 +1422,178 @@ describe('fleet screen', () => {
     );
     expect(titles).toContain('image-pipeline');
     expect(titles).toContain('image-pipeline → codex: gemini exhausted');
+    await app.disconnect();
+  });
+});
+
+/* ================================================================== *
+ * Preferences screen (issue #128)
+ * ================================================================== */
+
+describe('preferences screen', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  const PREF_PROFILE = {
+    rules: [
+      { provider: 'codex', note: 'prefer Codex for heavy lifting' },
+      {
+        provider: 'devin',
+        workTypes: ['migration'],
+        projectId: 'agent-secretary',
+        note: 'use Devin for migrations in this repo',
+      },
+    ],
+    denied: [{ provider: 'gemini', note: 'too flaky' }],
+  };
+
+  function findAll(node: unknown, tag: string, out: unknown[] = []): unknown[] {
+    if (typeof node !== 'object' || node === null) return out;
+    const r = node as Record<string, unknown>;
+    if (r['tag'] === tag) out.push(r);
+    for (const c of (r['children'] as unknown[]) ?? []) findAll(c, tag, out);
+    return out;
+  }
+
+  it('refreshNow pulls query-preferences and pushes the prefs:update tree', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    let sawPrefsQuery = false;
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-preferences') {
+        sawPrefsQuery = true;
+        socket.send(JSON.stringify({ ok: true, profile: PREF_PROFILE }));
+      } else {
+        socket.send(JSON.stringify({ ok: true, items: [], tasks: [] }));
+      }
+    });
+
+    await app.refreshNow();
+
+    expect(sawPrefsQuery).toBe(true);
+    const push = transport.toRenderer.filter((m) => m.channel === 'prefs:update').pop();
+    expect(push).toBeDefined();
+    const tree = push!.data as Record<string, unknown>;
+    expect(tree['tag']).toBe('PrefsView');
+    expect(findAll(tree, 'PrefCard')).toHaveLength(3);
+    await app.disconnect();
+  });
+
+  it('routes a prefcmd: revoke through the daemon as update-preference', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    const seen: Record<string, unknown>[] = [];
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      seen.push(cmd);
+      socket.send(JSON.stringify({ ok: true, items: [], tasks: [], profile: PREF_PROFILE }));
+    });
+
+    const payload = {
+      kind: 'update-preference',
+      action: 'remove-rule',
+      provider: 'devin',
+      projectId: 'agent-secretary',
+    };
+    await app.handleRendererCommand({
+      id: 'rev1',
+      cmd: `prefcmd:${encodeURIComponent(JSON.stringify(payload))}`,
+    });
+
+    const result = transport.toRenderer.find(
+      (m) => m.channel === 'command:result' && (m.data as { id?: unknown }).id === 'rev1',
+    );
+    expect(result).toBeDefined();
+    expect((result!.data as { res: { ok: boolean } }).res.ok).toBe(true);
+    const update = seen.find((c) => c['kind'] === 'update-preference');
+    expect(update).toEqual(payload);
+    await app.disconnect();
+  });
+
+  it('rejects malformed and non-preference prefcmd payloads without hitting the daemon', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    const seen: Record<string, unknown>[] = [];
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      seen.push(cmd);
+      socket.send(JSON.stringify({ ok: true }));
+    });
+
+    await app.handleRendererCommand({ id: 'bad1', cmd: 'prefcmd:not-json%25' });
+    await app.handleRendererCommand({
+      id: 'bad2',
+      cmd: `prefcmd:${encodeURIComponent(JSON.stringify({ kind: 'shutdown' }))}`,
+    });
+
+    const results = transport.toRenderer.filter(
+      (m) =>
+        m.channel === 'command:result' &&
+        ['bad1', 'bad2'].includes(String((m.data as { id?: unknown }).id)),
+    );
+    expect(results).toHaveLength(2);
+    for (const r of results) {
+      expect((r.data as { res: { ok: boolean } }).res.ok).toBe(false);
+    }
+    // Neither payload reached the daemon — only connect-time traffic did.
+    expect(seen.filter((c) => c['kind'] !== 'subscribe')).toHaveLength(0);
+    await app.disconnect();
+  });
+
+  it('re-pulls the profile after a committed update-preference mutation', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    let prefQueries = 0;
+    const updated = new Promise<void>((resolve) => {
+      socket.on('message', (data) => {
+        const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+        if (cmd['kind'] === 'query-preferences') {
+          prefQueries += 1;
+          if (prefQueries >= 2) resolve();
+        }
+        socket.send(
+          JSON.stringify(
+            cmd['kind'] === 'query-preferences'
+              ? { ok: true, profile: PREF_PROFILE }
+              : { ok: true, items: [], tasks: [] },
+          ),
+        );
+      });
+    });
+
+    await app.refreshNow(); // first query-preferences
+    const payload = { kind: 'update-preference', action: 'remove-deny', provider: 'gemini' };
+    await app.handleRendererCommand({
+      id: 'mut1',
+      cmd: `prefcmd:${encodeURIComponent(JSON.stringify(payload))}`,
+    });
+    await updated; // mutation triggered a second pull
+    expect(prefQueries).toBeGreaterThanOrEqual(2);
     await app.disconnect();
   });
 });

@@ -27,6 +27,8 @@ import type { AttentionItem } from '../../../core/application/use-cases/attentio
 import { renderHomeView } from './views/home-view.js';
 import { renderInspectorView } from './views/inspector-view.js';
 import { renderFleetScreen } from './views/fleet-screen.js';
+import { renderPrefsScreen } from './views/prefs-screen.js';
+import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
@@ -651,6 +653,9 @@ export class DesktopApp {
       error: e instanceof Error ? e.message : String(e),
     }));
     this.bridge.sendToRenderer('command:result', { id: m.id, res });
+    // A committed preference mutation re-pulls the profile so the prefs
+    // screen reflects the journaled change immediately (#128).
+    if (cmd.kind === 'update-preference' && res.ok) void this.refreshViews();
   }
 
   /**
@@ -660,6 +665,25 @@ export class DesktopApp {
    */
   private resolveRendererCommand(cmd: unknown): Command | { error: string } | null {
     if (typeof cmd !== 'string') return cmd as Command;
+    // `prefcmd:<uri-encoded JSON>` carries a typed `update-preference`
+    // command authored by the prefs screen — decode, validate the kind,
+    // forward. Other kinds are rejected: the renderer can only mutate
+    // the preference profile through this verb (DEC-011).
+    if (cmd.startsWith('prefcmd:')) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cmd.slice('prefcmd:'.length))) as unknown;
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          (parsed as { kind?: unknown }).kind === 'update-preference'
+        ) {
+          return parsed as Command;
+        }
+        return { error: 'prefcmd payload must be an update-preference command' };
+      } catch {
+        return { error: 'malformed prefcmd payload' };
+      }
+    }
     const [verb, itemId] = cmd.split(':', 2);
     if (verb === 'approve' || verb === 'deny') {
       const item = this.state.snapshot().inboxItems.find((i) => i.id === itemId);
@@ -803,12 +827,13 @@ export class DesktopApp {
     // A dropped socket mid-refresh is normal (reconnect races) — treat a
     // failed send as "no answer" and keep the last known state rather than
     // blanking the renderer or throwing an unhandled rejection.
-    const [inboxRes, tasksRes, fleetRes] = await Promise.all([
+    const [inboxRes, tasksRes, fleetRes, prefsRes] = await Promise.all([
       this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
       this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
       this.sendCommand({ kind: 'query-fleet' }).catch(() => null),
+      this.sendCommand({ kind: 'query-preferences' }).catch(() => null),
     ]);
-    if (inboxRes === null && tasksRes === null && fleetRes === null) {
+    if (inboxRes === null && tasksRes === null && fleetRes === null && prefsRes === null) {
       return; // offline — keep last known
     }
     const items =
@@ -829,6 +854,13 @@ export class DesktopApp {
     // Fleet/quota screen (#127): quota + parked + routing decisions.
     if (fleetRes !== null && fleetRes.ok && 'providers' in fleetRes) {
       this.bridge.sendToRenderer('fleet:update', renderFleetScreen(fleetRes));
+    }
+    // Preferences screen (#128): durable routing rules + denies.
+    if (prefsRes !== null && prefsRes.ok && 'profile' in prefsRes) {
+      this.bridge.sendToRenderer(
+        'prefs:update',
+        renderPrefsScreen(prefsRes.profile as PreferenceProfile),
+      );
     }
   }
 }

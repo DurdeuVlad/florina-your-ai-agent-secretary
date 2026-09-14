@@ -52,6 +52,9 @@ if (bridge) {
   /* fleet/quota screen (issue #127) */
   bridge.on('fleet:update', (tree) => mount(tree, $('fleet')));
 
+  /* preferences screen (issue #128) */
+  bridge.on('prefs:update', (tree) => mount(tree, $('prefs')));
+
   /* PTT pill in the header — same states as the old overlay (issue #123) */
   bridge.on('hud:state', renderHud);
 }
@@ -111,10 +114,149 @@ function renderHud(s) {
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-command]');
   if (!btn || !bridge) return;
-  void bridge.command(btn.dataset.command).then((res) => {
+  const cmd = btn.dataset.command;
+  /* renderer-only verbs: open the inline preference forms (#128) */
+  if (cmd.startsWith('prefedit:')) {
+    openPrefEditor(btn.closest('.card'), JSON.parse(decodeURIComponent(cmd.slice(9))));
+    return;
+  }
+  if (cmd === 'prefadd') {
+    openPrefAdder();
+    return;
+  }
+  void bridge.command(cmd).then((res) => {
     if (res && res.ok === false) toast(res.error || 'command failed');
   });
 });
+
+/* ---------- preferences inline editing (issue #128) ---------- */
+
+/** Wrap an update-preference payload in the prefcmd: wire verb. */
+function prefCmd(payload) {
+  return 'prefcmd:' + encodeURIComponent(JSON.stringify(payload));
+}
+
+/**
+ * Send a sequence of update-preference commands in order, toasting the
+ * first failure. Returns true when all succeeded.
+ */
+async function sendPrefCmds(cmds) {
+  for (const c of cmds) {
+    const res = await bridge.command(prefCmd(c));
+    if (res && res.ok === false) {
+      toast(res.error || 'preference update failed');
+      return false;
+    }
+  }
+  return true;
+}
+
+function formRow(input, onSave) {
+  const row = document.createElement('div');
+  row.className = 'pref-form';
+  row.appendChild(input);
+  const save = document.createElement('button');
+  save.textContent = 'Save';
+  save.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void onSave(input.value.trim());
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    row.remove();
+  });
+  row.appendChild(save);
+  row.appendChild(cancel);
+  return row;
+}
+
+/**
+ * Inline Edit: turns the card's note into an input; Save revokes the old
+ * rule and re-adds it with the new note (update-preference has no in-place
+ * edit, so edit = remove + add with the same structured fields).
+ */
+function openPrefEditor(card, rule) {
+  if (!card || card.querySelector('.pref-form')) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = rule.note || '';
+  input.placeholder = 'your words for this rule';
+  const structured = {
+    provider: rule.provider,
+    ...(rule.model ? { model: rule.model } : {}),
+    ...(rule.projectId ? { projectId: rule.projectId } : {}),
+  };
+  card.appendChild(
+    formRow(input, async (note) => {
+      const remove = { kind: 'update-preference', action: 'remove-rule', ...structured };
+      const add = {
+        kind: 'update-preference',
+        action: 'add-rule',
+        ...structured,
+        ...(rule.workTypes ? { workTypes: rule.workTypes } : {}),
+        ...(note ? { note } : {}),
+      };
+      await sendPrefCmds([remove, add]);
+    }),
+  );
+  input.focus();
+}
+
+/**
+ * + Add rule: a small inline form at the top of the prefs view —
+ * provider (required), note, optional project scope.
+ */
+function openPrefAdder() {
+  const host = $('prefs');
+  if (!host || host.querySelector('.pref-addform')) return;
+  const card = document.createElement('div');
+  card.className = 'card pref-addform';
+  const provider = document.createElement('input');
+  provider.type = 'text';
+  provider.placeholder = 'provider (e.g. codex, devin, claude-code)';
+  const note = document.createElement('input');
+  note.type = 'text';
+  note.placeholder = 'rule in your own words';
+  const project = document.createElement('input');
+  project.type = 'text';
+  project.placeholder = 'project scope (optional)';
+  card.appendChild(provider);
+  card.appendChild(note);
+  card.appendChild(project);
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const save = document.createElement('button');
+  save.textContent = 'Save rule';
+  save.addEventListener('click', () => {
+    if (!provider.value.trim()) {
+      toast('provider is required');
+      return;
+    }
+    void sendPrefCmds([
+      {
+        kind: 'update-preference',
+        action: 'add-rule',
+        provider: provider.value.trim(),
+        ...(note.value.trim() ? { note: note.value.trim() } : {}),
+        ...(project.value.trim() ? { projectId: project.value.trim() } : {}),
+      },
+    ]).then((ok) => {
+      if (ok) card.remove();
+    });
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => card.remove());
+  actions.appendChild(save);
+  actions.appendChild(cancel);
+  card.appendChild(actions);
+  host.prepend(card);
+  provider.focus();
+}
 
 function toast(msg) {
   const t = $('toast');
