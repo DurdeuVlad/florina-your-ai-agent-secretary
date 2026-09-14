@@ -69,6 +69,13 @@ export interface WindowBackend {
   loadFile(path: string): void;
   /** Close the window (emits `close` then `closed`). */
   close(): void;
+  /**
+   * Intercept close requests. The handler runs when a close is requested
+   * (user chrome, {@link close}, OS signal); returning `false` vetoes the
+   * close — the window is hidden instead, enabling close-to-tray (DG-01
+   * §3.8). Pass `null` to clear. Default: no interceptor (close proceeds).
+   */
+  setCloseInterceptor(handler: (() => boolean) | null): void;
   /** Register a handler for a window event. Returns an unsubscribe function. */
   on(event: WindowEvent, callback: WindowEventHandler): () => void;
   /** Show the window (emits `show`). */
@@ -120,6 +127,7 @@ export class MockWindowBackend implements WindowBackend {
   private options: WindowOptions = { ...DEFAULT_WINDOW_OPTIONS };
   private loadedURL: string | null = null;
   private loadedFile: string | null = null;
+  private closeInterceptor: (() => boolean) | null = null;
   private readonly handlers = new Map<WindowEvent, Set<WindowEventHandler>>();
   /** Ordered log of operations performed on this window. */
   readonly log: string[] = [];
@@ -158,9 +166,20 @@ export class MockWindowBackend implements WindowBackend {
     if (this.closed) return;
     this.log.push('close');
     this.emit('close');
+    if (this.closeInterceptor !== null && !this.closeInterceptor()) {
+      // Vetoed — hide instead of closing (close-to-tray).
+      this.visible = false;
+      this.log.push('close-vetoed');
+      this.emit('hide');
+      return;
+    }
     this.visible = false;
     this.closed = true;
     this.emit('closed');
+  }
+
+  setCloseInterceptor(handler: (() => boolean) | null): void {
+    this.closeInterceptor = handler;
   }
 
   on(event: WindowEvent, callback: WindowEventHandler): () => void {

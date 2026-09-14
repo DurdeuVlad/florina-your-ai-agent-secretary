@@ -66,6 +66,12 @@ export interface DesktopAppOptions {
    * system tray. The host wires these to daemon commands / window actions.
    */
   readonly onTrayAction?: TrayActionCallback;
+  /**
+   * Close-to-tray (DG-01 §3.8, issue #125): when true, closing the main
+   * window hides it instead of quitting — the app keeps running headless
+   * (HUD + tray stay live) until an explicit {@link stop} or tray Quit.
+   */
+  readonly closeToTray?: boolean;
 }
 
 /**
@@ -111,7 +117,9 @@ export class DesktopApp {
   private authToken: string | undefined;
   private readonly reconnectBaseDelayMs: number;
   private readonly reconnectMaxDelayMs: number;
+  private readonly closeToTray: boolean;
   private started = false;
+  private stopping = false;
 
   constructor(options: DesktopAppOptions) {
     this.window = options.window;
@@ -120,6 +128,7 @@ export class DesktopApp {
     this.connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
     this.reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 1_000;
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
+    this.closeToTray = options.closeToTray ?? false;
     this.windowOptions = options.windowOptions ?? {};
     if (options.trayBackend !== undefined) {
       this.tray = new SystemTrayManager(options.trayBackend);
@@ -170,6 +179,15 @@ export class DesktopApp {
       this.tray.setStatus(this.state.snapshot().daemonStatus);
     }
     this.started = true;
+    if (this.closeToTray) {
+      // Close-to-tray: a close request hides the window unless we're
+      // actually tearing down. The HUD + tray keep the process alive.
+      this.window.setCloseInterceptor(() => {
+        if (this.stopping) return true;
+        this.window.hide();
+        return false;
+      });
+    }
   }
 
   /**
@@ -389,6 +407,7 @@ export class DesktopApp {
 
   /** Stop the app: disconnect, dispose the IPC bridge, close the window, and destroy the tray. */
   stop(): Promise<void> {
+    this.stopping = true;
     return this.disconnect().then(() => {
       this.bridge.dispose();
       this.window.close();

@@ -1037,3 +1037,69 @@ describe('reconnect', () => {
     expect(app.getState().daemonStatus).toBe('disconnected');
   });
 });
+
+/* ================================================================== *
+ * Close-to-tray (issue #125)
+ * ================================================================== */
+
+describe('close-to-tray', () => {
+  it('close request hides the window instead of closing when enabled', () => {
+    const window = new MockWindowBackend();
+    const trayBackend = new MockTrayBackend();
+    const app = new DesktopApp({
+      window,
+      ipcTransport: new MockIpcTransport(),
+      trayBackend,
+      closeToTray: true,
+    });
+    app.start();
+    window.close();
+    expect(window.isClosed()).toBe(false);
+    expect(window.isVisible()).toBe(false);
+    expect(window.log).toContain('close-vetoed');
+    // Tray + HUD keep the app alive — app is still started.
+    expect(app.isStarted).toBe(true);
+  });
+
+  it('stop() bypasses the interceptor and really closes', async () => {
+    const window = new MockWindowBackend();
+    const app = new DesktopApp({
+      window,
+      ipcTransport: new MockIpcTransport(),
+      trayBackend: new MockTrayBackend(),
+      closeToTray: true,
+    });
+    app.start();
+    await app.stop();
+    expect(window.isClosed()).toBe(true);
+    expect(app.isStarted).toBe(false);
+  });
+
+  it('a vetoed window can be shown again from the tray', () => {
+    const window = new MockWindowBackend();
+    const trayBackend = new MockTrayBackend();
+    const shown: string[] = [];
+    const app = new DesktopApp({
+      window,
+      ipcTransport: new MockIpcTransport(),
+      trayBackend,
+      closeToTray: true,
+      onTrayAction: (a) => shown.push(a),
+    });
+    app.start();
+    window.close();
+    expect(window.isVisible()).toBe(false);
+    trayBackend.click('show-window');
+    expect(shown).toEqual(['show-window']);
+    window.show();
+    expect(window.isVisible()).toBe(true);
+  });
+
+  it('without closeToTray, close() closes normally', () => {
+    const window = new MockWindowBackend();
+    const app = new DesktopApp({ window, ipcTransport: new MockIpcTransport() });
+    app.start();
+    window.close();
+    expect(window.isClosed()).toBe(true);
+  });
+});

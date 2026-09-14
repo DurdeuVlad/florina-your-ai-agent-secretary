@@ -34,6 +34,7 @@ import type {
  */
 export class ElectronWindowBackend implements WindowBackend {
   private win: BrowserWindow | null = null;
+  private closeInterceptor: (() => boolean) | null = null;
   private readonly handlers = new Map<WindowEvent, Set<WindowEventHandler>>();
 
   /**
@@ -70,6 +71,13 @@ export class ElectronWindowBackend implements WindowBackend {
     for (const event of this.handlers.keys()) {
       this.attachEvent(event);
     }
+    // Close veto (close-to-tray, issue #125): the interceptor runs before
+    // the window actually closes; returning false hides it instead.
+    this.win.on('close', (event) => {
+      if (this.closeInterceptor !== null && !this.closeInterceptor()) {
+        event.preventDefault();
+      }
+    });
   }
 
   /** The window's WebContents, once created (used by the IPC transport). */
@@ -87,6 +95,10 @@ export class ElectronWindowBackend implements WindowBackend {
 
   close(): void {
     this.win?.close();
+  }
+
+  setCloseInterceptor(handler: (() => boolean) | null): void {
+    this.closeInterceptor = handler;
   }
 
   on(event: WindowEvent, callback: WindowEventHandler): () => void {
