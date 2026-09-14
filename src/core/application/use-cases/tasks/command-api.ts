@@ -21,7 +21,7 @@
 import type { AdapterFidelityTier } from '../../../domain/enums.js';
 import { TaskState } from '../../../domain/enums.js';
 import type { TaskState as TaskStateType } from '../../../domain/enums.js';
-import type { Approval, Event, Session, Task } from '../../../domain/types.js';
+import type { Approval, ConversationMessage, Event, Session, Task } from '../../../domain/types.js';
 import type {
   AgentStartedEvent,
   AgentStoppedEvent,
@@ -49,6 +49,7 @@ import type { AgentRuntimeRegistryPort } from '../../ports/outbound/runtime-regi
 import type { DelegationService } from '../federation/delegation.js';
 import type {
   ApprovalRepositoryPort,
+  ChatMessageRepositoryPort,
   CompletionDigestRepositoryPort,
   EventJournalPort,
   SessionRepositoryPort,
@@ -490,6 +491,38 @@ export interface DelegateTaskCommand {
 }
 
 /**
+ * Append a user message to the single Secretary conversation (issue
+ * #157). The message is journaled in `chat_messages` (append-only,
+ * DEC-012) before the response returns — the stored history IS the
+ * FlorinaLoop's memory. Assistant turns are produced by the ChatService
+ * (issue #158); this command only commits the user half.
+ *
+ * Only `role: 'user'` is constructible from a command — remote surfaces
+ * can never inject `system` or `assistant` records.
+ */
+export interface ChatSendCommand {
+  readonly kind: 'chat-send';
+  readonly text: string;
+}
+
+/**
+ * Read the single conversation's visible history — messages appended
+ * after the latest `chat-clear` mark (issue #157). Resume is automatic:
+ * every surface calls this on connect and renders what comes back.
+ */
+export interface ChatReadCommand {
+  readonly kind: 'chat-read';
+}
+
+/**
+ * Record a clear mark on the conversation (issue #157). Journaled in
+ * `chat_clears`; rows are never deleted — the read window moves.
+ */
+export interface ChatClearCommand {
+  readonly kind: 'chat-clear';
+}
+
+/**
  * The canonical discriminated union of all commands (DEC-026).
  *
  * The `kind` field is the discriminant; {@link CommandApi.execute} switches
@@ -528,7 +561,10 @@ export type Command =
   | QueryPreferencesCommand
   | GetDigestCommand
   | CreatePrCommand
-  | DelegateTaskCommand;
+  | DelegateTaskCommand
+  | ChatSendCommand
+  | ChatReadCommand
+  | ChatClearCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -565,6 +601,9 @@ export const COMMAND_KINDS: readonly string[] = [
   'get-digest',
   'create-pr',
   'delegate-task',
+  'chat-send',
+  'chat-read',
+  'chat-clear',
 ] as const;
 
 /* ================================================================== *
@@ -864,6 +903,28 @@ export interface FleetResponse {
   readonly routingDecisions: readonly RoutingDecisionView[];
 }
 
+/** chat-send response (issue #157) — the journaled user message. */
+export interface ChatSendResponse {
+  readonly ok: boolean;
+  readonly message?: ConversationMessage;
+  readonly error?: string;
+}
+
+/** chat-read response (issue #157) — visible history + latest clear mark. */
+export interface ChatReadResponse {
+  readonly ok: boolean;
+  readonly messages: readonly ConversationMessage[];
+  /** ISO timestamp of the latest `chat-clear`, when one exists. */
+  readonly clearedAt?: string;
+  readonly error?: string;
+}
+
+/** chat-clear response (issue #157). */
+export interface ChatClearResponse {
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
 export type Response =
   | StartTaskResponse
   | EventsResponse
@@ -892,6 +953,9 @@ export type Response =
   | VoiceStateResponse
   | PreferenceResponse
   | DelegateTaskResponse
+  | ChatSendResponse
+  | ChatReadResponse
+  | ChatClearResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -1038,6 +1102,17 @@ export interface CommandApiDeps {
    * optimistically-available with no observations.
    */
   readonly quotaLedger?: QuotaLedger;
+  /**
+   * Secretary conversation store (issue #157). When wired, `chat-send` /
+   * `chat-read` / `chat-clear` are served; when absent they fail cleanly.
+   */
+  readonly chatStore?: ChatMessageRepositoryPort;
+  /**
+   * Sink for journaled chat messages (issue #157). The composition root
+   * broadcasts `{type:'chat:message', message}` to subscribed surfaces so
+   * every client sees appends regardless of which surface sent them.
+   */
+  readonly chatMessageSink?: (message: ConversationMessage) => void;
 }
 
 /* ================================================================== *
@@ -1085,6 +1160,8 @@ export class CommandApi {
   private readonly preferences?: PreferenceProfilePort;
   private readonly delegation?: DelegationService;
   private readonly quotaLedger?: QuotaLedger;
+  private readonly chatStore?: ChatMessageRepositoryPort;
+  private readonly chatMessageSink?: (message: ConversationMessage) => void;
 
   /** Whether a `shutdown` command has been received. */
   private shutdownRequested = false;
@@ -1111,6 +1188,8 @@ export class CommandApi {
     this.preferences = deps.preferences;
     this.delegation = deps.delegation;
     this.quotaLedger = deps.quotaLedger;
+    this.chatStore = deps.chatStore;
+    this.chatMessageSink = deps.chatMessageSink;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -1192,6 +1271,12 @@ export class CommandApi {
         return this.handleCreatePr(command);
       case 'delegate-task':
         return this.handleDelegateTask(command);
+      case 'chat-send':
+        return this.handleChatSend(command);
+      case 'chat-read':
+        return this.handleChatRead();
+      case 'chat-clear':
+        return this.handleChatClear();
       default:
         return {
           ok: false,
@@ -2171,6 +2256,56 @@ export class CommandApi {
       };
     }
     return { ok: false, status: 'error', error: result.error };
+  }
+
+  /**
+   * chat-send (issue #157): journal the user message, then notify
+   * subscribers through the message sink. Only `role: 'user'` is
+   * constructible here — clients can never inject system/assistant rows.
+   */
+  private async handleChatSend(cmd: ChatSendCommand): Promise<ChatSendResponse> {
+    if (this.chatStore === undefined) {
+      return { ok: false, error: 'chat store is not wired into this daemon' };
+    }
+    const text = cmd.text.trim();
+    if (text.length === 0) {
+      return { ok: false, error: 'text is required' };
+    }
+    const message: ConversationMessage = {
+      id: generateId('msg'),
+      role: 'user',
+      content: text,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      this.chatStore.append(message);
+    } catch (err) {
+      return { ok: false, error: `failed to journal message: ${errorMessage(err)}` };
+    }
+    this.chatMessageSink?.(message);
+    return { ok: true, message };
+  }
+
+  /** chat-read (issue #157): visible history + the latest clear mark. */
+  private async handleChatRead(): Promise<ChatReadResponse> {
+    if (this.chatStore === undefined) {
+      return { ok: false, messages: [], error: 'chat store is not wired into this daemon' };
+    }
+    const clearedAt = this.chatStore.latestClear();
+    return {
+      ok: true,
+      messages: this.chatStore.listVisible(),
+      ...(clearedAt !== null ? { clearedAt } : {}),
+    };
+  }
+
+  /** chat-clear (issue #157): journal a clear mark; rows are kept. */
+  private async handleChatClear(): Promise<ChatClearResponse> {
+    if (this.chatStore === undefined) {
+      return { ok: false, error: 'chat store is not wired into this daemon' };
+    }
+    this.chatStore.recordClear(new Date().toISOString());
+    return { ok: true };
   }
 }
 

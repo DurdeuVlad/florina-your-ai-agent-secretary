@@ -18,3 +18,4 @@ export { ContextCapsuleRepository } from './context-capsule.js';
 export { CompletionDigestRepository } from './completion-digest.js';
 export type { ListDigestsOptions } from './completion-digest.js';
 export * from './brief.js';
+export { ChatMessageRepository } from './chat-message.js';

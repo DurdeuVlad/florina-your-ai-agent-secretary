@@ -431,3 +431,47 @@ export interface UserCapsuleContent {
    */
   readonly preferenceNotes: readonly string[];
 }
+
+/* ------------------------------------------------------------------ *
+ * Conversation — the single Secretary chat thread (issue #157)
+ * ------------------------------------------------------------------ */
+
+/**
+ * A tool call recorded on an assistant chat message. Structurally
+ * identical to the model-port wire `ToolCall`; the domain keeps its own
+ * declaration so the hexagonal direction (`domain <- application`) holds —
+ * the use-case layer maps between the two verbatim.
+ */
+export interface ConversationToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * One persisted message in the single Secretary conversation.
+ *
+ * The `chat_messages` table is the conversation's append-only journal
+ * (same no-update/no-delete trigger enforcement as `events`, DEC-012) —
+ * the stored history IS the FlorinaLoop's memory, replayed verbatim into
+ * each turn. `toolCalls`/`toolCallId`/`name`/`isError` carry the
+ * tool-call records so assistant+tool turns round-trip losslessly.
+ *
+ * `role` mirrors the model-port wire roles; `system` is persisted for
+ * completeness but the daemon never accepts it from a client command —
+ * remote surfaces cannot inject system or assistant turns.
+ */
+export interface ConversationMessage {
+  readonly id: EntityId;
+  readonly role: 'system' | 'user' | 'assistant' | 'tool';
+  readonly content: string | null;
+  /** Tool calls the assistant requested on this message. */
+  readonly toolCalls?: readonly ConversationToolCall[];
+  /** For `role: 'tool'`: the call this message answers. */
+  readonly toolCallId?: string;
+  /** For `role: 'tool'`: the tool that produced the result. */
+  readonly name?: string;
+  /** For `role: 'tool'`: the call failed (still a valid result). */
+  readonly isError?: boolean;
+  readonly createdAt: ISODateString;
+}
