@@ -1905,3 +1905,101 @@ describe('voice session events → HUD state (issue #131)', () => {
     await app.disconnect();
   });
 });
+
+/* ================================================================== *
+ * Daemon lifecycle (issue #132)
+ * ================================================================== */
+
+describe('daemon lifecycle (issue #132)', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function fastApp(transport: MockIpcTransport, onDaemonMissing?: () => void): DesktopApp {
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      reconnectBaseDelayMs: 20,
+      reconnectMaxDelayMs: 80,
+      ...(onDaemonMissing !== undefined ? { onDaemonMissing } : {}),
+    });
+    app.start();
+    return app;
+  }
+
+  async function deadUrl(): Promise<string> {
+    const dead = new MockDaemonServer();
+    await dead.start();
+    const url = dead.url;
+    await dead.close();
+    return url;
+  }
+
+  it('fires onDaemonMissing once when the daemon is absent at launch', async () => {
+    const transport = new MockIpcTransport();
+    const onMissing = vi.fn();
+    const app = fastApp(transport, onMissing);
+    const url = await deadUrl();
+
+    await expect(app.connectToDaemon(url)).rejects.toThrow(DesktopConnectionError);
+    expect(onMissing).toHaveBeenCalledTimes(1);
+    await app.disconnect();
+  });
+
+  it('does not re-fire on subsequent failed retries — the spawn is once per intent', async () => {
+    const transport = new MockIpcTransport();
+    const onMissing = vi.fn();
+    const app = fastApp(transport, onMissing);
+    const url = await deadUrl();
+
+    await expect(app.connectToDaemon(url)).rejects.toThrow(DesktopConnectionError);
+    // Let several backoff retries run against the still-dead port.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(onMissing).toHaveBeenCalledTimes(1);
+    await app.disconnect();
+  });
+
+  it('does not fire on a successful connect', async () => {
+    const transport = new MockIpcTransport();
+    const onMissing = vi.fn();
+    const app = fastApp(transport, onMissing);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    await conn;
+    expect(onMissing).not.toHaveBeenCalled();
+    await app.disconnect();
+  });
+
+  it('does not fire on a mid-session drop — a crash is not "missing"', async () => {
+    const transport = new MockIpcTransport();
+    const onMissing = vi.fn();
+    const app = fastApp(transport, onMissing);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.on('message', () => {});
+    server.dropClient();
+    await waitForState(app, (s) => s.daemonStatus === 'reconnecting');
+    expect(onMissing).not.toHaveBeenCalled();
+    await app.disconnect();
+  });
+
+  it('a new connectToDaemon intent re-arms the hook', async () => {
+    const transport = new MockIpcTransport();
+    const onMissing = vi.fn();
+    const app = fastApp(transport, onMissing);
+    const url = await deadUrl();
+
+    await expect(app.connectToDaemon(url)).rejects.toThrow(DesktopConnectionError);
+    await expect(app.connectToDaemon(url)).rejects.toThrow(DesktopConnectionError);
+    expect(onMissing).toHaveBeenCalledTimes(2);
+    await app.disconnect();
+  });
+});

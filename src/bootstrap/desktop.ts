@@ -28,7 +28,8 @@ import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-b
 import { HotkeyManager, DEFAULT_HOTKEYS } from '../adapters/inbound/desktop/hotkeys.js';
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
-import { readLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
+import { ensureLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
+import { readDesktopSettings } from '../adapters/outbound/platform/desktop-settings.js';
 
 // Same `.env` convenience as the CLI (#116) — FLORINA_DAEMON_URL and friends
 // resolve from the project file when the caller didn't export them.
@@ -56,6 +57,21 @@ function runCli(action: 'start' | 'stop'): void {
   });
   child.unref();
 }
+
+/**
+ * Quit path (issue #132): stop the daemon too when the user's
+ * desktop-local setting asks for it (`stopDaemonOnQuit` in
+ * ~/.florina/desktop-settings.json). Default is to leave it running —
+ * other surfaces (CLI, voice) may still be attached.
+ */
+async function quitApp(): Promise<void> {
+  await desktopAppRef?.stop();
+  if (readDesktopSettings().stopDaemonOnQuit) runCli('stop');
+  app.quit();
+}
+
+/** Set once {@link DesktopApp} is constructed — used by {@link quitApp}. */
+let desktopAppRef: DesktopApp | null = null;
 
 async function main(): Promise<void> {
   await app.whenReady();
@@ -85,6 +101,10 @@ async function main(): Promise<void> {
     },
     trayBackend: new ElectronTrayBackend(),
     closeToTray: true,
+    // Daemon lifecycle (#132): no daemon at launch → spawn `florina
+    // start` once; the existing reconnect loop picks it up when it
+    // listens. Mid-session drops never reach this hook.
+    onDaemonMissing: () => runCli('start'),
     onTrayAction: (action: TrayAction) => {
       switch (action) {
         case 'show-window':
@@ -98,12 +118,14 @@ async function main(): Promise<void> {
           runCli('stop');
           break;
         case 'quit':
-          // Explicit quit: tear down cleanly (stop() bypasses close-to-tray).
-          void desktopApp.stop().finally(() => app.quit());
+          // Explicit quit: tear down cleanly (stop() bypasses
+          // close-to-tray), then honor stopDaemonOnQuit.
+          void quitApp();
           break;
       }
     },
   });
+  desktopAppRef = desktopApp;
 
   desktopApp.onStateChange((s) => hud.applyRendererState(s));
 
@@ -143,7 +165,11 @@ async function main(): Promise<void> {
   ipc.onMessage('command', (msg) => void desktopApp.handleRendererCommand(msg));
 
   try {
-    await desktopApp.connectToDaemon(DAEMON_URL, readLocalAuthToken());
+    // ensureLocalAuthToken (not read): on a first launch the file may
+    // not exist yet — provisioning it here means the daemon we might
+    // spawn (onDaemonMissing → florina start) adopts the same token
+    // instead of generating one we never send (#118 + #132).
+    await desktopApp.connectToDaemon(DAEMON_URL, ensureLocalAuthToken());
     desktopApp.subscribeToEvents();
     void desktopApp.refreshNow();
   } catch {
@@ -152,7 +178,7 @@ async function main(): Promise<void> {
 
   app.on('window-all-closed', () => {
     hud.stop();
-    void desktopApp.stop().finally(() => app.quit());
+    void quitApp();
   });
   app.on('activate', () => {
     // macOS dock click: re-show the existing window.

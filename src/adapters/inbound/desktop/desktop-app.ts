@@ -91,6 +91,15 @@ export interface DesktopAppOptions {
    * composition root wires this to `HudController.toggleLocalListening`.
    */
   readonly onPttToggle?: () => void;
+  /**
+   * Daemon lifecycle (issue #132): invoked once per {@link connectToDaemon}
+   * intent when the FIRST connection attempt fails — i.e. the daemon is
+   * absent at launch, not a mid-session drop (a crash shouldn't silently
+   * respawn the daemon; the reconnect loop plus the tray's "Start daemon"
+   * cover that). The composition root wires this to spawning
+   * `florina start`; the existing retry loop then picks the daemon up.
+   */
+  readonly onDaemonMissing?: () => void;
 }
 
 /**
@@ -140,6 +149,9 @@ export class DesktopApp {
   private readonly reconnectMaxDelayMs: number;
   private readonly closeToTray: boolean;
   private readonly onPttToggle?: () => void;
+  private readonly onDaemonMissing?: () => void;
+  /** True once the current connect intent has linked at least once (#132). */
+  private everConnected = false;
   private started = false;
   private stopping = false;
   /** Latest task list from the daemon (inspector column 1, #126). */
@@ -160,6 +172,7 @@ export class DesktopApp {
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
     this.closeToTray = options.closeToTray ?? false;
     this.onPttToggle = options.onPttToggle;
+    this.onDaemonMissing = options.onDaemonMissing;
     this.windowOptions = options.windowOptions ?? {};
     if (options.trayBackend !== undefined) {
       this.tray = new SystemTrayManager(options.trayBackend);
@@ -235,11 +248,16 @@ export class DesktopApp {
     this.authToken = authToken;
     this.wantsConnection = true;
     this.reconnectAttempt = 0;
+    this.everConnected = false;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     return this.openSocket().catch((err: unknown) => {
+      // First attempt failed and we've never linked on this intent —
+      // the daemon simply isn't running (issue #132). The host can
+      // spawn it; the retry loop below picks it up once it listens.
+      if (!this.everConnected) this.onDaemonMissing?.();
       this.scheduleReconnect();
       throw err;
     });
@@ -349,6 +367,7 @@ export class DesktopApp {
       return;
     }
     this.socket = socket;
+    this.everConnected = true;
     this.updateDaemonStatus('connected', { connected: true, error: undefined });
     this.wireDaemonSocket(socket);
     resolve();
