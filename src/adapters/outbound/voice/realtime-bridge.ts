@@ -248,6 +248,7 @@ export class RealtimeBridge implements RealtimeSessionPort {
     this.options = this.normalizeOptions(options ?? {});
     this.intentionalClose = false;
     this.reconnectAttempts = 0;
+    this.seenToolCalls.clear();
     this.setState(State.Connecting);
 
     const url = this.buildUrl();
