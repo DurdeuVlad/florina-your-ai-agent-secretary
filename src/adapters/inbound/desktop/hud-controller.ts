@@ -96,7 +96,17 @@ export class HudController {
    * @returns `true` when the HUD is now listening.
    */
   toggleLocalListening(): boolean {
-    this.localListening = !this.localListening;
+    return this.setLocalListening(!this.localListening);
+  }
+
+  /**
+   * Set the local-PTT flag to a known state. Used when a real audio
+   * pipeline (dictation / voice talk-turn) drives the HUD — the pill
+   * then mirrors actual capture instead of optimistic intent.
+   */
+  setLocalListening(listening: boolean): boolean {
+    if (this.localListening === listening) return this.localListening;
+    this.localListening = listening;
     this.refreshFromCurrent();
     return this.localListening;
   }

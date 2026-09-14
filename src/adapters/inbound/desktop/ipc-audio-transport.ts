@@ -73,9 +73,22 @@ export class IpcAudioTransport implements AudioTransport {
     this.ipc.sendToRenderer('dictation:audio-out', { stop: true });
   }
 
+  /**
+   * Session teardown — stops capture/playback but keeps the chunk listener
+   * subscribed. The transport proxies the renderer's mic for the app's
+   * lifetime and is shared between dictation and voice sessions: a
+   * `VoiceSessionManager.stop()` must not kill the pipeline for the next
+   * session (a closed listener silently dropped all audio, leaving the
+   * transcription session to commit an empty buffer and die).
+   */
   close(): void {
     this.stopCapture();
     this.stopPlayback();
+  }
+
+  /** App-level teardown — releases the IPC subscription entirely. */
+  dispose(): void {
+    this.close();
     this.unsubChunk();
   }
 }

@@ -159,6 +159,8 @@ export interface DaemonOptions {
     readonly baseUrl: string;
     readonly model: string;
     readonly apiKey?: string;
+    /** Passed to the connector — e.g. `'none'` for models that reject tools with reasoning. */
+    readonly reasoningEffort?: string;
   };
 }
 

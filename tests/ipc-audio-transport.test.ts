@@ -68,14 +68,28 @@ describe('IpcAudioTransport', () => {
     ]);
   });
 
-  it('close() stops capture, playback, and unsubscribes from audio chunks', () => {
+  it('close() stops capture and playback but keeps the chunk subscription (shared transport)', () => {
+    // A voice session's stop() calls close() — but dictation and voice
+    // share this transport for the app's lifetime, so the dictation:audio
+    // listener must survive session teardown.
     const received: AudioChunk[] = [];
     transport.startCapture((c) => received.push(c));
     transport.close();
-    ipc.emitToMain('dictation:audio', { pcm: 'AFTER' });
-    expect(received).toHaveLength(0);
     expect(ipc.toRenderer.filter((m) => m.channel === 'dictation:capture').at(-1)?.data).toEqual({
       capturing: false,
     });
+    // A new session can capture again after the previous one closed.
+    transport.startCapture((c) => received.push(c));
+    ipc.emitToMain('dictation:audio', { pcm: 'AFTER' });
+    expect(received).toHaveLength(1);
+  });
+
+  it('dispose() is the terminal teardown — unsubscribes from audio chunks', () => {
+    const received: AudioChunk[] = [];
+    transport.startCapture((c) => received.push(c));
+    transport.dispose();
+    transport.startCapture((c) => received.push(c));
+    ipc.emitToMain('dictation:audio', { pcm: 'AFTER' });
+    expect(received).toHaveLength(0);
   });
 });

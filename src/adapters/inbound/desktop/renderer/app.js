@@ -118,9 +118,11 @@ if (bridge) {
         toggleVoiceMode();
       }
     }
+    if (d.connecting) $('chatVoice').classList.add('connecting');
     if (typeof d.active === 'boolean') setVoiceMode(d.active);
     if (typeof d.listening === 'boolean') setMicListening(d.listening);
     if (d.suspended) toast('daemon lost — voice turn suspended');
+    if (typeof d.error === 'string') toast(d.error);
     if (typeof d.state === 'string' && d.state !== 'listening') setMicListening(false);
     if (typeof d.partial === 'string' && voiceOn) {
       $('dictation').hidden = false;
@@ -596,7 +598,8 @@ function insertDictated(text) {
 /** Flip voice-mode visuals + local flag (driven by voice:update). */
 function setVoiceMode(on) {
   voiceOn = on;
-  $('chatVoice').classList.toggle('listening', on);
+  $('chatVoice').classList.remove('connecting');
+  $('chatVoice').classList.toggle('on', on);
   $('chatMic').title = on
     ? 'Talk — a spoken turn the Secretary answers'
     : 'Dictate — speech becomes editable text here';
@@ -611,7 +614,10 @@ function setVoiceMode(on) {
 function toggleVoiceMode() {
   if (!bridge) return;
   void bridge.command(voiceOn ? 'voicemode:stop' : 'voicemode:start').then((res) => {
-    if (res && res.ok === false) toast(res.error || 'voice mode failed');
+    if (res && res.ok === false) {
+      $('chatVoice').classList.remove('connecting');
+      toast(res.error || 'voice mode failed');
+    }
   });
 }
 

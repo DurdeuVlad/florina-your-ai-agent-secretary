@@ -123,6 +123,9 @@ export class DaemonRunner {
             ...(typeof process.env['FLORINA_LITELLM_KEY'] === 'string'
               ? { apiKey: process.env['FLORINA_LITELLM_KEY']! }
               : {}),
+            ...(typeof process.env['FLORINA_REASONING_EFFORT'] === 'string'
+              ? { reasoningEffort: process.env['FLORINA_REASONING_EFFORT']! }
+              : {}),
           }
         : undefined;
 
