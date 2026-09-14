@@ -32,6 +32,7 @@ export const IPC_CHANNELS = [
   'prefs:update',
   'ideas:update',
   'secretary:update',
+  'chat:update',
   'hud:state',
   'command',
   'command:result',

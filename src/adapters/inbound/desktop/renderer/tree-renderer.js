@@ -86,6 +86,15 @@ const TAG_CLASS = {
   ClearAllButton: null,
   ActionButton: null,
   Icon: 'icon',
+  /* chat screen (issue #160) — the single Secretary thread */
+  ChatView: 'chatlist',
+  ChatMsg: 'msg',
+  ChatWho: 'who',
+  ToolRow: 'toolrow',
+  ToolStatus: null, // <span>
+  ClearRow: 'clearrow',
+  WorkRow: 'workrow',
+  WorkDot: 'dot wait',
 };
 
 function propsToClass(tag, props) {
@@ -109,7 +118,13 @@ function renderNode(node) {
   const { tag, props, children } = node;
   const isButton = tag === 'Button' || tag === 'ClearAllButton' || tag === 'ActionButton';
   const el = document.createElement(
-    isButton ? 'button' : tag === 'Icon' ? 'span' : tag === 'InspRowTitle' ? 'b' : 'div',
+    isButton
+      ? 'button'
+      : tag === 'Icon' || tag === 'ToolStatus' || tag === 'WorkDot'
+        ? 'span'
+        : tag === 'InspRowTitle'
+          ? 'b'
+          : 'div',
   );
 
   const cls = propsToClass(tag, props || {});
