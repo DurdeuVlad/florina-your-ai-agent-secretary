@@ -23,8 +23,10 @@
  * exhaustion surfaces as JSON-RPC errors or `AgentFailed`, which daemon
  * wiring feeds to {@link reportExhaustion} (issue #71).
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+
+import { spawnCli } from './spawn-cli.js';
 
 import { AdapterFidelityTier } from '../../../core/domain/enums.js';
 import type { SupervisorEvent } from '../../../core/domain/events.js';
@@ -52,7 +54,7 @@ export type AcpSpawner = (command: string, args: readonly string[], cwd: string)
 
 /** Default spawner: child_process with newline-delimited stdout framing. */
 export const nodeAcpSpawner: AcpSpawner = (command, args, cwd) => {
-  const child: ChildProcess = spawn(command, [...args], {
+  const child: ChildProcess = spawnCli(command, args, {
     cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
   });

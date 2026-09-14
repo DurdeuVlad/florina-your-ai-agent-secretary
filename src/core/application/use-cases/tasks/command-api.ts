@@ -48,6 +48,7 @@ import type {
 import type { AgentRuntimeRegistryPort } from '../../ports/outbound/runtime-registry.js';
 import type { DelegationService } from '../federation/delegation.js';
 import type {
+  AgentRepositoryPort,
   ApprovalRepositoryPort,
   ChatMessageRepositoryPort,
   CompletionDigestRepositoryPort,
@@ -1058,6 +1059,13 @@ export type ApprovalStore = Pick<ApprovalRepositoryPort, 'getById' | 'update'>;
 export type SessionStore = Pick<SessionRepositoryPort, 'insert' | 'delete'>;
 
 /**
+ * Minimal agent-store surface used by `start-task` to materialize the
+ * `agents` row that `sessions.agent_id` foreign-keys into, when the
+ * resolved adapter id has no row yet.
+ */
+export type AgentStore = Pick<AgentRepositoryPort, 'insert' | 'getById'>;
+
+/**
  * Dependencies injected into {@link CommandApi}.
  *
  * The six core dependencies match the issue specification. `taskStore`,
@@ -1076,6 +1084,13 @@ export interface CommandApiDeps {
   readonly taskStore: TaskStore;
   readonly approvalStore: ApprovalStore;
   readonly sessionStore: SessionStore;
+  /**
+   * Optional agent store. When wired, `start-task` materializes an
+   * `agents` row for the resolved adapter id on first use so the
+   * `sessions.agent_id` FK is satisfied; when absent, adapters must be
+   * pre-seeded (test/demo fixtures do this).
+   */
+  readonly agentStore?: AgentStore;
   /** Optional callback invoked when the `shutdown` command is received. */
   readonly onShutdown?: () => void;
   /**
@@ -1190,6 +1205,7 @@ export class CommandApi {
   private readonly taskStore: TaskStore;
   private readonly approvalStore: ApprovalStore;
   private readonly sessionStore: SessionStore;
+  private readonly agentStore?: AgentStore;
   private readonly onShutdown?: () => void;
   private readonly adapterRegistry?: AgentRuntimeRegistryPort;
   private readonly sessionManager?: SessionManager;
@@ -1219,6 +1235,7 @@ export class CommandApi {
     this.taskStore = deps.taskStore;
     this.approvalStore = deps.approvalStore;
     this.sessionStore = deps.sessionStore;
+    this.agentStore = deps.agentStore;
     this.onShutdown = deps.onShutdown;
     this.adapterRegistry = deps.adapterRegistry;
     this.sessionManager = deps.sessionManager;
@@ -1418,10 +1435,12 @@ export class CommandApi {
     // If the adapter fails to start, no DB state has been mutated, so the
     // task remains in its original state and the caller can retry with a
     // different agent or after fixing the adapter (issue #35 audit fix).
+    let adapterTier: AdapterFidelityTier = 'E';
     if (this.adapterRegistry && this.sessionManager) {
       let adapter: AgentRuntimePort;
       try {
         adapter = this.adapterRegistry.create(cmd.agentId);
+        adapterTier = adapter.fidelityTier;
       } catch (err) {
         return {
           ok: false,
@@ -1454,6 +1473,21 @@ export class CommandApi {
           error: sessionResult.error ?? 'Failed to start adapter session',
         };
       }
+    }
+
+    // --- Materialize the agents row for the resolved adapter id ---
+    // sessions.agent_id foreign-keys into agents.id; adapters registered
+    // in the runtime registry have no pre-seeded row, so first use
+    // creates one with the adapter's declared fidelity tier.
+    if (this.agentStore && this.agentStore.getById(cmd.agentId) === null) {
+      this.agentStore.insert({
+        id: cmd.agentId,
+        name: cmd.agentId,
+        provider: cmd.agentId,
+        fidelityTier: adapterTier,
+        runtime: { kind: 'cli' },
+        createdAt: new Date().toISOString(),
+      });
     }
 
     // --- Persist the session row ---

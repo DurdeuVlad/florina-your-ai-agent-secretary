@@ -425,10 +425,10 @@ export class ClaudeHooksAdapter extends BaseAdapter {
  * injected spawner (i.e. in production, not in tests).
  */
 async function createNodeCliSpawner(): Promise<ClaudeCliSpawner> {
-  const { spawn } = await import('node:child_process');
+  const { spawnCli } = await import('./spawn-cli.js');
   return {
     spawn(options: ClaudeCliSpawnOptions): ClaudeCliProcess {
-      const proc = spawn(options.file, options.args, {
+      const proc = spawnCli(options.file, options.args, {
         cwd: options.cwd,
         env: options.env,
         stdio: ['ignore', 'pipe', 'pipe'],

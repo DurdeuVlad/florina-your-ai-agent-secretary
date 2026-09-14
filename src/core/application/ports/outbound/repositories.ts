@@ -10,6 +10,7 @@
  * proceeds.
  */
 import type {
+  Agent,
   Approval,
   AttentionItem as DomainAttentionItem,
   ContextCapsule,
@@ -75,6 +76,12 @@ export interface SessionRepositoryPort {
   listByTask(taskId: EntityId): Session[];
   update(session: Session): void;
   delete(id: EntityId): void;
+}
+
+/** Agent (provider runtime) store — backs the sessions.agent_id FK. */
+export interface AgentRepositoryPort {
+  insert(agent: Agent): void;
+  getById(id: EntityId): Agent | null;
 }
 
 /** Context Capsule store (DEC-020). */

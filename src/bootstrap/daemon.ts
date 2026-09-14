@@ -28,6 +28,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import {
+  AgentRepository,
   ApprovalRepository,
   AttentionItemRepository,
   CapabilityGrantRepository,
@@ -45,6 +46,7 @@ import {
 import { EventBus } from '../adapters/outbound/events/in-memory-event-bus.js';
 import { GitWorktreeAdapter } from '../adapters/outbound/git/worktree-manager.js';
 import { AdapterRegistry } from '../adapters/outbound/agents/registry.js';
+import { attachLocalAgentProviders, type LocalProviderAttachment } from './agent-providers.js';
 import { StubAdapter, STUB_ADAPTER_ID } from '../adapters/outbound/agents/stub-adapter.js';
 import { EventStream } from '../adapters/inbound/websocket/event-stream.js';
 import {
@@ -213,6 +215,7 @@ export class FlorinaDaemon extends EventEmitter {
   private worktreeManager: GitWorktreeAdapter | null = null;
   private taskStateMachine: TaskStateMachine | null = null;
   private adapterRegistry: AdapterRegistry | null = null;
+  private localProviders: LocalProviderAttachment | null = null;
   private sessionManager: SessionManager | null = null;
   private quotaLedger: QuotaLedger | null = null;
   private preferenceStore: PreferenceProfileStore | null = null;
@@ -451,6 +454,13 @@ export class FlorinaDaemon extends EventEmitter {
       // the SessionManager is the sole event publisher (no duplicates).
       this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter());
 
+      // Local provider attachment: probe installed provider CLIs (claude,
+      // codex, devin, gemini, agy) and register their real adapters so
+      // tasks can route to them. Skipped providers are logged to the
+      // journal-free stderr — daemon stdio is detached; the fleet view
+      // (adapterRegistry.list()) is the user-visible surface.
+      this.localProviders = await attachLocalAgentProviders(this.adapterRegistry);
+
       // Federated capacity pools (DEC-036, issue #78): each configured
       // child daemon registers under its `provider@host` id — the router
       // treats it as ordinary provider capacity.
@@ -579,6 +589,7 @@ export class FlorinaDaemon extends EventEmitter {
         taskStore: repos.tasks,
         approvalStore: repos.approvals,
         sessionStore: repos.sessions,
+        agentStore: repos.agents,
         adapterRegistry: this.adapterRegistry,
         sessionManager: this.sessionManager,
         completionDigestRepository: repos.completionDigests,
@@ -749,6 +760,7 @@ export class FlorinaDaemon extends EventEmitter {
       approvals: new ApprovalRepository(raw),
       deliverables: new DeliverableRepository(raw),
       sessions: new SessionRepository(raw),
+      agents: new AgentRepository(raw),
       decisions: new DecisionRepository(raw),
       capsules: new ContextCapsuleRepository(raw),
       completionDigests: new CompletionDigestRepository(raw),
@@ -868,6 +880,9 @@ export class FlorinaDaemon extends EventEmitter {
       await this.sessionManager.stopAll();
       this.sessionManager = null;
     }
+    // Kill provider helper processes (codex app-server) after sessions stop.
+    this.localProviders?.dispose();
+    this.localProviders = null;
     if (this.attentionAggregator) {
       this.attentionAggregator.stop();
       this.attentionAggregator = null;

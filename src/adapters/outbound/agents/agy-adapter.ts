@@ -18,8 +18,10 @@
  * common event vocabulary (`system`/`assistant`/`tool_use`/`tool_result`/
  * `result`/`error`) and ignores shapes it does not know.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+
+import { spawnCli } from './spawn-cli.js';
 
 import { AdapterFidelityTier } from '../../../core/domain/enums.js';
 import type { SupervisorEvent } from '../../../core/domain/events.js';
@@ -51,7 +53,7 @@ export type AgySpawner = (command: string, args: readonly string[], cwd: string)
 /** Default spawner: plain child_process. Swap for a PTY spawner to work
  * around the non-TTY stdout bug (upstream #76). */
 export const nodeAgySpawner: AgySpawner = (command, args, cwd) => {
-  const child: ChildProcess = spawn(command, [...args], {
+  const child: ChildProcess = spawnCli(command, args, {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
