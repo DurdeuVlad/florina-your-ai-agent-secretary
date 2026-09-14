@@ -46,7 +46,9 @@ function statusWord(task: TaskSnapshot): string {
   }
 }
 
-function renderTaskRow(task: TaskSnapshot): RenderTree {
+/** Shared task-row rendering (objective · provider chip · status word) —
+ * reused by the chat activity drawer (#181) so the two surfaces agree. */
+export function renderTaskRow(task: TaskSnapshot): RenderTree {
   const word = statusWord(task);
   const done = DONE_STATES.has(task.state);
   const provider = task.agentIds[0] ?? '';

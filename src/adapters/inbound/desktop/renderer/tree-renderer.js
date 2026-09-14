@@ -95,6 +95,8 @@ const TAG_CLASS = {
   ClearRow: 'clearrow',
   WorkRow: 'workrow',
   WorkDot: 'dot wait',
+  /* chat activity/diff drawer (issue #181) */
+  ActivityDrawerList: null,
 };
 
 function propsToClass(tag, props) {
