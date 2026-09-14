@@ -61,6 +61,14 @@ if (bridge) {
   /* secretary screen (issue #130) */
   bridge.on('secretary:update', (tree) => mount(tree, $('secretary')));
 
+  /* chat screen (issue #160): the message list is a RenderTree; the
+     composer is static DOM so re-mounts never drop a draft. */
+  bridge.on('chat:update', (tree) => {
+    mount(tree, $('chatmsgs'));
+    const wrap = $('chatwrap');
+    if (wrap) wrap.scrollTop = wrap.scrollHeight;
+  });
+
   /* PTT pill in the header — same states as the old overlay (issue #123) */
   bridge.on('hud:state', renderHud);
 }
@@ -377,6 +385,47 @@ function openIdeaCompiler(card, ideaId) {
   project.focus();
 }
 
+/* ---------- chat composer (issue #160) ---------- */
+
+/** Wrap a chat command payload in the chatcmd: wire verb. */
+function chatCmd(payload) {
+  return 'chatcmd:' + encodeURIComponent(JSON.stringify(payload));
+}
+
+/**
+ * Send the composer text — journaled by the daemon, echoed back as a
+ * `chat:message` push (no optimistic bubble, DG-01 §3.9). The input
+ * clears on accept; an in-flight turn or daemon error toasts honestly.
+ */
+function sendChat() {
+  const input = $('chatInput');
+  const text = input.value.trim();
+  if (!text || !bridge) return;
+  void bridge.command(chatCmd({ kind: 'chat-send', text })).then((res) => {
+    if (res && res.ok === false) {
+      toast(res.error || 'send failed');
+      return;
+    }
+    input.value = '';
+    input.focus();
+  });
+}
+
+$('chatSend').addEventListener('click', sendChat);
+$('chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+});
+$('chatClear').addEventListener('click', () => {
+  if (!bridge) return;
+  if (!window.confirm('Clear the visible conversation? History stays in the journal.')) return;
+  void bridge.command(chatCmd({ kind: 'chat-clear' })).then((res) => {
+    if (res && res.ok === false) toast(res.error || 'clear failed');
+  });
+});
+
 function toast(msg) {
   const t = $('toast');
   t.textContent = msg;
@@ -388,6 +437,7 @@ function toast(msg) {
 /* ---------- view navigation ---------- */
 
 const TITLES = {
+  chat: ['Chat', 'one conversation with your Secretary'],
   inbox: ['Attention Inbox', 'what needs you right now'],
   tasks: ['Tasks', 'delegated work and its state'],
   fleet: ['Fleet', 'provider capacity and routing'],
@@ -396,7 +446,7 @@ const TITLES = {
   secretary: ['Secretary', 'her plan, research, and memory — context health is first-class'],
 };
 
-let currentView = 'inbox';
+let currentView = 'chat';
 
 function showView(name) {
   currentView = name;
@@ -408,6 +458,8 @@ function showView(name) {
     .forEach((x) => x.classList.toggle('active', x.id === 'v-' + name));
   $('viewTitle').textContent = TITLES[name][0];
   $('viewSub').textContent = TITLES[name][1];
+  $('chatClear').style.display = name === 'chat' ? '' : 'none';
+  if (name === 'chat') $('chatInput').focus();
 }
 
 document
@@ -482,7 +534,15 @@ document.addEventListener('keydown', (e) => {
     return;
   if (gPending) {
     gPending = false;
-    const map = { i: 'inbox', t: 'tasks', f: 'fleet', d: 'ideas', p: 'prefs', s: 'secretary' };
+    const map = {
+      c: 'chat',
+      i: 'inbox',
+      t: 'tasks',
+      f: 'fleet',
+      d: 'ideas',
+      p: 'prefs',
+      s: 'secretary',
+    };
     if (map[e.key]) showView(map[e.key]);
     return;
   }

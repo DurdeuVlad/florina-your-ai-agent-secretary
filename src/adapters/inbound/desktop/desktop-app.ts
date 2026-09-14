@@ -21,7 +21,7 @@ import type {
   AttentionItemSnapshot,
   TaskSnapshot,
 } from '../../../core/application/use-cases/tasks/command-api.js';
-import type { Event } from '../../../core/domain/types.js';
+import type { ConversationMessage, Event } from '../../../core/domain/types.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
 import { renderHomeView } from './views/home-view.js';
@@ -30,6 +30,7 @@ import { renderFleetScreen } from './views/fleet-screen.js';
 import { renderPrefsScreen } from './views/prefs-screen.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
+import { renderChatScreen } from './views/chat-screen.js';
 import { renderSecretaryScreen } from './views/secretary-screen.js';
 import type { SecretaryResponse } from '../../../core/application/use-cases/tasks/command-api.js';
 import type {
@@ -162,6 +163,11 @@ export class DesktopApp {
   private inspectorEvents: readonly Event[] = [];
   /** Open ledger reader on the ideas screen (#129), if any. */
   private ideaReader: { ideaId: string; title: string; body: string } | null = null;
+  /** Single Secretary conversation mirror (issue #160). */
+  private chatMessages: ConversationMessage[] = [];
+  private chatClearedAt: string | undefined;
+  private chatWorking = false;
+  private chatTool: string | undefined;
 
   constructor(options: DesktopAppOptions) {
     this.window = options.window;
@@ -646,6 +652,46 @@ export class DesktopApp {
         this.bridge.sendToRenderer('voice:state', record);
         break;
       }
+      case 'chat:message': {
+        // Journaled conversation append (issue #160). The sender's own
+        // message arrives here AND in the chat-send response — dedupe by
+        // id so the bubble renders once regardless of ordering.
+        const message = record['message'] as ConversationMessage | undefined;
+        if (message !== undefined && !this.chatMessages.some((m) => m.id === message.id)) {
+          this.chatMessages.push(message);
+        }
+        // An assistant row only journals when a turn ends (or fails) —
+        // the loop emits no 'completed' event on the failure path.
+        if (message?.role === 'assistant') {
+          this.chatWorking = false;
+          this.chatTool = undefined;
+        }
+        this.pushChat();
+        break;
+      }
+      case 'chat:event': {
+        // Ephemeral loop progress (issue #158 → #160): drives only the
+        // working row — never the message list (journaled rows do that).
+        const event = record['event'] as { kind?: string; name?: string } | undefined;
+        switch (event?.kind) {
+          case 'iteration':
+            this.chatWorking = true;
+            break;
+          case 'tool_call':
+            this.chatWorking = true;
+            this.chatTool = event.name;
+            break;
+          case 'completed':
+          case 'iteration_limit':
+            this.chatWorking = false;
+            this.chatTool = undefined;
+            break;
+          default:
+            break;
+        }
+        this.pushChat();
+        break;
+      }
       case 'event': {
         // Raw SupervisorEvent from the daemon's subscribe stream. Events are
         // the change signal: rebuild the inbox view (debounced) so the
@@ -706,6 +752,20 @@ export class DesktopApp {
       error: e instanceof Error ? e.message : String(e),
     }));
     this.bridge.sendToRenderer('command:result', { id: m.id, res });
+    // Chat (issue #160): a started turn shows the working row right
+    // away; a clear wipes the local mirror — the journaled rows stay
+    // on the daemon side, the read window just moved.
+    if (res.ok && cmd.kind === 'chat-send') {
+      this.chatWorking = 'turn' in res && res.turn === 'started';
+      if (this.chatWorking) this.pushChat();
+    }
+    if (res.ok && cmd.kind === 'chat-clear') {
+      this.chatMessages = [];
+      this.chatClearedAt = new Date().toISOString();
+      this.chatWorking = false;
+      this.chatTool = undefined;
+      this.pushChat();
+    }
     // Committed mutations re-pull their view data so the screen reflects
     // the journaled change immediately (#128 preferences, #129 ideas,
     // #130 memory-write gate).
@@ -758,6 +818,21 @@ export class DesktopApp {
         return { error: 'ideacmd payload must be an idea/brief command' };
       } catch {
         return { error: 'malformed ideacmd payload' };
+      }
+    }
+    // `chatcmd:<uri-encoded JSON>` — chat composer sends/clears (issue
+    // #160). Whitelisted to the chat command kinds; the renderer can't
+    // mint arbitrary commands through this verb (DEC-011).
+    if (cmd.startsWith('chatcmd:')) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cmd.slice('chatcmd:'.length))) as unknown;
+        const kind = (parsed as { kind?: unknown }).kind;
+        if (kind === 'chat-send' || kind === 'chat-clear') {
+          return parsed as Command;
+        }
+        return { error: 'chatcmd payload must be a chat-send or chat-clear command' };
+      } catch {
+        return { error: 'malformed chatcmd payload' };
       }
     }
     // `memwrite:confirm:<id>` / `memwrite:reject:<id>` — memory-write
@@ -917,6 +992,19 @@ export class DesktopApp {
     );
   }
 
+  /** Render and push the chat message list on the `chat:update` channel. */
+  private pushChat(): void {
+    this.bridge.sendToRenderer(
+      'chat:update',
+      renderChatScreen({
+        messages: this.chatMessages,
+        working: this.chatWorking,
+        ...(this.chatTool !== undefined ? { workingTool: this.chatTool } : {}),
+        ...(this.chatClearedAt !== undefined ? { clearedAt: this.chatClearedAt } : {}),
+      }),
+    );
+  }
+
   /**
    * Re-query the daemon and push fresh RenderTrees to the renderer.
    * Debounced because daemon events can arrive in bursts.
@@ -945,7 +1033,7 @@ export class DesktopApp {
     // A dropped socket mid-refresh is normal (reconnect races) — treat a
     // failed send as "no answer" and keep the last known state rather than
     // blanking the renderer or throwing an unhandled rejection.
-    const [inboxRes, tasksRes, fleetRes, prefsRes, ideasRes, briefsRes, secretaryRes] =
+    const [inboxRes, tasksRes, fleetRes, prefsRes, ideasRes, briefsRes, secretaryRes, chatRes] =
       await Promise.all([
         this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
         this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
@@ -954,6 +1042,7 @@ export class DesktopApp {
         this.sendCommand({ kind: 'idea-list' }).catch(() => null),
         this.sendCommand({ kind: 'brief-list' }).catch(() => null),
         this.sendCommand({ kind: 'query-secretary' }).catch(() => null),
+        this.sendCommand({ kind: 'chat-read' }).catch(() => null),
       ]);
     if (
       inboxRes === null &&
@@ -962,7 +1051,8 @@ export class DesktopApp {
       prefsRes === null &&
       ideasRes === null &&
       briefsRes === null &&
-      secretaryRes === null
+      secretaryRes === null &&
+      chatRes === null
     ) {
       return; // offline — keep last known
     }
@@ -1009,6 +1099,16 @@ export class DesktopApp {
         'secretary:update',
         renderSecretaryScreen(secretaryRes as SecretaryResponse),
       );
+    }
+    // Chat screen (#160): rehydrate the single conversation — resume is
+    // automatic on every (re)connect. A daemon restart loses any
+    // in-flight turn, so the working row resets here.
+    if (chatRes !== null && chatRes.ok && 'messages' in chatRes) {
+      this.chatMessages = [...chatRes.messages];
+      this.chatClearedAt = chatRes.clearedAt;
+      this.chatWorking = false;
+      this.chatTool = undefined;
+      this.pushChat();
     }
   }
 }

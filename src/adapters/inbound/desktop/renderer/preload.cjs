@@ -26,6 +26,7 @@ const PUSH_CHANNELS = new Set([
   'prefs:update',
   'ideas:update',
   'secretary:update',
+  'chat:update',
   'hud:state',
   'command:result',
 ]);

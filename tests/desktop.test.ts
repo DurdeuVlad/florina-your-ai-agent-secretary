@@ -282,6 +282,7 @@ describe('IpcBridge', () => {
       'prefs:update',
       'ideas:update',
       'secretary:update',
+      'chat:update',
       'hud:state',
       'command',
       'command:result',
@@ -2000,6 +2001,259 @@ describe('daemon lifecycle (issue #132)', () => {
     await expect(app.connectToDaemon(url)).rejects.toThrow(DesktopConnectionError);
     await expect(app.connectToDaemon(url)).rejects.toThrow(DesktopConnectionError);
     expect(onMissing).toHaveBeenCalledTimes(2);
+    await app.disconnect();
+  });
+});
+
+/* ================================================================== *
+ * Chat screen (issue #160) — chat:message/chat:event pushes, chatcmd:
+ * verbs, and chat-read hydration on refresh.
+ * ================================================================== */
+
+describe('chat screen wiring', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function chatApp(transport: MockIpcTransport): DesktopApp {
+    const app = new DesktopApp({ window: new MockWindowBackend(), ipcTransport: transport });
+    app.start();
+    return app;
+  }
+
+  const userMsg = (id: string, content: string) => ({
+    id,
+    role: 'user',
+    content,
+    createdAt: '2026-01-01T00:00:00Z',
+  });
+
+  function lastChatTree(transport: MockIpcTransport): string {
+    const pushes = transport.toRenderer.filter((m) => m.channel === 'chat:update');
+    return JSON.stringify(pushes[pushes.length - 1]?.data ?? {});
+  }
+
+  it('chat:message pushes append to the mirrored history and push a tree', async () => {
+    const transport = new MockIpcTransport();
+    const app = chatApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    socket.send(
+      JSON.stringify({ type: 'chat:message', message: userMsg('m1', 'hello secretary') }),
+    );
+    socket.send(
+      JSON.stringify({
+        type: 'chat:message',
+        message: {
+          id: 'm2',
+          role: 'assistant',
+          content: 'hi there',
+          createdAt: '2026-01-01T00:00:01Z',
+        },
+      }),
+    );
+    // The same message pushed twice must not double-render.
+    socket.send(
+      JSON.stringify({ type: 'chat:message', message: userMsg('m1', 'hello secretary') }),
+    );
+
+    await waitFor(
+      () => transport.toRenderer.filter((m) => m.channel === 'chat:update').length >= 3,
+    );
+    const text = lastChatTree(transport);
+    expect(text.match(/hello secretary/g)).toHaveLength(1);
+    expect(text).toContain('hi there');
+    await app.disconnect();
+  });
+
+  it('chat:event tool_call sets the working row; completed clears it', async () => {
+    const transport = new MockIpcTransport();
+    const app = chatApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    socket.send(
+      JSON.stringify({ type: 'chat:message', message: userMsg('m1', 'check the fleet') }),
+    );
+    socket.send(
+      JSON.stringify({
+        type: 'chat:event',
+        event: {
+          kind: 'tool_call',
+          iteration: 1,
+          name: 'query_fleet',
+          callId: 'c1',
+          arguments: {},
+        },
+      }),
+    );
+    await waitFor(() => lastChatTree(transport).includes('query_fleet'));
+    expect(lastChatTree(transport)).toContain('Secretary is working');
+
+    socket.send(
+      JSON.stringify({ type: 'chat:event', event: { kind: 'completed', iterations: 2 } }),
+    );
+    socket.send(
+      JSON.stringify({
+        type: 'chat:message',
+        message: {
+          id: 'm2',
+          role: 'assistant',
+          content: 'codex has headroom',
+          createdAt: '2026-01-01T00:00:01Z',
+        },
+      }),
+    );
+    await waitFor(() => lastChatTree(transport).includes('codex has headroom'));
+    expect(lastChatTree(transport)).not.toContain('Secretary is working');
+    await app.disconnect();
+  });
+
+  it('a journaled assistant error message clears the working row (no completed event)', async () => {
+    const transport = new MockIpcTransport();
+    const app = chatApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    socket.send(JSON.stringify({ type: 'chat:event', event: { kind: 'iteration', iteration: 1 } }));
+    await waitFor(() => lastChatTree(transport).includes('working'));
+    socket.send(
+      JSON.stringify({
+        type: 'chat:message',
+        message: {
+          id: 'm9',
+          role: 'assistant',
+          content: "I couldn't complete that turn — model unreachable",
+          createdAt: '2026-01-01T00:00:02Z',
+        },
+      }),
+    );
+    await waitFor(() => !lastChatTree(transport).includes('Secretary is working'));
+    await app.disconnect();
+  });
+
+  it('chatcmd:chat-send forwards a typed command and arms the working row', async () => {
+    const transport = new MockIpcTransport();
+    const app = chatApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'chat-send') {
+        expect(cmd['text']).toBe('ship it');
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            message: userMsg('m1', 'ship it'),
+            turn: 'started',
+          }),
+        );
+      }
+    });
+
+    const verb =
+      'chatcmd:' + encodeURIComponent(JSON.stringify({ kind: 'chat-send', text: 'ship it' }));
+    await app.handleRendererCommand({ id: 10, cmd: verb });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 10,
+      res: { ok: true, message: userMsg('m1', 'ship it'), turn: 'started' },
+    });
+    // Working row armed immediately — before any chat:event arrives.
+    expect(lastChatTree(transport)).toContain('Secretary is working');
+    await app.disconnect();
+  });
+
+  it('chatcmd rejects non-chat command kinds', async () => {
+    const transport = new MockIpcTransport();
+    const app = chatApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    let sawCommand = false;
+    socket.on('message', () => {
+      sawCommand = true;
+    });
+    const verb = 'chatcmd:' + encodeURIComponent(JSON.stringify({ kind: 'shutdown' }));
+    await app.handleRendererCommand({ id: 11, cmd: verb });
+    const result = transport.toRenderer.find((m) => m.channel === 'command:result');
+    expect((result?.data as { res: { ok: boolean } }).res.ok).toBe(false);
+    expect(sawCommand).toBe(false);
+    await app.disconnect();
+  });
+
+  it('chatcmd:chat-clear empties the mirrored history', async () => {
+    const transport = new MockIpcTransport();
+    const app = chatApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    socket.send(JSON.stringify({ type: 'chat:message', message: userMsg('m1', 'old thread') }));
+    await waitFor(() => lastChatTree(transport).includes('old thread'));
+
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'chat-clear') {
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    await app.handleRendererCommand({
+      id: 12,
+      cmd: 'chatcmd:' + encodeURIComponent(JSON.stringify({ kind: 'chat-clear' })),
+    });
+    const text = lastChatTree(transport);
+    expect(text).not.toContain('old thread');
+    expect(text).toContain('history cleared');
+    await app.disconnect();
+  });
+
+  it('refresh seeds the conversation from chat-read (resume on reconnect)', async () => {
+    const transport = new MockIpcTransport();
+    const app = chatApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'chat-read') {
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            messages: [
+              userMsg('m1', 'earlier context'),
+              {
+                id: 'm2',
+                role: 'assistant',
+                content: 'still here',
+                createdAt: '2026-01-01T00:00:01Z',
+              },
+            ],
+          }),
+        );
+      } else {
+        socket.send(JSON.stringify({ ok: true, items: [], tasks: [] }));
+      }
+    });
+
+    await app.refreshNow();
+    await waitFor(() => transport.toRenderer.some((m) => m.channel === 'chat:update'));
+    const text = lastChatTree(transport);
+    expect(text).toContain('earlier context');
+    expect(text).toContain('still here');
     await app.disconnect();
   });
 });
