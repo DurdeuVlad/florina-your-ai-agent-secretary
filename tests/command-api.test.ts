@@ -20,6 +20,8 @@ import type {
   PruneResponse,
   ShutdownResponse,
   DigestResponse,
+  SecretaryResponse,
+  MemoryWriteResponse,
   UnknownCommandResponse,
 } from '../src/daemon/command-api.js';
 import { EventBus } from '../src/daemon/event-stream.js';
@@ -1407,5 +1409,87 @@ describe('CommandApi', () => {
       const shutdownRes = await fixture.api.execute({ kind: 'shutdown' });
       expect(shutdownRes).toHaveProperty('ok');
     });
+  });
+});
+
+describe('query-secretary (issue #130)', () => {
+  it('returns the working surface from wired ports', async () => {
+    const fixture = createFixture();
+    const confirmed: string[] = [];
+    const api = new CommandApi({
+      ...fixture.deps,
+      secretaryOps: {
+        plan: () => [
+          { id: 'todo-1', content: 'watch the run', status: 'in_progress' },
+          { id: 'todo-2', content: 'draft brief', status: 'pending' },
+        ],
+        inFlightResearch: () => [
+          { id: 'r1', query: 'capsule interfaces', startedAt: '2026-09-15T14:11:00Z' },
+        ],
+        pendingMemoryWrites: () => [
+          {
+            id: 'mw-1',
+            summary: 'prefers parked over failover',
+            scope: 'user',
+            proposedAt: '2026-09-15T14:09:00Z',
+          },
+        ],
+        confirmMemoryWrite: (id) => {
+          confirmed.push(id);
+          return id === 'mw-1';
+        },
+        rejectMemoryWrite: () => false,
+      },
+      contextHealth: {
+        snapshot: () => undefined,
+        listSnapshots: () => [
+          {
+            agentId: 'secretary',
+            windowFillPct: 0.42,
+            eventsSinceCondensation: 173,
+            condensationCount: 2,
+            status: 'ok' as const,
+          },
+        ],
+      },
+    });
+
+    const res = (await api.execute({ kind: 'query-secretary' })) as SecretaryResponse;
+    expect(res.ok).toBe(true);
+    expect(res.plan).toHaveLength(2);
+    expect(res.research[0]!.query).toBe('capsule interfaces');
+    expect(res.memoryWrites[0]!.id).toBe('mw-1');
+    expect(res.health[0]!.agentId).toBe('secretary');
+
+    const confirm = (await api.execute({
+      kind: 'memory-confirm',
+      writeId: 'mw-1',
+    })) as MemoryWriteResponse;
+    expect(confirm.ok).toBe(true);
+    expect(confirmed).toEqual(['mw-1']);
+
+    const miss = (await api.execute({
+      kind: 'memory-reject',
+      writeId: 'mw-9',
+    })) as MemoryWriteResponse;
+    expect(miss.ok).toBe(false);
+    expect(miss.error).toContain('mw-9');
+  });
+
+  it('returns honest empty sections and clean errors when unwired', async () => {
+    const fixture = createFixture();
+    const res = (await fixture.api.execute({ kind: 'query-secretary' })) as SecretaryResponse;
+    expect(res.ok).toBe(true);
+    expect(res.plan).toEqual([]);
+    expect(res.research).toEqual([]);
+    expect(res.memoryWrites).toEqual([]);
+    expect(res.health).toEqual([]);
+
+    const confirm = (await fixture.api.execute({
+      kind: 'memory-confirm',
+      writeId: 'mw-1',
+    })) as MemoryWriteResponse;
+    expect(confirm.ok).toBe(false);
+    expect(confirm.error).toContain('not wired');
   });
 });

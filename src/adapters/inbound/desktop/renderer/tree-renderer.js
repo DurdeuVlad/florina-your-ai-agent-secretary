@@ -153,6 +153,7 @@ function renderNode(node) {
     const fill = document.createElement('i');
     fill.style.width = String(props && props.pct ? props.pct : 0) + '%';
     if (props && props.dry) fill.classList.add('dry');
+    if (props && props.warm) fill.classList.add('warm');
     el.appendChild(fill);
   }
   if (tag === 'SectionHeader' && props && props.label) {

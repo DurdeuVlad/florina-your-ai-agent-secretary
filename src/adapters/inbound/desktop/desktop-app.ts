@@ -30,6 +30,8 @@ import { renderFleetScreen } from './views/fleet-screen.js';
 import { renderPrefsScreen } from './views/prefs-screen.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
+import { renderSecretaryScreen } from './views/secretary-screen.js';
+import type { SecretaryResponse } from '../../../core/application/use-cases/tasks/command-api.js';
 import type {
   BriefListResponse,
   IdeaListResponse,
@@ -664,8 +666,15 @@ export class DesktopApp {
     }));
     this.bridge.sendToRenderer('command:result', { id: m.id, res });
     // Committed mutations re-pull their view data so the screen reflects
-    // the journaled change immediately (#128 preferences, #129 ideas).
-    if (res.ok && (cmd.kind === 'update-preference' || IDEACMD_KINDS.has(cmd.kind))) {
+    // the journaled change immediately (#128 preferences, #129 ideas,
+    // #130 memory-write gate).
+    if (
+      res.ok &&
+      (cmd.kind === 'update-preference' ||
+        cmd.kind === 'memory-confirm' ||
+        cmd.kind === 'memory-reject' ||
+        IDEACMD_KINDS.has(cmd.kind))
+    ) {
       void this.refreshViews();
     }
   }
@@ -709,6 +718,14 @@ export class DesktopApp {
       } catch {
         return { error: 'malformed ideacmd payload' };
       }
+    }
+    // `memwrite:confirm:<id>` / `memwrite:reject:<id>` — memory-write
+    // gate decisions on the Secretary screen (issue #130).
+    if (cmd.startsWith('memwrite:confirm:')) {
+      return { kind: 'memory-confirm', writeId: cmd.slice('memwrite:confirm:'.length) };
+    }
+    if (cmd.startsWith('memwrite:reject:')) {
+      return { kind: 'memory-reject', writeId: cmd.slice('memwrite:reject:'.length) };
     }
     const [verb, itemId] = cmd.split(':', 2);
     if (verb === 'approve' || verb === 'deny') {
@@ -887,21 +904,24 @@ export class DesktopApp {
     // A dropped socket mid-refresh is normal (reconnect races) — treat a
     // failed send as "no answer" and keep the last known state rather than
     // blanking the renderer or throwing an unhandled rejection.
-    const [inboxRes, tasksRes, fleetRes, prefsRes, ideasRes, briefsRes] = await Promise.all([
-      this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
-      this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
-      this.sendCommand({ kind: 'query-fleet' }).catch(() => null),
-      this.sendCommand({ kind: 'query-preferences' }).catch(() => null),
-      this.sendCommand({ kind: 'idea-list' }).catch(() => null),
-      this.sendCommand({ kind: 'brief-list' }).catch(() => null),
-    ]);
+    const [inboxRes, tasksRes, fleetRes, prefsRes, ideasRes, briefsRes, secretaryRes] =
+      await Promise.all([
+        this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
+        this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
+        this.sendCommand({ kind: 'query-fleet' }).catch(() => null),
+        this.sendCommand({ kind: 'query-preferences' }).catch(() => null),
+        this.sendCommand({ kind: 'idea-list' }).catch(() => null),
+        this.sendCommand({ kind: 'brief-list' }).catch(() => null),
+        this.sendCommand({ kind: 'query-secretary' }).catch(() => null),
+      ]);
     if (
       inboxRes === null &&
       tasksRes === null &&
       fleetRes === null &&
       prefsRes === null &&
       ideasRes === null &&
-      briefsRes === null
+      briefsRes === null &&
+      secretaryRes === null
     ) {
       return; // offline — keep last known
     }
@@ -940,6 +960,13 @@ export class DesktopApp {
           briefs: briefsRes as BriefListResponse,
           ...(this.ideaReader !== null ? { reader: this.ideaReader } : {}),
         }),
+      );
+    }
+    // Secretary screen (#130): plan, research, memory writes, health.
+    if (secretaryRes !== null && secretaryRes.ok && 'plan' in secretaryRes) {
+      this.bridge.sendToRenderer(
+        'secretary:update',
+        renderSecretaryScreen(secretaryRes as SecretaryResponse),
       );
     }
   }
