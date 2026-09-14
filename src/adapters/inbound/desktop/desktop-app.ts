@@ -32,6 +32,7 @@ import type { PreferenceProfile } from '../../../core/application/ports/outbound
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
 import { renderSecretaryScreen } from './views/secretary-screen.js';
+import type { DictationService } from '../../../core/application/use-cases/voice/dictation-service.js';
 import type { SecretaryResponse } from '../../../core/application/use-cases/tasks/command-api.js';
 import type {
   BriefListResponse,
@@ -101,6 +102,14 @@ export interface DesktopAppOptions {
    * `florina start`; the existing retry loop then picks the daemon up.
    */
   readonly onDaemonMissing?: () => void;
+  /**
+   * Dictation pipeline (issue #161): the mic button's `dictation:start` /
+   * `dictation:stop` verbs drive this service; it owns the renderer-mic
+   * ↔ realtime/whisper path and reports state + transcripts through its
+   * own callbacks (the composition root forwards them on
+   * `dictation:update`). Absent → the verbs fail honestly.
+   */
+  readonly dictation?: DictationService;
 }
 
 /**
@@ -151,6 +160,7 @@ export class DesktopApp {
   private readonly closeToTray: boolean;
   private readonly onPttToggle?: () => void;
   private readonly onDaemonMissing?: () => void;
+  private readonly dictation: DictationService | undefined;
   /** True once the current connect intent has linked at least once (#132). */
   private everConnected = false;
   private started = false;
@@ -179,6 +189,7 @@ export class DesktopApp {
     this.closeToTray = options.closeToTray ?? false;
     this.onPttToggle = options.onPttToggle;
     this.onDaemonMissing = options.onDaemonMissing;
+    this.dictation = options.dictation;
     this.windowOptions = options.windowOptions ?? {};
     if (options.trayBackend !== undefined) {
       this.tray = new SystemTrayManager(options.trayBackend);
@@ -733,6 +744,9 @@ export class DesktopApp {
     if (typeof m.cmd === 'string' && (await this.handleIdeasCommand(m.cmd, m.id))) {
       return;
     }
+    if (typeof m.cmd === 'string' && (await this.handleDictationCommand(m.cmd, m.id))) {
+      return;
+    }
     const cmd = this.resolveRendererCommand(m.cmd);
     if (cmd === null) {
       // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
@@ -942,6 +956,41 @@ export class DesktopApp {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Dictation verbs (issue #161). `dictation:start` begins a mic round
+   * (the service pushes `dictation:capture` to start the renderer mic and
+   * `dictation:update` for state/transcripts); `dictation:stop` commits
+   * and awaits the final transcript; `dictation:cancel` aborts silently.
+   * Without a wired service the verbs fail honestly. Returns true when
+   * the command was claimed.
+   */
+  private async handleDictationCommand(raw: string, id: unknown): Promise<boolean> {
+    if (!raw.startsWith('dictation:')) return false;
+    // dictation:audio / dictation:capture / dictation:update are channel
+    // names, not renderer verbs — only the three control verbs reach here
+    // via the `command` channel.
+    const verb = raw.slice('dictation:'.length);
+    if (verb !== 'start' && verb !== 'stop' && verb !== 'cancel') return false;
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      this.bridge.sendToRenderer('command:result', { id, res });
+    };
+    if (this.dictation === undefined) {
+      ack({ ok: false, error: 'dictation is not configured' });
+      return true;
+    }
+    if (verb === 'cancel') {
+      this.dictation.cancel();
+      ack({ ok: true });
+      return true;
+    }
+    const run = verb === 'start' ? this.dictation.start() : this.dictation.stop();
+    await run.then(
+      () => ack({ ok: true }),
+      (err: unknown) => ack({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+    );
+    return true;
   }
 
   /**

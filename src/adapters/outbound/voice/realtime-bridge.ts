@@ -90,7 +90,9 @@ export function defaultSocketFactory(url: string, headers: Record<string, string
  * ================================================================== */
 
 /** Default Realtime API model id. */
-export const DEFAULT_REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
+export const DEFAULT_REALTIME_MODEL = 'gpt-realtime';
+/** GA realtime transcription model for dictation sessions (issue #161). */
+export const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-transcribe';
 
 /** Default audio sample rate (Realtime API expects 24 kHz). */
 export const DEFAULT_SAMPLE_RATE = 24000;
@@ -119,6 +121,13 @@ export interface RealtimeBridgeOptions {
   readonly channels?: number;
   /** Override the Realtime API base URL (for testing). */
   readonly baseUrl?: string;
+  /**
+   * Transcription-only session (dictation, issue #161): `stopListening`
+   * commits the input buffer WITHOUT sending `response.create`, so the
+   * server transcribes the speech and never generates a reply. The
+   * session returns to Idle on `input_audio_transcription.completed`.
+   */
+  readonly transcriptionOnly?: boolean;
   /** Auto-reconnect on unexpected close (default true). */
   readonly autoReconnect?: boolean;
   /** Max reconnection attempts before giving up (default 3). */
@@ -174,6 +183,8 @@ export class RealtimeBridge implements RealtimeSessionPort {
   private intentionalClose = false;
   /** Current reconnection attempt count. */
   private reconnectAttempts = 0;
+  /** Function-call ids already dispatched (GA emits them twice). */
+  private readonly seenToolCalls = new Set<string>();
   /** Whether audio capture is currently active (PTT). */
   private listening = false;
   /** Bound socket listeners (kept so they can be removed on disconnect). */
@@ -294,7 +305,8 @@ export class RealtimeBridge implements RealtimeSessionPort {
   /**
    * Stop capturing audio and commit the input buffer. In PTT (manual) mode
    * this also sends `response.create` to trigger the model's response, then
-   * transitions to `Processing`.
+   * transitions to `Processing`. In `transcriptionOnly` mode the commit is
+   * all that is sent — the server transcribes and no reply is generated.
    */
   stopListening(): void {
     if (!this.listening) {
@@ -303,8 +315,11 @@ export class RealtimeBridge implements RealtimeSessionPort {
     this.listening = false;
     this.audioTransport.stopCapture();
     this.sendMessage({ type: 'input_audio_buffer.commit' });
-    // Manual / PTT mode: explicitly request a response.
-    this.sendMessage({ type: 'response.create' });
+    // Manual / PTT mode: explicitly request a response. Dictation skips
+    // this — the commit alone yields `input_audio_transcription.completed`.
+    if (!this.options.transcriptionOnly) {
+      this.sendMessage({ type: 'response.create' });
+    }
     if (this.state === State.Listening) {
       this.setState(State.Processing);
     }
@@ -494,12 +509,13 @@ export class RealtimeBridge implements RealtimeSessionPort {
 
       case 'conversation.item.created': {
         // A function_call item means the model wants a tool executed.
-        if (isFunctionCallItem(msg.item)) {
-          const item = msg.item;
+        // Dedupe: GA also reports the same call via response.output_item.done.
+        if (isFunctionCallItem(msg.item) && !this.seenToolCalls.has(msg.item.call_id)) {
+          this.seenToolCalls.add(msg.item.call_id);
           this.emitToolCall({
-            callId: item.call_id,
-            name: item.name,
-            arguments: item.arguments,
+            callId: msg.item.call_id,
+            name: msg.item.name,
+            arguments: msg.item.arguments,
           });
         }
         break;
@@ -515,17 +531,49 @@ export class RealtimeBridge implements RealtimeSessionPort {
 
       case 'conversation.item.input_audio_transcription.completed':
         this.emitTranscript({ partial: false, text: msg.transcript });
+        // Dictation: no response follows the transcript — return to Idle.
+        if (this.options.transcriptionOnly && this.state === State.Processing) {
+          this.setState(State.Idle);
+        }
         break;
 
-      case 'response.text.delta':
+      case 'response.output_text.delta':
         this.transitionToResponding();
         this.emitResponse({ partial: true, text: msg.delta });
         this.emitTranscript({ partial: true, text: msg.delta });
         break;
 
-      case 'response.text.done':
+      case 'response.output_text.done':
         this.emitResponse({ partial: false, text: msg.text });
         this.emitTranscript({ partial: false, text: msg.text });
+        this.maybeReturnToIdle();
+        break;
+
+      case 'response.output_audio_transcript.delta':
+        // Assistant speech transcript — drives captions in voice mode.
+        this.emitTranscript({ partial: true, text: msg.delta });
+        break;
+
+      case 'response.output_audio_transcript.done':
+        this.emitTranscript({ partial: false, text: msg.transcript });
+        break;
+
+      case 'response.output_item.done': {
+        // GA also delivers completed function_call items here (in addition
+        // to conversation.item.created) — dedupe by call_id.
+        if (isFunctionCallItem(msg.item) && !this.seenToolCalls.has(msg.item.call_id)) {
+          this.seenToolCalls.add(msg.item.call_id);
+          this.emitToolCall({
+            callId: msg.item.call_id,
+            name: msg.item.name,
+            arguments: msg.item.arguments,
+          });
+        }
+        break;
+      }
+
+      case 'response.done':
+        // Terminal regardless of which modality events streamed.
         this.maybeReturnToIdle();
         break;
 
@@ -592,15 +640,36 @@ export class RealtimeBridge implements RealtimeSessionPort {
    * ---------------------------------------------------------------- */
 
   private sendSessionUpdate(): void {
+    const pcm = { type: 'audio/pcm' as const, rate: this.options.sampleRate };
+    // GA session shape (issue #161): dictation opens a `transcription`
+    // session — commits produce transcript events and nothing else.
+    if (this.options.transcriptionOnly) {
+      const session: RealtimeSessionConfig = {
+        type: 'transcription',
+        audio: {
+          input: {
+            format: pcm,
+            transcription: { model: DEFAULT_TRANSCRIPTION_MODEL },
+            turn_detection: null, // manual commit on stopListening
+          },
+        },
+      };
+      this.sendMessage({ type: 'session.update', session });
+      return;
+    }
     const session: RealtimeSessionConfig = {
+      type: 'realtime',
+      model: this.options.model,
       instructions: this.options.instructions,
-      voice: this.options.voice,
-      turn_detection: { type: 'none' },
       tools: this.options.tools,
-      modalities: ['text', 'audio'],
-      input_audio_format: 'pcm16',
-      output_audio_format: 'pcm16',
-      input_audio_transcription: { model: 'whisper-1' },
+      audio: {
+        input: {
+          format: pcm,
+          transcription: { model: DEFAULT_TRANSCRIPTION_MODEL },
+          turn_detection: null, // PTT — the bridge commits explicitly
+        },
+        output: { format: pcm, voice: this.options.voice },
+      },
     };
     this.sendMessage({ type: 'session.update', session });
   }
@@ -649,14 +718,20 @@ export class RealtimeBridge implements RealtimeSessionPort {
 
   private buildUrl(): string {
     const base = this.options.baseUrl;
-    const model = this.options.model;
-    return `${base}?model=${encodeURIComponent(model)}`;
+    // Dictation dials a transcription session (issue #161): the GA API
+    // requires `intent=transcription` and REJECTS a `model` query param in
+    // that mode — the transcription model lives in the session.update.
+    if (this.options.transcriptionOnly) {
+      return `${base}?intent=transcription`;
+    }
+    return `${base}?model=${encodeURIComponent(this.options.model)}`;
   }
 
   private buildHeaders(): Record<string, string> {
+    // GA realtime API — the retired beta required `OpenAI-Beta: realtime=v1`;
+    // sending it now fails the handshake with `beta_api_shape_disabled`.
     return {
       Authorization: `Bearer ${this.apiKey}`,
-      'OpenAI-Beta': 'realtime=v1',
     };
   }
 
@@ -672,6 +747,7 @@ export class RealtimeBridge implements RealtimeSessionPort {
       autoReconnect: opts.autoReconnect ?? true,
       maxReconnectAttempts: opts.maxReconnectAttempts ?? 3,
       reconnectBaseDelayMs: opts.reconnectBaseDelayMs ?? 500,
+      transcriptionOnly: opts.transcriptionOnly ?? false,
     };
   }
 
