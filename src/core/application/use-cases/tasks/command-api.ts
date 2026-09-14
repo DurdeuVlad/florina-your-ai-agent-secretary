@@ -1554,7 +1554,9 @@ export class CommandApi {
       if (e.kind !== 'TaskParked') continue;
       const task = this.taskStore.getById(e.taskId);
       if (task === null) continue;
-      if (task.state === 'completed' || task.state === 'failed' || task.state === 'cancelled') {
+      // A parked task that later completed/reviewed/terminated isn't
+      // waiting on quota anymore.
+      if (isTerminalState(task.state) || task.state === 'completed' || task.state === 'reviewed') {
         continue;
       }
       const resumeAt = e.payload['resumeAt'];
