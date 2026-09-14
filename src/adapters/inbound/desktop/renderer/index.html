@@ -61,8 +61,48 @@
       }
       .pref-form input:focus,
       .pref-addform input:focus,
-      .pref-addform textarea:focus {
+      .pref-addform textarea:focus,
+      .pref-addform select:focus {
         border-color: var(--accent);
+      }
+      .pref-addform select {
+        flex: 1;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .desk-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .desk-row select,
+      .desk-row input[type='text'] {
+        flex: 1;
+      }
+      .desk-check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      /* .pref-addform input above gives every input flex:1 + border —
+         checkboxes keep their native size and no box styling. */
+      .desk-check input[type='checkbox'] {
+        flex: 0 0 auto;
+        width: auto;
+        padding: 0;
+        border: none;
+        background: transparent;
       }
       .icon {
         font-size: 13px;
@@ -449,7 +489,38 @@
             <section class="view" id="v-tasks"><div id="inspector"></div></section>
             <section class="view" id="v-fleet"><div id="fleet"></div></section>
             <section class="view" id="v-ideas"><div id="ideas"></div></section>
-            <section class="view" id="v-prefs"><div id="prefs"></div></section>
+            <section class="view" id="v-prefs">
+              <div id="prefs"></div>
+              <!-- Desktop-local settings (issue #163): not part of the
+                   daemon profile — persisted to ~/.florina/desktop-
+                   settings.json via the deskset: verb. Static DOM like
+                   the composer so tree re-mounts never drop an edit. -->
+              <div class="sect" style="margin-top: 18px">Desktop &amp; voice</div>
+              <div class="card" id="deskCard">
+                <div class="pref-addform">
+                  <label class="desk-row">
+                    Microphone
+                    <select id="deskMic">
+                      <option value="">System default</option>
+                    </select>
+                  </label>
+                  <label class="desk-row">
+                    Dictation language
+                    <input id="deskLang" type="text" placeholder="auto-detect (e.g. en, fr, ro)" />
+                  </label>
+                  <label class="desk-check"
+                    ><input type="checkbox" id="deskVoiceMode" /> Open chat in voice mode</label
+                  >
+                  <label class="desk-check"
+                    ><input type="checkbox" id="deskStopDaemon" /> Stop the daemon when the app
+                    quits</label
+                  >
+                  <div>
+                    <button id="deskSave">Save desktop settings</button>
+                  </div>
+                </div>
+              </div>
+            </section>
             <section class="view" id="v-secretary"><div id="secretary"></div></section>
           </div>
         </div>

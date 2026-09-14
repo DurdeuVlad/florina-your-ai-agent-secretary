@@ -28,7 +28,7 @@ tasks, deliverables, decisions, and attention requests.
 | **Adapters** | Bridges into a canonical `SupervisorEvent` stream (DEC-019): Codex (JSON-RPC, Tier A), Claude Code (hooks, Tier B), ACP-native CLIs — `devin acp`, `gemini --acp` (Tier C, DEC-030), `agy` headless stream-json (Tier D). A stub adapter is included for local testing. |
 | **Attention engine** | Deterministic policy that ranks events into a priority inbox, suppresses routine noise, and supports adaptive tuning (DEC-014). |
 | **Voice pipeline** | OpenAI Realtime API with a `whisper.cpp` fallback; supports voice approvals and spoken notifications (DEC-021). |
-| **Desktop app** | Electron shell — a strict daemon client (DEC-028). Mockup-faithful screens (inbox, session inspector, fleet/quota, ideas, preferences, secretary), an inline five-state PTT HUD with a global hotkey, system tray + close-to-tray, auto-reconnect, and daemon auto-start. `npm run desktop`. |
+| **Desktop app** | Electron app — a strict daemon client (DEC-028). Chat-first: the launch view is a persistent Secretary conversation with dictation and two-way voice mode in the composer, backed by mockup-faithful supporting screens (inbox, session inspector, fleet/quota, ideas, preferences, secretary), an inline five-state PTT HUD with a global hotkey, system tray + close-to-tray, auto-reconnect, and daemon auto-start. `npm run desktop`. |
 | **Storage** | Immutable SQLite event journal, context capsules, completion digests, and per-idea markdown ledgers (DEC-012/020/033). |
 | **Security** | Audit framework and hardening utilities enforcing DEC-011 (the Florina narrows permissions, never silently widens them). |
 
@@ -154,7 +154,9 @@ architecture, contracts, models, and code are derived from them.
 - SQLite event journal, context capsules, completion digests
 - CLI (`florina` / `flor`) with inbox, approvals, tasks, digest, metrics, voice
 - Voice pipeline (OpenAI Realtime + whisper.cpp fallback) wired into daemon + CLI
-- Desktop app (`npm run desktop`) — Electron shell, daemon client, full screen set + PTT HUD + tray
+- Desktop app (`npm run desktop`) — chat-first Electron client: one persistent Secretary
+  conversation (journaled, resumes on connect) with dictation and two-way voice mode in
+  the composer, plus inbox/inspector/fleet/ideas/preferences screens, PTT HUD + tray
 - Security/audit framework (DEC-011 compliance)
 - Git worktree lifecycle per task (DEC-024)
 

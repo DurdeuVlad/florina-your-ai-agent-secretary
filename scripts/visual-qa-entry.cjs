@@ -33,13 +33,13 @@ const APP_SETTLE_MS = 3500;
 
 /* view name -> keys after 'g' (renderer keymap, DG-01 §4) */
 const APP_VIEWS = {
-  inbox: null, // default view — no keys needed
+  chat: null, // default launch view (#160) — no keys needed
+  inbox: 'i',
   tasks: 't',
   fleet: 'f',
   ideas: 'd',
   prefs: 'p',
   secretary: 's',
-  chat: 'c', // #160 — until the screen lands, 'g c' is unmapped and this shot mirrors the prior view
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -64,7 +64,7 @@ export class DictationService {
   private readonly transport: AudioTransport;
   private readonly session: RealtimeSessionPort | undefined;
   private readonly apiKey: string | undefined;
-  private readonly sessionOptions: RealtimeSessionOptions | undefined;
+  private sessionOptions: RealtimeSessionOptions | undefined;
   private readonly whisper: TranscriptionPort | undefined;
   private readonly onUpdate: ((update: DictationUpdate) => void) | undefined;
   private readonly onTranscript: ((event: TranscriptEvent) => void) | undefined;
@@ -79,6 +79,8 @@ export class DictationService {
   private lastPartial = '';
   private awaitingFinal: ((text: string) => void) | null = null;
   private sessionReady = false;
+  /** A language change mid-round drops the session when the round ends. */
+  private dropSessionAfterRound = false;
   /** Set by cancel() — the in-flight final is swallowed, not inserted. */
   private suppressFinal = false;
   /**
@@ -133,6 +135,26 @@ export class DictationService {
 
   get currentState(): DictationState {
     return this.state;
+  }
+
+  /**
+   * Update the transcription language hint for future rounds (issue
+   * #163). An idle realtime session is dropped so the next start()
+   * reconnects with the new config; mid-round changes drop the session
+   * when the round ends so the following round renegotiates. The
+   * whisper fallback's language is fixed at initialize() time.
+   */
+  setSessionLanguage(language: string | undefined): void {
+    this.sessionOptions = {
+      ...this.sessionOptions,
+      transcriptionLanguage: language,
+    };
+    if (!this.sessionReady) return;
+    if (this.active) {
+      this.dropSessionAfterRound = true;
+    } else {
+      this.releaseSession();
+    }
   }
 
   /** Whether a dictation round is active (any non-idle, non-error state). */
@@ -227,6 +249,10 @@ export class DictationService {
 
     this.mode = null;
     this.setState('idle');
+    if (this.dropSessionAfterRound) {
+      this.dropSessionAfterRound = false;
+      this.releaseSession();
+    }
   }
 
   /** Abort without emitting a final transcript (e.g. window closing). */
@@ -241,6 +267,16 @@ export class DictationService {
     }
     this.mode = null;
     this.setState('idle');
+    if (this.dropSessionAfterRound) {
+      this.dropSessionAfterRound = false;
+      this.releaseSession();
+    }
+  }
+
+  /** Close the cached realtime session so the next start() reconnects. */
+  private releaseSession(): void {
+    this.sessionReady = false;
+    void this.session?.disconnect();
   }
 
   /** Wait for the next final transcript, bounded by {@link finalTimeoutMs}. */

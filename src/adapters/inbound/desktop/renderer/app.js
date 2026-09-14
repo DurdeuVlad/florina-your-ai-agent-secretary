@@ -112,7 +112,11 @@ if (bridge) {
     if (!d) return;
     if (d.config) {
       micDeviceId = d.config.micDeviceId || null;
-      if (d.config.voiceModeDefault && !voiceOn) toggleVoiceMode();
+      applyDesktopSettings(d.config);
+      if (d.config.voiceModeDefault && !voiceOn && !voiceDefaultApplied) {
+        voiceDefaultApplied = true;
+        toggleVoiceMode();
+      }
     }
     if (typeof d.active === 'boolean') setVoiceMode(d.active);
     if (typeof d.listening === 'boolean') setMicListening(d.listening);
@@ -482,6 +486,7 @@ const playback = createPlayback();
 let micOn = false;
 let voiceOn = false;
 let micDeviceId = null;
+let voiceDefaultApplied = false;
 
 /** Start the renderer mic; chunks flow to main as dictation:audio IPC. */
 function startMic() {
@@ -516,6 +521,67 @@ function setMicListening(on) {
     $('dictation').hidden = true;
   }
 }
+
+/* ---------- desktop & voice settings card (issue #163) ---------- */
+
+/** Reflect saved desktop settings into the prefs card fields. */
+function applyDesktopSettings(cfg) {
+  const micSel = $('deskMic');
+  if (micSel && cfg.micDeviceId !== undefined) {
+    micSel.dataset.saved = cfg.micDeviceId || '';
+    if (cfg.micDeviceId) {
+      // A saved device that isn't enumerated (unplugged, or list not
+      // yet run) stays selected as an explicit option — saving must
+      // never silently wipe it back to the default.
+      if (![...micSel.options].some((o) => o.value === cfg.micDeviceId)) {
+        const opt = document.createElement('option');
+        opt.value = cfg.micDeviceId;
+        opt.textContent = 'Saved device (not detected)';
+        micSel.appendChild(opt);
+      }
+      micSel.value = cfg.micDeviceId;
+    }
+  }
+  if (cfg.voiceModeDefault !== undefined) $('deskVoiceMode').checked = cfg.voiceModeDefault;
+  if (cfg.stopDaemonOnQuit !== undefined) $('deskStopDaemon').checked = cfg.stopDaemonOnQuit;
+  if (cfg.dictationLanguage !== undefined) $('deskLang').value = cfg.dictationLanguage || '';
+}
+
+/** Enumerate mics once; labels need a prior getUserMedia grant. */
+let micsListed = false;
+async function listMicrophones() {
+  if (micsListed || !navigator.mediaDevices?.enumerateDevices) return;
+  micsListed = true;
+  try {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (d) => d.kind === 'audioinput',
+    );
+    const sel = $('deskMic');
+    devices.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `Microphone ${i + 1}`;
+      sel.appendChild(opt);
+    });
+    const saved = sel.dataset.saved;
+    if (saved && [...sel.options].some((o) => o.value === saved)) sel.value = saved;
+  } catch {
+    /* enumeration unsupported — the default-only select stays */
+  }
+}
+
+$('deskSave').addEventListener('click', () => {
+  const patch = {
+    micDeviceId: $('deskMic').value || null,
+    dictationLanguage: $('deskLang').value.trim() || null,
+    voiceModeDefault: $('deskVoiceMode').checked,
+    stopDaemonOnQuit: $('deskStopDaemon').checked,
+  };
+  void bridge.command('deskset:' + encodeURIComponent(JSON.stringify(patch))).then((res) => {
+    if (res && res.ok === false) toast(res.error || 'could not save desktop settings');
+    else toast('desktop settings saved');
+  });
+});
 
 /** Insert dictated text at the composer cursor — editable, not sent. */
 function insertDictated(text) {
@@ -609,6 +675,8 @@ function showView(name) {
   $('viewSub').textContent = TITLES[name][1];
   $('chatClear').style.display = name === 'chat' ? '' : 'none';
   if (name === 'chat') $('chatInput').focus();
+  // Enumerate mics whenever prefs opens — covers g p as well as clicks.
+  if (name === 'prefs') void listMicrophones();
   // Leaving Chat suspends an open capture (issue #162): voice talk turns
   // end (the reply still journals into the thread); dictation rounds
   // cancel — inserting dictated text while the user is away would be a

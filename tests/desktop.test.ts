@@ -15,7 +15,12 @@ import {
   DEFAULT_RENDERER_STATE,
   DEFAULT_WINDOW_BOUNDS,
 } from '../src/desktop/index.js';
-import type { IpcChannel, WindowOptions } from '../src/desktop/index.js';
+import type {
+  DesktopSettingsShape,
+  DesktopSettingsStore,
+  IpcChannel,
+  WindowOptions,
+} from '../src/desktop/index.js';
 import { DictationService } from '../src/core/application/use-cases/voice/dictation-service.js';
 
 /* ------------------------------------------------------------------ *
@@ -2703,6 +2708,167 @@ describe('voice-mode verbs (issue #162)', () => {
     expect(voiceUpdates(transport)).toContainEqual({
       config: { micDeviceId: 'usb-mic-1', voiceModeDefault: true },
     });
+    await app.disconnect();
+  });
+});
+
+describe('deskset: desktop settings command (issue #163)', () => {
+  function memStore(initial?: Partial<DesktopSettingsShape>): {
+    store: DesktopSettingsStore;
+    written: DesktopSettingsShape[];
+    current: () => DesktopSettingsShape;
+  } {
+    let current: DesktopSettingsShape = {
+      stopDaemonOnQuit: false,
+      voiceModeDefault: false,
+      ...initial,
+    };
+    const written: DesktopSettingsShape[] = [];
+    return {
+      store: {
+        read: () => current,
+        write: (s) => {
+          current = s;
+          written.push(s);
+        },
+      },
+      written,
+      current: () => current,
+    };
+  }
+
+  function settingsApp(
+    transport: MockIpcTransport,
+    options?: { desktopSettings?: DesktopSettingsStore; dictation?: DictationService },
+  ): DesktopApp {
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      ...(options?.desktopSettings !== undefined
+        ? { desktopSettings: options.desktopSettings }
+        : {}),
+      ...(options?.dictation !== undefined ? { dictation: options.dictation } : {}),
+    });
+    app.start();
+    return app;
+  }
+
+  function resultFor(
+    transport: MockIpcTransport,
+    id: string,
+  ): { ok: boolean; error?: string } | undefined {
+    return transport.toRenderer
+      .filter((m) => m.channel === 'command:result')
+      .map((m) => m.data as { id: string; res: { ok: boolean; error?: string } })
+      .find((r) => r.id === id)?.res;
+  }
+
+  function deskset(patch: Record<string, unknown>): string {
+    return `deskset:${encodeURIComponent(JSON.stringify(patch))}`;
+  }
+
+  it('persists a valid patch locally and repushes the merged config', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore({ stopDaemonOnQuit: true });
+    const app = settingsApp(transport, { desktopSettings: store });
+    await app.handleRendererCommand({
+      id: 's1',
+      cmd: deskset({ micDeviceId: 'usb-1', dictationLanguage: 'ro', voiceModeDefault: true }),
+    });
+    expect(written).toEqual([
+      {
+        stopDaemonOnQuit: true,
+        micDeviceId: 'usb-1',
+        voiceModeDefault: true,
+        dictationLanguage: 'ro',
+      },
+    ]);
+    expect(resultFor(transport, 's1')?.ok).toBe(true);
+    // The renderer sees what actually landed on disk.
+    const configs = transport.toRenderer
+      .filter((m) => m.channel === 'voice:update')
+      .map((m) => m.data as Record<string, unknown>);
+    expect(configs).toContainEqual({
+      config: {
+        stopDaemonOnQuit: true,
+        micDeviceId: 'usb-1',
+        voiceModeDefault: true,
+        dictationLanguage: 'ro',
+      },
+    });
+    await app.disconnect();
+  });
+
+  it('null clears mic/language; wrong types preserve the current value', async () => {
+    const transport = new MockIpcTransport();
+    const { store, current } = memStore({
+      micDeviceId: 'usb-1',
+      dictationLanguage: 'en',
+      voiceModeDefault: true,
+    });
+    const app = settingsApp(transport, { desktopSettings: store });
+    await app.handleRendererCommand({
+      id: 's2',
+      cmd: deskset({ micDeviceId: null, dictationLanguage: null, voiceModeDefault: 'yes' }),
+    });
+    expect(resultFor(transport, 's2')?.ok).toBe(true);
+    expect(current()).toEqual({ stopDaemonOnQuit: false, voiceModeDefault: true });
+    await app.disconnect();
+  });
+
+  it('rejects malformed and non-object payloads without writing', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore();
+    const app = settingsApp(transport, { desktopSettings: store });
+    await app.handleRendererCommand({ id: 'b1', cmd: 'deskset:not-json%25' });
+    await app.handleRendererCommand({ id: 'b2', cmd: deskset([1, 2] as never) });
+    expect(resultFor(transport, 'b1')?.ok).toBe(false);
+    expect(resultFor(transport, 'b2')?.ok).toBe(false);
+    expect(written).toHaveLength(0);
+    await app.disconnect();
+  });
+
+  it('fails honestly when no settings store is wired', async () => {
+    const transport = new MockIpcTransport();
+    const app = settingsApp(transport);
+    await app.handleRendererCommand({ id: 's3', cmd: deskset({ voiceModeDefault: true }) });
+    const res = resultFor(transport, 's3');
+    expect(res?.ok).toBe(false);
+    expect(res?.error).toContain('not wired');
+    await app.disconnect();
+  });
+
+  it('works fully offline — local settings never round-trip the daemon', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore();
+    const app = settingsApp(transport, { desktopSettings: store });
+    // Deliberately no connectToDaemon: deskset must still succeed.
+    await app.handleRendererCommand({ id: 's4', cmd: deskset({ dictationLanguage: 'fr' }) });
+    expect(resultFor(transport, 's4')?.ok).toBe(true);
+    expect(written[0]?.dictationLanguage).toBe('fr');
+    await app.disconnect();
+  });
+
+  it('applies a saved language to the dictation service immediately', async () => {
+    const transport = new MockIpcTransport();
+    const dictation = new DictationService({
+      transport: {
+        startCapture: () => undefined,
+        stopCapture: () => undefined,
+        play: () => undefined,
+        stopPlayback: () => undefined,
+        close: () => undefined,
+      },
+      apiKey: 'sk-test',
+      onUpdate: () => undefined,
+      onTranscript: () => undefined,
+    });
+    const spy = vi.spyOn(dictation, 'setSessionLanguage');
+    const { store } = memStore({ dictationLanguage: 'en' });
+    const app = settingsApp(transport, { desktopSettings: store, dictation });
+    await app.handleRendererCommand({ id: 's5', cmd: deskset({ dictationLanguage: 'ro' }) });
+    expect(resultFor(transport, 's5')?.ok).toBe(true);
+    expect(spy).toHaveBeenCalledWith('ro');
     await app.disconnect();
   });
 });

@@ -94,7 +94,13 @@ default, tinted only when carrying priority meaning.
   Preferences, Secretary) + daemon status footer (dot + one word). Never
   shows project pickers or filters — the inbox decides what matters.
 - **Chat is the launch view** — the single Secretary conversation is the
-  product's center; inbox/fleet/etc. are support surfaces.
+  product's center; inbox/fleet/etc. are support surfaces. Launch flow:
+  the window opens on Chat, the daemon auto-starts if absent, and
+  journaled history hydrates via `chat-read` — resume is automatic,
+  there is no thread picker. Desktop voice prefs (mic device, dictation
+  language, voice-mode default) load from
+  `~/.florina/desktop-settings.json` and push to the renderer on
+  `did-finish-load`; a saved `voiceModeDefault` engages voice mode.
 - **Header**: view title + one-line qualifier ("what needs you right now")
   - at most two actions. No breadcrumbs — depth is ≤2.
 - **Content**: single column of cards. Three-column layouts exist _only_
@@ -154,6 +160,13 @@ Scoped entries carry an `amber` `project:<id>` tag. Every entry shows
 provenance in `meta` ("learned from voice · Sep 13"). Edit and revoke are
 inline; changes journal through `update-preference`.
 
+Below the learned rules, a **Desktop & voice** card holds app-local
+settings — microphone device, dictation language hint, voice-mode
+default, stop-daemon-on-quit. These persist to
+`~/.florina/desktop-settings.json` via `deskset:` — they are _not_
+daemon profile rules, save while offline, and never surface as learned
+routing entries.
+
 ### 3.7 PTT HUD (floating overlay)
 
 Always-on-top, ~360×72px, radius 10, `panel-raised`, the only shadowed
@@ -210,9 +223,10 @@ pick. History is journaled; resume on launch is automatic.
 
 - **Keyboard-first**: `j/k` move selection, `Enter` drills, `Esc` pops,
   `g c/i/t/f/d/p/s` jump to views, `a` applies the card's primary action,
-  `Space` (global) = push-to-talk dictation.
-- **Composer keys** (chat): `Enter` sends, `Shift+Enter` newline, mic
-  button or `Ctrl+Space` toggles dictation.
+  the global hotkey (`FLORINA_PTT_HOTKEY`, default Space-hold) toggles
+  the PTT HUD.
+- **Composer keys** (chat): `Enter` sends, `Shift+Enter` newline; the
+  mic button toggles dictation, `🔊 voice` toggles voice mode.
 - **Pointer**: single click selects; double/`Enter` drills. Cards show
   hover at `panel-raised` — no other hover effects.
 - **Focus**: visible 1px `accent` outline. Everything reachable by keyboard.

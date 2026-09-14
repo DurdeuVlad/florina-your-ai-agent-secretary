@@ -143,7 +143,37 @@ export interface DesktopAppOptions {
    * (issue #162): `micDeviceId` constrains getUserMedia;
    * `voiceModeDefault: true` auto-engages voice mode.
    */
-  readonly voiceConfig?: { readonly micDeviceId?: string; readonly voiceModeDefault?: boolean };
+  readonly voiceConfig?: {
+    readonly micDeviceId?: string;
+    readonly voiceModeDefault?: boolean;
+    readonly dictationLanguage?: string;
+  };
+  /**
+   * Desktop-local settings persistence (issue #163): the prefs screen's
+   * "Desktop & voice" card writes through this port (`deskset:` verb);
+   * {@link replayVoiceConfig} re-reads so a saved change is what the
+   * renderer sees. Absent → deskset fails honestly.
+   */
+  readonly desktopSettings?: DesktopSettingsStore;
+}
+
+/**
+ * The shape {@link DesktopApp} persists through the injected settings
+ * store (issue #163) — mirrors `DesktopSettings` in the platform adapter
+ * without importing it (hexagonal direction: inbound never imports
+ * outbound).
+ */
+export interface DesktopSettingsShape {
+  readonly stopDaemonOnQuit: boolean;
+  readonly micDeviceId?: string;
+  readonly voiceModeDefault: boolean;
+  readonly dictationLanguage?: string;
+}
+
+/** Read/write port for `~/.florina/desktop-settings.json` (issue #163). */
+export interface DesktopSettingsStore {
+  read(): DesktopSettingsShape;
+  write(settings: DesktopSettingsShape): void;
 }
 
 /**
@@ -197,6 +227,7 @@ export class DesktopApp {
   private readonly dictation: DictationService | undefined;
   private readonly voiceSession: DesktopVoiceSession | undefined;
   private readonly voiceConfig: DesktopAppOptions['voiceConfig'];
+  private readonly desktopSettings: DesktopSettingsStore | undefined;
   /** Voice-mode on/off + whether a talk turn is capturing (issue #162). */
   private voiceActive = false;
   private voiceListening = false;
@@ -231,6 +262,7 @@ export class DesktopApp {
     this.dictation = options.dictation;
     this.voiceSession = options.voiceSession;
     this.voiceConfig = options.voiceConfig;
+    this.desktopSettings = options.desktopSettings;
     // Voice-mode state + live transcript captions reach the renderer on
     // voice:update (issue #162). Finals ALSO journal into the chat thread
     // via chat-append (wired in the composition root) — the preview is
@@ -812,6 +844,10 @@ export class DesktopApp {
     if (typeof m.cmd === 'string' && (await this.handleVoiceCommand(m.cmd, m.id))) {
       return;
     }
+    if (typeof m.cmd === 'string' && m.cmd.startsWith('deskset:')) {
+      this.handleDesktopSettingsCommand(m.cmd, m.id);
+      return;
+    }
     const cmd = this.resolveRendererCommand(m.cmd);
     if (cmd === null) {
       // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
@@ -1117,11 +1153,78 @@ export class DesktopApp {
   /**
    * Push the voice preference/config to the renderer (issue #162) —
    * called on `did-finish-load` like the other state replays (#133).
+   * When a settings store is wired (#163) the freshest read wins so a
+   * `deskset:` save is reflected immediately.
    */
   replayVoiceConfig(): void {
-    if (this.voiceConfig !== undefined) {
-      this.bridge.sendToRenderer('voice:update', { config: this.voiceConfig });
+    const config = this.desktopSettings?.read() ?? this.voiceConfig;
+    if (config !== undefined) {
+      this.bridge.sendToRenderer('voice:update', { config });
     }
+  }
+
+  /**
+   * `deskset:<uri-encoded JSON>` — persist a desktop-settings patch
+   * (issue #163). The renderer may only touch the desktop-owned fields;
+   * anything else is stripped. After a successful write the config is
+   * re-pushed so the UI reflects what actually landed on disk.
+   */
+  private handleDesktopSettingsCommand(raw: string, id: unknown): void {
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      this.bridge.sendToRenderer('command:result', { id, res });
+    };
+    if (this.desktopSettings === undefined) {
+      ack({ ok: false, error: 'desktop settings store is not wired' });
+      return;
+    }
+    let patch: unknown;
+    try {
+      patch = JSON.parse(decodeURIComponent(raw.slice('deskset:'.length)));
+    } catch {
+      ack({ ok: false, error: 'malformed deskset payload' });
+      return;
+    }
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+      ack({ ok: false, error: 'deskset payload must be an object' });
+      return;
+    }
+    const p = patch as Record<string, unknown>;
+    const current = this.desktopSettings.read();
+    const next: DesktopSettingsShape = {
+      stopDaemonOnQuit:
+        typeof p['stopDaemonOnQuit'] === 'boolean'
+          ? p['stopDaemonOnQuit']
+          : current.stopDaemonOnQuit,
+      voiceModeDefault:
+        typeof p['voiceModeDefault'] === 'boolean'
+          ? p['voiceModeDefault']
+          : current.voiceModeDefault,
+      ...(p['micDeviceId'] === null
+        ? {}
+        : typeof p['micDeviceId'] === 'string' && p['micDeviceId'].length > 0
+          ? { micDeviceId: p['micDeviceId'] }
+          : current.micDeviceId !== undefined
+            ? { micDeviceId: current.micDeviceId }
+            : {}),
+      ...(p['dictationLanguage'] === null
+        ? {}
+        : typeof p['dictationLanguage'] === 'string' && p['dictationLanguage'].length > 0
+          ? { dictationLanguage: p['dictationLanguage'] }
+          : current.dictationLanguage !== undefined
+            ? { dictationLanguage: current.dictationLanguage }
+            : {}),
+    };
+    try {
+      this.desktopSettings.write(next);
+    } catch (err) {
+      ack({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    // Apply live: future dictation rounds use the new language; mic
+    // device + voice default flow through the config re-push below.
+    this.dictation?.setSessionLanguage(next.dictationLanguage);
+    ack({ ok: true });
+    this.replayVoiceConfig();
   }
 
   /**

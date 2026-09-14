@@ -154,12 +154,21 @@ completed/cancelled worktree for human review.
 The desktop module is a **runnable Electron app** — `npm run desktop` launches
 `src/bootstrap/desktop.ts` on the real Electron backends
 (`ElectronWindowBackend`, `ElectronIpcTransport`, `ElectronTrayBackend`,
-`ElectronKeyboardBackend`). Screens (inbox, inspector, fleet, ideas,
-preferences, secretary) render live daemon data; the PTT HUD is inline in the
-main window with a global hotkey; tray, close-to-tray, auto-reconnect, and
-daemon auto-start are wired. Visual parity is checked via `npm run visual-qa`
-(see `docs/VISUAL_QA.md`).
+`ElectronKeyboardBackend`). The launch view is **Chat** (#160) — one
+persistent, journaled Secretary conversation — with the supporting screens
+(inbox, inspector, fleet, ideas, preferences, secretary) a `g`-key away. The
+PTT HUD is inline in the main window with a global hotkey; tray,
+close-to-tray, auto-reconnect, and daemon auto-start are wired. Visual parity
+is checked via `npm run visual-qa` (see `docs/VISUAL_QA.md`).
 
-**Remaining gaps** (issue #43 stays open for these): OS-native packaging /
-distribution (DEC-028 milestone) and a real audio transport for PTT — the
-hotkey toggles HUD state, but no `AudioTransport` is wired into the app yet.
+**Audio transport is wired** (the old gap closed by #161/#162): renderer-side
+`audio-capture.js`/`audio-playback.js` stream PCM16@24k through IPC to
+`IpcAudioTransport` in the main process, feeding the OpenAI Realtime GA
+pipeline (whisper.cpp fallback via `FLORINA_WHISPER_MODEL`). Dictation lands
+editable text in the composer (#161); voice mode runs two-way spoken turns
+journaled into the same chat thread (#162). Desktop-local preferences — mic
+device, voice-mode default, dictation language — persist to
+`~/.florina/desktop-settings.json` via the `deskset:` verb (#163).
+
+**Remaining gap** (issue #43 stays open for this): OS-native packaging /
+distribution (DEC-028 milestone).

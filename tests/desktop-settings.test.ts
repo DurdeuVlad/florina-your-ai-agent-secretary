@@ -80,4 +80,29 @@ describe('desktop settings (issue #132)', () => {
     );
     expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
   });
+
+  it('round-trips the dictation language hint (issue #163)', () => {
+    const dir = tmpDir();
+    writeDesktopSettings(
+      {
+        stopDaemonOnQuit: false,
+        voiceModeDefault: false,
+        dictationLanguage: 'ro',
+      },
+      dir,
+    );
+    expect(readDesktopSettings(dir)).toEqual({
+      stopDaemonOnQuit: false,
+      voiceModeDefault: false,
+      dictationLanguage: 'ro',
+    });
+  });
+
+  it('drops a malformed dictationLanguage (empty/non-string)', () => {
+    const dir = tmpDir();
+    writeFileSync(desktopSettingsPath(dir), JSON.stringify({ dictationLanguage: 42 }));
+    expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
+    writeFileSync(desktopSettingsPath(dir), JSON.stringify({ dictationLanguage: '' }));
+    expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
+  });
 });
