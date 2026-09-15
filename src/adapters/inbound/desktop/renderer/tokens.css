@@ -25,6 +25,23 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+  /* Motion (DG-01 §4/§6): one easing curve, three durations. Polish, not
+   * spectacle — every animation here is a quick settle, never a bounce or
+   * a loop, and prefers-reduced-motion (below) flattens all of it. */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 * {
   box-sizing: border-box;
@@ -74,6 +91,11 @@ nav {
   color: var(--muted);
   font-weight: 500;
   margin-bottom: 2px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 .navitem.active {
   background: var(--panel-raised);
@@ -275,11 +297,15 @@ button {
   font-family: inherit;
   cursor: pointer;
   transition:
-    filter 0.12s ease,
-    border-color 0.12s ease;
+    filter var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 button:hover {
   filter: brightness(1.08);
+}
+button:active {
+  transform: scale(0.97);
 }
 button:focus-visible {
   outline: 2px solid var(--accent);
@@ -536,6 +562,45 @@ button.danger:hover {
 }
 .voice-overlay .voice-bars {
   transform: scale(1.6);
+}
+
+/* entrance polish: new chat messages/tool rows/working row only — the
+ * renderer tags genuinely-new elements with .enter (by message id) so a
+ * full re-render of the same thread never replays the animation on
+ * already-seen content. One quick settle, not a bounce. */
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.msg.enter,
+.toolrow.enter,
+.workrow.enter {
+  animation: enter-up var(--dur-base) var(--ease);
+}
+/* word-reveal (chat.js): the newest assistant reply's text is split into
+ * word spans with a short stagger — a "generation" feel over an already-
+ * complete string, not real token streaming. Capped total duration keeps
+ * long replies from crawling in. */
+@keyframes word-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.msg .w {
+  display: inline-block;
+  opacity: 0;
+  animation: word-in var(--dur-fast) var(--ease) forwards;
 }
 
 /* gallery */

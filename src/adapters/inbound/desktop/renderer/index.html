@@ -172,6 +172,17 @@
       }
       .view.active {
         display: block;
+        animation: view-in var(--dur-base) var(--ease);
+      }
+      @keyframes view-in {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
       /* session inspector (#126): full-width, full-height 3 columns */
       .column {

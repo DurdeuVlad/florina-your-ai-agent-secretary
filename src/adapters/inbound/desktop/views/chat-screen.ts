@@ -40,26 +40,31 @@ function preview(content: string | null): string {
 function messageNodes(m: ConversationMessage): RenderTree[] {
   switch (m.role) {
     case 'user':
-      return [el('ChatMsg', { variant: 'user' }, [el('ChatWho', {}, ['You']), m.content ?? ''])];
+      return [
+        el('ChatMsg', { variant: 'user', id: m.id }, [el('ChatWho', {}, ['You']), m.content ?? '']),
+      ];
     case 'assistant': {
       const nodes: RenderTree[] = [];
       if (m.content !== null && m.content.trim() !== '') {
         nodes.push(
-          el('ChatMsg', { variant: 'assistant' }, [el('ChatWho', {}, ['Secretary']), m.content]),
+          el('ChatMsg', { variant: 'assistant', id: m.id }, [
+            el('ChatWho', {}, ['Secretary']),
+            m.content,
+          ]),
         );
       }
       // Tool calls ride on the assistant message but render as rows so
       // the thread reads like the mockup: bubble, then ▸ activity lines.
-      for (const call of m.toolCalls ?? []) {
-        nodes.push(el('ToolRow', {}, [`▸ ${call.name}`]));
-      }
+      m.toolCalls?.forEach((call, i) => {
+        nodes.push(el('ToolRow', { id: `${m.id}-tool-${i}` }, [`▸ ${call.name}`]));
+      });
       return nodes;
     }
     case 'tool': {
       const status = m.isError === true ? 'err' : 'ok';
       const tail = preview(m.content);
       return [
-        el('ToolRow', {}, [
+        el('ToolRow', { id: m.id }, [
           `▸ ${m.name ?? 'tool'} `,
           el('ToolStatus', { variant: status }, [status]),
           ...(tail !== '' ? [` · ${tail}`] : []),

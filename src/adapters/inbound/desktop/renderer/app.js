@@ -67,6 +67,7 @@ if (bridge) {
      composer is static DOM so re-mounts never drop a draft. */
   bridge.on('chat:update', (tree) => {
     mount(tree, $('chatmsgs'));
+    animateNewChatEntries();
     const wrap = $('chatwrap');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
   });
@@ -458,6 +459,78 @@ function openIdeaCompiler(card, ideaId) {
   form.appendChild(actions);
   card.appendChild(form);
   project.focus();
+}
+
+/* ---------- chat entrance/word-reveal polish ---------- */
+
+/**
+ * Ids already animated in this window session. `mount()` replaces the
+ * whole message list on every `chat:update` (even a single new tool row
+ * re-renders the full thread), so "new" is tracked here — by message id,
+ * not DOM identity — rather than by diffing nodes. Never cleared: a
+ * cleared/reloaded thread gets fresh message ids from the journal anyway.
+ */
+const seenChatIds = new Set();
+
+/**
+ * Tag genuinely-new message/tool-row/working-row elements with `.enter`
+ * (triggers the CSS entrance animation) and word-reveal the single
+ * newest assistant bubble. Call once per `chat:update`, after `mount()`.
+ */
+function animateNewChatEntries() {
+  const list = $('chatmsgs').firstElementChild; // the mounted .chatlist
+  if (!list) return;
+  let newestAssistant = null;
+  for (const el of list.children) {
+    const id = el.dataset.id;
+    if (id === undefined) {
+      // The working row has no stable id — animate every appearance,
+      // it's transient by nature (on for one turn, then gone).
+      if (el.classList.contains('workrow')) el.classList.add('enter');
+      continue;
+    }
+    if (seenChatIds.has(id)) continue;
+    seenChatIds.add(id);
+    el.classList.add('enter');
+    if (el.classList.contains('msg') && el.classList.contains('assistant')) {
+      newestAssistant = el;
+    }
+  }
+  if (newestAssistant) revealWords(newestAssistant);
+}
+
+/**
+ * Split a freshly-arrived assistant bubble's text into staggered word
+ * spans — a "generation" feel over an already-complete string (the
+ * daemon doesn't stream partial content over chat:update; real token
+ * streaming would need that wired first). Total stagger is capped so a
+ * long reply doesn't crawl in.
+ */
+function revealWords(bubble) {
+  // The bubble is [ChatWho div, text node] — only touch the text node.
+  const textNode = [...bubble.childNodes].find(
+    (n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim() !== '',
+  );
+  if (!textNode) return;
+  const tokens = textNode.textContent.split(/(\s+)/);
+  const wordCount = tokens.filter((t) => t.trim() !== '').length;
+  if (wordCount === 0) return;
+  const perWordDelay = Math.min(14, 260 / wordCount);
+  const frag = document.createDocumentFragment();
+  let i = 0;
+  for (const token of tokens) {
+    if (token.trim() === '') {
+      frag.appendChild(document.createTextNode(token));
+      continue;
+    }
+    const span = document.createElement('span');
+    span.className = 'w';
+    span.textContent = token;
+    span.style.animationDelay = `${i * perWordDelay}ms`;
+    frag.appendChild(span);
+    i += 1;
+  }
+  bubble.replaceChild(frag, textNode);
 }
 
 /* ---------- chat composer (issue #160) ---------- */

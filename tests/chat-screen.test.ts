@@ -79,6 +79,29 @@ describe('chat screen', () => {
     expect(rows[1]!.children?.[2]).toBe(' · 5 tasks');
   });
 
+  it('carries the source message id on ChatMsg/ToolRow — the renderer diffs entrance animation by this, not DOM identity', () => {
+    const tree = renderChatScreen({
+      working: false,
+      messages: [
+        msg({ id: 'm1', role: 'user', content: 'hi' }),
+        msg({
+          id: 'm2',
+          role: 'assistant',
+          content: 'hello',
+          toolCalls: [{ id: 'c1', name: 'ping', arguments: {} }],
+        }),
+        msg({ id: 'm3', role: 'tool', name: 'ping', content: 'pong' }),
+      ],
+    });
+    const [userMsg] = findAll(tree, 'ChatMsg');
+    expect(userMsg!.props?.['id']).toBe('m1');
+    const [assistantMsg] = findAll(tree, 'ChatMsg').slice(1);
+    expect(assistantMsg!.props?.['id']).toBe('m2');
+    const rows = findAll(tree, 'ToolRow');
+    expect(rows[0]!.props?.['id']).toBe('m2-tool-0'); // from m2's toolCalls
+    expect(rows[1]!.props?.['id']).toBe('m3'); // the tool-result message itself
+  });
+
   it('marks errored tool results', () => {
     const tree = renderChatScreen({
       working: false,
