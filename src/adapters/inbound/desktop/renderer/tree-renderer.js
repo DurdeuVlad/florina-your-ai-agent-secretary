@@ -141,6 +141,9 @@ function renderNode(node) {
     else if (props && props.variant === 'ghost') el.classList.add('ghost');
   }
   if (props && props.command) el.dataset.command = String(props.command);
+  // Stable identity for entrance-animation diffing (chat messages) — the
+  // renderer decides what's "new since last render", never the tree.
+  if (props && props.id !== undefined) el.dataset.id = String(props.id);
   if (tag === 'ChipClear') el.style.cursor = 'pointer';
   if (tag === 'InboxItem' || tag === 'TaskRow' || (props && props.selectable)) {
     el.dataset.selectable = 'true';
