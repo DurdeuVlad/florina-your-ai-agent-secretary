@@ -476,6 +476,68 @@ button.danger:hover {
   height: 14px;
 }
 
+/* voice-mode full-window overlay (#182) — a distinct, larger takeover
+ * surface for active two-way voice turns; the small PTT HUD above stays
+ * the idle/hold-to-talk affordance. Same states as .hud, bigger canvas. */
+.voice-overlay {
+  width: 100%;
+  height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.voice-overlay .orb {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+}
+.voice-overlay.listening .orb {
+  border-color: var(--accent);
+  animation: pulse-orb 1.4s infinite;
+}
+.voice-overlay.processing .orb {
+  border-color: var(--amber);
+}
+.voice-overlay.responding .orb {
+  border-color: var(--green);
+}
+@keyframes pulse-orb {
+  50% {
+    box-shadow: 0 0 0 14px rgba(79, 141, 255, 0.16);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-overlay.listening .orb {
+    animation: none;
+  }
+}
+.voice-overlay .voice-title {
+  font-size: 17px;
+  font-weight: 650;
+}
+.voice-overlay .voice-sub {
+  max-width: 380px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  min-height: 1.5em;
+}
+.voice-overlay .voice-bars {
+  transform: scale(1.6);
+}
+
 /* gallery */
 .gallery {
   padding: 40px;

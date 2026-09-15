@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Florina — Voice-mode overlay states (mockup)</title>
+    <link rel="stylesheet" href="mockup.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="logo">Flor<em>ina</em></div>
+        <div class="navitem">✳ Chat</div>
+        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
+        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
+        <div class="navitem">◔ Fleet</div>
+        <div class="navitem">◇ Ideas</div>
+        <div class="navitem">◍ Preferences</div>
+        <div class="navitem">☰ Secretary</div>
+        <div class="sidefoot">
+          <div class="statusline"><span class="dot on"></span>daemon connected</div>
+        </div>
+      </nav>
+      <main>
+        <header>
+          <h1>Voice-mode overlay</h1>
+          <span class="sub"
+            >full-window immersive takeover · active two-way turns only (issue #182) — the small PTT
+            HUD above stays the idle/hold-to-talk affordance</span
+          >
+        </header>
+        <div class="content">
+          <div class="column" style="display: grid; grid-template-columns: 1fr 1fr; gap: 22px">
+            <div>
+              <div class="sect" style="margin-top: 0">Listening</div>
+              <div class="voice-overlay listening" style="height: 260px">
+                <div class="orb">
+                  <span class="bars voice-bars"><i></i><i></i><i></i><i></i></span>
+                </div>
+                <div class="voice-title">Listening…</div>
+                <div class="voice-sub">"approve network access for checkout-refactor"</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="sect" style="margin-top: 0">Processing</div>
+              <div class="voice-overlay processing" style="height: 260px">
+                <div class="orb">…</div>
+                <div class="voice-title">Thinking</div>
+                <div class="voice-sub"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="sect">Responding</div>
+              <div class="voice-overlay responding" style="height: 260px">
+                <div class="orb">▶</div>
+                <div class="voice-title">Secretary</div>
+                <div class="voice-sub">
+                  "Approved network to registry.npmjs.org, this task only."
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="sect">Idle (transient — window opening/closing)</div>
+              <div class="voice-overlay" style="height: 260px">
+                <div class="orb">🎙</div>
+                <div class="voice-title">Voice mode</div>
+                <div class="voice-sub"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

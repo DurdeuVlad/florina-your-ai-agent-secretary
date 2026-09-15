@@ -117,6 +117,14 @@ export interface DesktopAppOptions {
    */
   readonly onPttToggle?: (listening: boolean) => void;
   /**
+   * Voice-mode engaged/disengaged hook (issue #182): called with `true`
+   * right after `voicemode:start` succeeds and `false` right after
+   * `voicemode:stop` completes. The composition root wires this to
+   * `VoiceOverlayController.show`/`hide` — the full-window immersive
+   * overlay is a render target for voice-mode state, not new state.
+   */
+  readonly onVoiceModeChange?: (active: boolean) => void;
+  /**
    * Daemon lifecycle (issue #132): invoked once per {@link connectToDaemon}
    * intent when the FIRST connection attempt fails — i.e. the daemon is
    * absent at launch, not a mid-session drop (a crash shouldn't silently
@@ -225,6 +233,7 @@ export class DesktopApp {
   private readonly reconnectMaxDelayMs: number;
   private readonly closeToTray: boolean;
   private readonly onPttToggle?: (listening: boolean) => void;
+  private readonly onVoiceModeChange?: (active: boolean) => void;
   private readonly onDaemonMissing?: () => void;
   private readonly dictation: DictationService | undefined;
   private readonly voiceSession: DesktopVoiceSession | undefined;
@@ -262,6 +271,7 @@ export class DesktopApp {
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
     this.closeToTray = options.closeToTray ?? false;
     this.onPttToggle = options.onPttToggle;
+    this.onVoiceModeChange = options.onVoiceModeChange;
     this.onDaemonMissing = options.onDaemonMissing;
     this.dictation = options.dictation;
     this.voiceSession = options.voiceSession;
@@ -1188,12 +1198,14 @@ export class DesktopApp {
         }
         this.voiceActive = true;
         this.bridge.sendToRenderer('voice:update', { active: true });
+        this.onVoiceModeChange?.(true);
       } else if (raw === 'voicemode:stop') {
         this.voiceListening = false;
         this.voiceSession.stopListening();
         await this.voiceSession.stop();
         this.voiceActive = false;
         this.bridge.sendToRenderer('voice:update', { active: false });
+        this.onVoiceModeChange?.(false);
       } else {
         // voice:talk — PTT inside voice mode.
         if (!this.voiceActive) {
