@@ -30,6 +30,7 @@ import type {
   VoiceSessionState,
 } from '../core/application/ports/outbound/voice.js';
 import { HudController } from '../adapters/inbound/desktop/hud-controller.js';
+import { VoiceOverlayController } from '../adapters/inbound/desktop/voice-overlay-controller.js';
 import { ElectronWindowBackend } from '../adapters/inbound/desktop/electron/window-backend.js';
 import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-transport.js';
 import { ElectronKeyboardBackend } from '../adapters/inbound/desktop/electron/keyboard-backend.js';
@@ -57,6 +58,11 @@ const RENDERER_HTML = fileURLToPath(
 /** CJS preload exposing the whitelisted `window.florina` bridge API. */
 const PRELOAD = fileURLToPath(
   new URL('../../src/adapters/inbound/desktop/renderer/preload.cjs', import.meta.url),
+);
+
+/** Voice-mode full-window overlay (#182) — served from the source tree. */
+const VOICE_OVERLAY_HTML = fileURLToPath(
+  new URL('../../src/adapters/inbound/desktop/renderer/voice-overlay.html', import.meta.url),
 );
 
 /** Repo root — used to resolve the CLI entry for tray daemon actions. */
@@ -246,9 +252,29 @@ async function main(): Promise<void> {
     hotkeyHint: 'Ctrl+Space to talk',
   });
 
+  // Voice-mode full-window overlay (#182) — a distinct, larger takeover
+  // surface for active two-way turns, unlike the small always-on-top HUD
+  // pill above. Its own window + IPC pair, but shares hud.viewModel so
+  // both surfaces read one state machine.
+  const overlayWindow = new ElectronWindowBackend(PRELOAD);
+  const overlayIpc = new ElectronIpcTransport();
+  overlayWindow.on('ready-to-show', () => {
+    if (overlayWindow.contents !== null) overlayIpc.attachContents(overlayWindow.contents);
+  });
+  const voiceOverlay = new VoiceOverlayController({
+    window: overlayWindow,
+    ipc: overlayIpc,
+    viewModel: hud.viewModel,
+    overlayHtmlPath: VOICE_OVERLAY_HTML,
+  });
+
   const desktopApp = new DesktopApp({
     window,
     ipcTransport: ipc,
+    onVoiceModeChange: (active) => {
+      if (active) voiceOverlay.show();
+      else voiceOverlay.hide();
+    },
     // The HUD pill mirrors real capture state — never animates on a
     // dead toggle (no engine → pttToggle pushes an honest error).
     onPttToggle: (listening) => {
@@ -361,6 +387,7 @@ async function main(): Promise<void> {
 
   app.on('window-all-closed', () => {
     hud.stop();
+    voiceOverlay.stop();
     void quitApp();
   });
   app.on('activate', () => {
