@@ -515,7 +515,7 @@ button.danger:hover {
 }
 @keyframes pulse-orb {
   50% {
-    box-shadow: 0 0 0 14px rgba(79, 141, 255, 0.14);
+    box-shadow: 0 0 0 14px rgba(79, 141, 255, 0.16);
   }
 }
 @media (prefers-reduced-motion: reduce) {
