@@ -471,6 +471,15 @@ function openIdeaCompiler(card, ideaId) {
  * cleared/reloaded thread gets fresh message ids from the journal anyway.
  */
 const seenChatIds = new Set();
+/**
+ * The first `chat:update` after launch/reconnect delivers the full
+ * existing history, not new messages — without this flag every past
+ * message in the thread would play the entrance animation at once (and
+ * the last one would word-reveal) on every app open. That first push
+ * seeds `seenChatIds` silently; only pushes after it can mark anything
+ * `.enter`.
+ */
+let chatHistoryLoaded = false;
 
 /**
  * Tag genuinely-new message/tool-row/working-row elements with `.enter`
@@ -480,6 +489,13 @@ const seenChatIds = new Set();
 function animateNewChatEntries() {
   const list = $('chatmsgs').firstElementChild; // the mounted .chatlist
   if (!list) return;
+  if (!chatHistoryLoaded) {
+    chatHistoryLoaded = true;
+    for (const el of list.children) {
+      if (el.dataset.id !== undefined) seenChatIds.add(el.dataset.id);
+    }
+    return;
+  }
   let newestAssistant = null;
   for (const el of list.children) {
     const id = el.dataset.id;
