@@ -10,6 +10,9 @@
  */
 import type { MemoryItem, MemoryScope } from '../../../domain/memory.js';
 import { isMemoryActive } from '../../../domain/memory.js';
+import type { ExecutionBrief, ExecutionBriefRuleLine } from '../../../domain/execution-brief.js';
+
+export type { ExecutionBrief, ExecutionBriefRuleLine } from '../../../domain/execution-brief.js';
 
 export interface ExecutionBriefRequest {
   readonly taskId: string;
@@ -22,24 +25,6 @@ export interface ExecutionBriefRequest {
   readonly requiredVerification?: readonly string[];
   readonly definitionOfDone?: string;
   readonly providerRationale?: string;
-}
-
-/** One line of the compiled Brief's "Applicable rules" section. */
-export interface ExecutionBriefRuleLine {
-  readonly id: string;
-  readonly statement: string;
-  readonly provenance: MemoryItem['provenance'];
-  readonly scope: MemoryScope;
-}
-
-/** The §6.4 inspectable artifact. */
-export interface ExecutionBrief {
-  readonly objective: string;
-  readonly relevantContext: readonly string[];
-  readonly applicableRules: readonly ExecutionBriefRuleLine[];
-  readonly requiredVerification: readonly string[];
-  readonly definitionOfDone: string;
-  readonly providerRationale: string;
 }
 
 /** Lower rank wins a same-topic conflict. Hard policies rank above everything. */

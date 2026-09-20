@@ -55,6 +55,7 @@
 import type { AdapterFidelityTier, ApprovalAuthorityLevel } from './enums.js';
 import type { SupervisorEventKind } from './types.js';
 import { CAPABILITY_TYPE_VALUES, CAPABILITY_RISK_LEVEL_VALUES } from './capabilities.js';
+import type { ExecutionBrief } from './execution-brief.js';
 import type {
   CapabilityType,
   CapabilityRiskLevel,
@@ -115,6 +116,13 @@ export interface AgentStartedEvent extends SupervisorEventBase {
   autonomyLevel?: string;
   /** Model identifier the agent is using, if known. */
   model?: string;
+  /**
+   * The compiled Execution Brief for this dispatch (§6.4, DEC-039,
+   * issue #208), when one was compiled. Journaled as part of this event
+   * per DEC-012 — the Brief a worker was actually dispatched with is not
+   * reconstructed after the fact.
+   */
+  executionBrief?: ExecutionBrief;
 }
 
 /**
@@ -837,6 +845,12 @@ function validateAgentStarted(value: Record<string, unknown>, problems: string[]
   }
   if (value['model'] !== undefined && !isString(value['model'])) {
     problems.push('AgentStarted: optional field "model" must be a string.');
+  }
+  if (
+    value['executionBrief'] !== undefined &&
+    (typeof value['executionBrief'] !== 'object' || value['executionBrief'] === null)
+  ) {
+    problems.push('AgentStarted: optional field "executionBrief" must be an object.');
   }
 }
 
