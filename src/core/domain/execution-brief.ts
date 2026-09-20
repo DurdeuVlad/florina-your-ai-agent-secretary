@@ -22,7 +22,19 @@ export interface ExecutionBrief {
   readonly objective: string;
   readonly relevantContext: readonly string[];
   readonly applicableRules: readonly ExecutionBriefRuleLine[];
+  /** Prose non-goals / scope boundaries (§6.4's "Constraints"). */
+  readonly constraints: readonly string[];
   readonly requiredVerification: readonly string[];
   readonly definitionOfDone: string;
   readonly providerRationale: string;
+  /**
+   * Structured path patterns declaring where edits are expected (issue
+   * #214). Supports an exact path, a `dir/**` directory wildcard, or a
+   * trailing `*` prefix wildcard — intentionally not a full glob engine
+   * (ponytail: three concrete cases cover real usage; upgrade to a glob
+   * library if patterns get more complex than that). Undefined/empty
+   * means no declared boundary — the out-of-scope-edit detector never
+   * flags anything when scope wasn't declared, to avoid false positives.
+   */
+  readonly scopePaths?: readonly string[];
 }

@@ -32,6 +32,7 @@ function sampleBrief(): ExecutionBrief {
     applicableRules: [
       { id: 'r-1', statement: 'Reproduce before fixing.', provenance: 'explicit', scope: { type: 'global' } },
     ],
+    constraints: ['Do not touch unrelated files.'],
     requiredVerification: ['npm test', 'npm run typecheck'],
     definitionOfDone: 'Pagination bug no longer reproduces; tests pass.',
     providerRationale: 'Claude Code — best routing preference for TypeScript bug fixes.',

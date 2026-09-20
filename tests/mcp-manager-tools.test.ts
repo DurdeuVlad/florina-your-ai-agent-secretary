@@ -185,6 +185,7 @@ describe('ManagerToolService', () => {
           scope: { type: 'global' as const },
         },
       ],
+      constraints: ['Do not touch unrelated files.'],
       requiredVerification: ['npm test'],
       definitionOfDone: 'Widget implemented; tests pass.',
       providerRationale: 'Codex — routing preference for this work type.',

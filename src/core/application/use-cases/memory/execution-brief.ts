@@ -22,9 +22,12 @@ export interface ExecutionBriefRequest {
   readonly topics: readonly string[];
   /** Project-knowledge / prior-work strings not sourced from memory items. */
   readonly relevantContext?: readonly string[];
+  readonly constraints?: readonly string[];
   readonly requiredVerification?: readonly string[];
   readonly definitionOfDone?: string;
   readonly providerRationale?: string;
+  /** Structured scope-boundary path patterns (#214); see `ExecutionBrief.scopePaths`. */
+  readonly scopePaths?: readonly string[];
 }
 
 /** Lower rank wins a same-topic conflict. Hard policies rank above everything. */
@@ -121,8 +124,10 @@ export function compileExecutionBrief(
     objective: request.objective,
     relevantContext: [...(request.relevantContext ?? []), ...projectKnowledge.map((i) => i.statement)],
     applicableRules,
+    constraints: request.constraints ?? [],
     requiredVerification: request.requiredVerification ?? [],
     definitionOfDone: request.definitionOfDone ?? '',
     providerRationale: request.providerRationale ?? '',
+    ...(request.scopePaths !== undefined ? { scopePaths: request.scopePaths } : {}),
   };
 }

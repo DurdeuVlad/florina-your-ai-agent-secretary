@@ -13,3 +13,4 @@ export * from './attention-aggregator.js';
 export * from './diff-analyzer.js';
 export * from './supervision-ladder.js';
 export * from './escalation-triggers.js';
+export * from './scope-edit-trigger.js';
