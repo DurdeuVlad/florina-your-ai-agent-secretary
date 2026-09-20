@@ -13,6 +13,18 @@
  */
 import type { EntityId, ISODateString } from '../../../domain/types.js';
 import type { MemoryItem, MemoryKind, MemoryScope } from '../../../domain/memory.js';
+import { isExcludedTopic } from './write-guard.js';
+
+/**
+ * True when an item's kind/statement falls under §4's never-auto-learn
+ * exclusion list (issue #212) — autonomy/credential/deploy-merge topics,
+ * or `hard-policy` kind. Shared between the promotion cap below and
+ * `exclusion-and-conflict.ts`'s always-confirm surfacing so both use the
+ * exact same definition of "exclusion-listed."
+ */
+export function isExclusionListed(item: Pick<MemoryItem, 'kind' | 'statement'>): boolean {
+  return item.kind === 'hard-policy' || isExcludedTopic(item.statement);
+}
 
 /** One occurrence of a same-direction statement, from a single conversation turn. */
 export interface RuleObservation {
@@ -30,6 +42,14 @@ export interface RuleObservation {
  * Two or more *distinct* turns -> `inferred-repeated` / `proposed` (§3:
  * "recorded as proposed until the user confirms it once").
  *
+ * Exception (§4, issue #212): an exclusion-listed statement — autonomy
+ * loosening, credentials, deploy/merge triggers, or `hard-policy` kind —
+ * is capped at `candidate` *regardless of repetition count*. Repetition
+ * never promotes it to `proposed`'s auto-surfacing; it always requires
+ * `exclusion-and-conflict.ts`'s always-confirm path instead. `provenance`
+ * still reflects the true repetition count (how it was observed);
+ * `status` reflects the lifecycle cap (never silently escalated).
+ *
  * The most recent observation's statement/kind/scope/tags represent the
  * item (later phrasing supersedes earlier phrasing of the same direction).
  */
@@ -44,6 +64,7 @@ export function classifyRepeatedObservations(
   const latest = observations[observations.length - 1]!;
   const distinctTurns = new Set(observations.map((o) => o.turnId));
   const isRepeated = distinctTurns.size >= 2;
+  const capped = isExclusionListed(latest);
 
   return {
     id,
@@ -51,8 +72,8 @@ export function classifyRepeatedObservations(
     scope: latest.scope,
     statement: latest.statement,
     provenance: isRepeated ? 'inferred-repeated' : 'inferred-single',
-    confidence: isRepeated ? 'medium' : 'low',
-    status: isRepeated ? 'proposed' : 'candidate',
+    confidence: isRepeated && !capped ? 'medium' : 'low',
+    status: isRepeated && !capped ? 'proposed' : 'candidate',
     createdAt: now,
     updatedAt: now,
     ...(latest.tags !== undefined ? { tags: latest.tags } : {}),
