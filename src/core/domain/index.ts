@@ -14,3 +14,4 @@ export * from './grants.js';
 export * from './events.js';
 export * from './ideas.js';
 export * from './memory.js';
+export * from './agent-profile.js';
