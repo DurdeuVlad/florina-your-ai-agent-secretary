@@ -142,6 +142,18 @@ architecture, contracts, models, and code are derived from them.
 | [`DEEP_RESEARCH.md`](DEEP_RESEARCH.md) | Landscape analysis, reusable components, what's solved vs. open |
 | [`DECISION_LEDGER.md`](DECISION_LEDGER.md) | Settled and open product decisions with rationale |
 
+Supervisory-model research (2026-09-20) adds five focused companion docs
+under `docs/`, all cross-linked from `PRODUCT_DESIGN.md`:
+[`RULES_MEMORY_AND_SUPERVISION.md`](docs/RULES_MEMORY_AND_SUPERVISION.md)
+(memory taxonomy, rule lifecycle, Execution Brief compiler, supervision
+ladder, resumption/catch-up), [`PROVIDER_TOPOLOGY.md`](docs/PROVIDER_TOPOLOGY.md)
+(agent vocabulary, brokered-vs-federated subagent research),
+[`UX_INFORMATION_ARCHITECTURE.md`](docs/UX_INFORMATION_ARCHITECTURE.md)
+(nav redesign, terminology audit), [`UX_FLOWS.md`](docs/UX_FLOWS.md) +
+[`SYSTEM_FLOWS.md`](docs/SYSTEM_FLOWS.md) (user and agent/system flows), and
+[`GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) (current vs. target, mapped to the
+`Florina — Persistent AI Supervisor` milestone).
+
 ## Status
 
 **MVP — actively implemented.** 32+ issues landed, 1585+ tests passing.

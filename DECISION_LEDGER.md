@@ -244,6 +244,66 @@ This is the Decision Ledger for Florina — a living record that prevents future
 
 ---
 
+**ID**: DEC-039
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Generalize preference memory into a full Rules & Memory model — facts, preferences, rules, hard policies, project knowledge, decisions, temporary instructions, learned patterns, each carrying scope/provenance/confidence
+- **Rationale**: DEC-029's `PreferenceProfile` is auto-written memory scoped narrowly to provider/model routing. The first user's actual repeated complaint (per the product-research pass, `docs/RULES_MEMORY_AND_SUPERVISION.md`) is about *all* categories of repeated instruction — research-before-deciding, scope discipline, review requirements — not just which provider runs the work. The memory envelope and provenance/confidence model DEC-029 already established generalizes cleanly; it does not need to be reinvented per category.
+- **Consequences**: `PreferenceProfile` becomes one memory *kind* (preference, provider/model-focused) inside the general taxonomy in `docs/RULES_MEMORY_AND_SUPERVISION.md` § 2, not the whole memory system. A hard exclusion list (autonomy/safety loosening, credentials, deploy/merge triggers) is never written from inferred provenance regardless of repetition (§ 4 of that doc) — this is the concrete answer to DEC-011 applied to memory-writing specifically.
+- **Alternatives Considered**: Keep memory scoped to provider/model preference only and build a separate, unrelated system for general rules (rejected — duplicates the provenance/scope/confidence machinery DEC-029 already solved); a numeric confidence score (rejected — false precision for a coarse three-value signal).
+- **Reconsideration Trigger**: If the general taxonomy proves too coarse in practice (kinds need further subdivision) or too permissive (the exclusion list needs to grow).
+- **Resolved By**: This research pass; implementation tracked in `docs/GAP_ANALYSIS.md` #1, #3, #16.
+
+---
+
+**ID**: DEC-040
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Rule application to workers runs through a deterministic Execution Brief Compiler, never a raw rule dump into a prompt
+- **Rationale**: With hundreds of eventual rules (brief's stated design target), injecting all of them into every worker prompt degrades context quality and defeats DEC-003's context-isolation principle. The *selection* of which rules apply must be deterministic and auditable (tag-match + scope-filter + priority-ranked conflict resolution), with an LLM call used only for wording/compilation after selection — consistent with DEC-014's "deterministic first" philosophy already applied to the attention engine.
+- **Consequences**: Every delegated Task produces an inspectable Execution Brief (Objective / Relevant context / Applicable rules / Constraints / Required verification / Definition of done / Provider rationale — `docs/RULES_MEMORY_AND_SUPERVISION.md` § 6.4) as a journaled artifact, not a reconstructed-after-the-fact explanation. This is the literal object shown when a user asks "why did you send this to Gemini?"
+- **Alternatives Considered**: LLM-driven relevance selection (rejected — non-deterministic, harder to audit, and the failure mode is silent context bloat); no compiler, rely on managers to informally decide what to mention (rejected — already the status quo per DEC-029's amendment, doesn't scale past a handful of rules).
+- **Reconsideration Trigger**: If tag-matching proves too coarse to correctly exclude irrelevant rules at scale, revisit with a lightweight embedding-based relevance step ahead of the deterministic filter (not instead of it).
+- **Resolved By**: This research pass; implementation tracked in `docs/GAP_ANALYSIS.md` #2.
+
+---
+
+**ID**: DEC-041
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Provider-native subagent topology gets a third state — Observed — alongside Managed (dispatched by Florina) and Opaque (no visibility); federation (Florina controlling native subagent trees) is not adopted
+- **Rationale**: Primary-source research (`docs/PROVIDER_TOPOLOGY.md` § 2, access date 2026-09-20) found no provider Florina targets exposes a stable, external, structured API for a third party to enumerate and control its native subagent tree — Claude Code's Agent View and subagents are session-internal or research-preview, Gemini CLI subagents are experimental (March 2026), and ACP's `subagents` capability is still draft and gated behind bilateral negotiation. Building toward full federation now means coding against unstable, single-vendor surfaces — the same risk profile DEC-023 already rejected for PTY scraping.
+- **Consequences**: DEC-018 stands unchanged for dispatch — there is still exactly one channel (`florina_spawn_task`) through which Florina/managers create work, and native subagents bypassing it remain disallowed. A new **Observed** classification is added for read-only visibility into provider-native activity Florina did not dispatch: display-only in the inspector, explicitly excluded from journal-as-Task, policy auto-approval, and quota accounting, so it can never be mistaken for Florina's own dispatch. No adapter currently implements Observed (see `docs/GAP_ANALYSIS.md` #7 — gated on provider surfaces stabilizing).
+- **Alternatives Considered**: Full federation now (rejected — no stable provider surface to build against); purely Opaque forever (rejected — becomes a real gap once these surfaces stabilize, and a user running a provider's own multi-agent UI alongside Florina would reasonably expect at least visibility).
+- **Reconsideration Trigger**: If a provider ships a stable, documented, external control/observation API for its native subagent topology.
+- **Resolved By**: `docs/PROVIDER_TOPOLOGY.md`; implementation tracked in `docs/GAP_ANALYSIS.md` #7.
+
+---
+
+**ID**: DEC-042
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Resumption ("catch me up") is a first-class, explicitly designed capability — not an emergent property of chat history
+- **Rationale**: The product's central promise is that the user doesn't have to reconstruct their own operational state after stepping away. Today's Chat resumes journaled history (DEC-012) but does not compile a since-you-were-away digest — the user would still have to scroll and infer. This is the flagship flow identified across the product-research pass (brief § 10, § 15C) and was previously implicit rather than specified.
+- **Consequences**: A `last_active_at` watermark is introduced (global per user session, not per-task); catch-up queries the journal/attention/task-status since that watermark and compiles a digest through the same deterministic-facts-first pipeline as completion digests (`PRODUCT_DESIGN.md` § Deliverable Review). The watermark advances only after the digest is confirmed delivered, so a crash before delivery doesn't skip a window. Full mechanism: `docs/RULES_MEMORY_AND_SUPERVISION.md` § 9.
+- **Alternatives Considered**: Rely on the user asking specific questions after returning (rejected — reintroduces the exact reconstruction burden the product exists to remove); auto-summarize on every idle gap regardless of length (rejected — noisy for short breaks; a threshold is used instead).
+- **Reconsideration Trigger**: If the chosen idle threshold produces digests that are either too frequent (noise) or too sparse (state loss) in practice.
+- **Resolved By**: This research pass; implementation tracked in `docs/GAP_ANALYSIS.md` #5.
+
+---
+
+**ID**: DEC-043
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Desktop information architecture simplifies from the current 7-item sidebar to five top-level destinations — Florina (home) / Attention / Work / History / Settings
+- **Rationale**: The current nav (Chat, Inbox, Tasks, Fleet, Ideas, Preferences, Secretary — `docs/UX_GUIDELINES.md` § 2) accumulated one entry per implementation slice (#120, #126–129, #157–163) rather than being designed as an information architecture. It puts diagnostic surfaces (Fleet, raw Preferences forms) at the same level as the product's actual center, and splits "what's happening" across Inbox/Tasks/Inspector without a clear ownership line.
+- **Consequences**: Chat + Secretary merge into **Florina** (home, unchanged as the launch view); Inbox renames to **Attention** (same substance); Tasks + Projects + the non-historical part of Session Inspector become **Work** (one progressive drill-down: project -> manager -> task -> worker -> run -> event); a new **History** surface holds completed/reviewed work, resolved decisions, and journal search; Fleet + Preferences + provider setup + desktop-local prefs become **Settings**, reframed as an audit/inspection surface (per DEC-031's "ordinary configuration happens conversationally" promise) rather than the primary way to configure Florina. Full mapping and rationale per item: `docs/UX_INFORMATION_ARCHITECTURE.md`. This is a navigation relabel/regroup only — it does not change any individual screen's internal component design (DG-01 tokens and card patterns from #180–#190 are unaffected).
+- **Alternatives Considered**: Keep the 7-item nav and rely on user habituation (rejected — doesn't fix the underlying category error of mixing product surfaces with diagnostics); collapse everything into the conversation with no addressable screens (rejected — brief § 12 explicitly wants the GUI to remain a navigable visual extension, not chat-only).
+- **Reconsideration Trigger**: If user testing shows the five-item split doesn't reduce navigation confusion versus the current seven.
+- **Resolved By**: `docs/UX_INFORMATION_ARCHITECTURE.md`; implementation tracked in `docs/GAP_ANALYSIS.md` #8, #9, #10.
+
+---
+
 ## DEFERRED Decisions
 
 **ID**: DEC-016  

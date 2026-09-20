@@ -2,6 +2,24 @@
 
 This is the product design document for Florina — an open-source supervisory layer for coding agents that routes human attention to what matters. The core premise is that developers can parallelize implementation with coding agents faster than they can supervise the resulting work.
 
+**The permanent relationship is User <-> Florina.** Providers (Codex, Claude
+Code, Gemini, Devin, `agy`), managers, workers, sessions, and subagents are
+replaceable execution infrastructure beneath her — never a second
+relationship the user has to maintain in parallel. Florina absorbs two
+forms of cognitive load: **work memory** (what's running, why, what
+finished, what needs a decision — see § Attention Model and
+`docs/RULES_MEMORY_AND_SUPERVISION.md` § 9 "Catch me up") and **operating
+memory** (how the user likes work done — rules and preferences, not just
+provider routing — see `docs/RULES_MEMORY_AND_SUPERVISION.md`). This
+document remains the canonical doctrine; four companion documents carry the
+detail that would otherwise bloat it: `docs/RULES_MEMORY_AND_SUPERVISION.md`
+(memory taxonomy, rule lifecycle, Execution Brief compiler, supervision
+ladder, resumption), `docs/PROVIDER_TOPOLOGY.md` (agent/provider vocabulary,
+brokered-vs-federated research), `docs/UX_INFORMATION_ARCHITECTURE.md`
+(navigation, terminology audit) and `docs/UX_FLOWS.md` +
+`docs/SYSTEM_FLOWS.md` (user/system flows). `docs/GAP_ANALYSIS.md` tracks
+current-vs-target and the issues that close each gap.
+
 ## Product Principles
 
 ### Attention Over Activity
@@ -43,7 +61,7 @@ Durable work context, usually corresponding to a repository or closely related w
 A goal delegated to one or more agents. Human-facing unit of work. A task may be handled by one agent, move between agents, use several parallel agents, produce several sessions, restart after failure, generate multiple Deliverables.
 
 ### Agent
-A provider/runtime capable of performing work (Codex, Claude Code, future ACP agents, etc.).
+A provider/runtime capable of performing work (Codex, Claude Code, future ACP agents, etc.). "Agent" has three senses in Florina — provider/runtime (this one), Agent Profile (a reusable role/system-prompt/tool-scope configuration applied to a Task), and Session/Run (a concrete execution instance, below). See `docs/PROVIDER_TOPOLOGY.md` § 1 for the full disambiguation and why only Agent Profile is a scoped addition to the existing model.
 
 ### Session (Run)
 A concrete execution/conversation instance belonging to a Task. Implementation detail — the human shouldn't need to care unless session-level detail becomes relevant.
