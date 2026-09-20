@@ -15,3 +15,4 @@ export * from './voice.js';
 export * from './health.js';
 export * from './idea-ledger.js';
 export * from './memory-store.js';
+export * from './agent-profile-store.js';

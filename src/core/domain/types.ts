@@ -96,6 +96,12 @@ export interface Task {
   readonly capsuleId: EntityId;
   /** Maps 1:1 to a git worktree in MVP (DEC-020). */
   readonly worktreePath?: string;
+  /**
+   * Optional reference to an `AgentProfile` (issue #196) — the role this
+   * Task is executed under. Undefined for Tasks that predate this field
+   * or don't need one; no forced migration.
+   */
+  readonly agentProfileId?: EntityId;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
 }

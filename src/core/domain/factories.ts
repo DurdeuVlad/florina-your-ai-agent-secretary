@@ -88,6 +88,8 @@ export interface BuildTaskInput {
   readonly capsuleId?: EntityId;
   readonly worktreePath?: string;
   readonly id?: EntityId;
+  /** Optional Agent Profile reference (issue #196); omit for no role binding. */
+  readonly agentProfileId?: EntityId;
 }
 
 export function buildTask(input: BuildTaskInput): Task {
@@ -103,6 +105,7 @@ export function buildTask(input: BuildTaskInput): Task {
     attentionItemIds: [],
     capsuleId: input.capsuleId ?? generateId('capsule'),
     worktreePath: input.worktreePath,
+    agentProfileId: input.agentProfileId,
     createdAt: ts,
     updatedAt: ts,
   };
