@@ -125,6 +125,14 @@ export interface MemoryItem {
    * no consumer for it yet.
    */
   readonly tags?: readonly string[];
+  /**
+   * Conversation-turn ids this item's `inferred-*` provenance is derived
+   * from (issue #193/#210) — how the confirmation flow (#211) shows the
+   * user "you said this on ..." and how repetition count is computed.
+   * Undefined for `explicit`/`observed` provenance, which don't derive
+   * from a turn count.
+   */
+  readonly sourceTurnIds?: readonly string[];
 }
 
 /** True when two scopes refer to the same place (used for retrieval/matching). */
