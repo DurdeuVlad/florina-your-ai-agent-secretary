@@ -20,3 +20,4 @@ export * from './verification/index.js';
 export * from './voice/index.js';
 export * from './ideas/index.js';
 export * from './managers/index.js';
+export * from './memory/index.js';
