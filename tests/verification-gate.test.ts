@@ -101,10 +101,19 @@ function createFixture(): Fixture {
   };
 }
 
+/**
+ * Monotonically increasing timestamps anchored to real "now", not a fixed
+ * calendar date. `VerificationGate.gateCompletion` stamps its own claim
+ * record with `new Date()` (real wall clock); a fixed-past-date fixture
+ * here would eventually sort *before* that real-clock claim once the
+ * fixed date fell in the past, silently flipping the gate's "latest fact
+ * wins" comparison. Anchoring to `Date.now()` keeps this test's evidence
+ * timestamps always later than anything the gate itself stamps mid-test.
+ */
 let seq = 0;
 function ts(): string {
   seq += 1;
-  return `2026-09-20T00:00:${String(seq).padStart(2, '0')}.000Z`;
+  return new Date(Date.now() + seq).toISOString();
 }
 
 function verifyEvent(
