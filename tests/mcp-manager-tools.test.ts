@@ -9,6 +9,7 @@ import type { CommandApiDeps } from '../src/core/application/use-cases/tasks/com
 import { CapacityRouter } from '../src/core/application/use-cases/routing/capacity-router.js';
 import { QuotaLedger } from '../src/core/application/use-cases/routing/quota-ledger.js';
 import { EventBus } from '../src/adapters/outbound/events/in-memory-event-bus.js';
+import { EventJournalWriter } from '../src/core/application/use-cases/journal/event-journal-writer.js';
 import { AttentionInbox } from '../src/core/application/use-cases/attention/attention-inbox.js';
 import { MetricsCollector } from '../src/core/application/use-cases/metrics.js';
 import { TaskStateMachine } from '../src/core/application/use-cases/tasks/task-lifecycle.js';
@@ -26,6 +27,7 @@ interface Fixture {
   api: CommandApi;
   inbox: AttentionInbox;
   taskStore: TaskRepository;
+  eventRepo: EventRepository;
   ledger: QuotaLedger;
   createWorktree: ReturnType<typeof vi.fn>;
   projectId: string;
@@ -70,11 +72,15 @@ function createFixture(
   const sessionRepo = new SessionRepository(raw);
 
   const inbox = new AttentionInbox();
+  const eventBus = new EventBus();
+  // Journals bus-published adapter/daemon events (e.g. AgentStarted) —
+  // without this, CommandApi's eventBus.publish never reaches eventRepo.
+  new EventJournalWriter({ journal: eventRepo, bus: eventBus }).start();
 
   // The service and CommandApi share the real task repository: the state
   // machine reads what the service writes.
   const deps: CommandApiDeps = {
-    eventBus: new EventBus(),
+    eventBus,
     taskStateMachine: new TaskStateMachine(taskRepo, eventRepo),
     attentionInbox: inbox,
     metricsCollector: new MetricsCollector(),
@@ -107,6 +113,7 @@ function createFixture(
     api,
     inbox,
     taskStore: taskRepo,
+    eventRepo,
     ledger,
     createWorktree,
     projectId: project.id,
@@ -164,6 +171,49 @@ describe('ManagerToolService', () => {
     const res = await fx.service.spawnTask({ objective: '   ' });
     expect(res.status).toBe('error');
     expect(fx.taskStore.listAll()).toHaveLength(0);
+  });
+
+  it('carries a caller-compiled Execution Brief through to the journaled AgentStarted event (issue #209)', async () => {
+    const executionBrief = {
+      objective: 'implement the widget',
+      relevantContext: ['This project uses hexagonal architecture.'],
+      applicableRules: [
+        {
+          id: 'r-1',
+          statement: 'Reproduce before fixing.',
+          provenance: 'explicit' as const,
+          scope: { type: 'global' as const },
+        },
+      ],
+      requiredVerification: ['npm test'],
+      definitionOfDone: 'Widget implemented; tests pass.',
+      providerRationale: 'Codex — routing preference for this work type.',
+    };
+
+    const res = await fx.service.spawnTask({ objective: 'implement the widget', executionBrief });
+    expect(res.status).toBe('spawned');
+    if (res.status !== 'spawned') return;
+
+    // TaskStateMachine's own Created->Delegated transition journals a
+    // *different* record that happens to reuse the same journal `kind`
+    // string ('AgentStarted') for its own purposes (fromState/toState
+    // payload) — distinguish the canonical SupervisorEvent by its
+    // `objective` field, unique to the real dispatch event.
+    const events = fx.eventRepo
+      .listByTask(res.taskId)
+      .filter((e) => e.kind === 'AgentStarted' && 'objective' in e.payload);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.payload['executionBrief']).toEqual(executionBrief);
+  });
+
+  it('spawns fine with no Execution Brief (optional, unchanged default behavior)', async () => {
+    const res = await fx.service.spawnTask({ objective: 'implement the widget' });
+    expect(res.status).toBe('spawned');
+    if (res.status !== 'spawned') return;
+    const events = fx.eventRepo
+      .listByTask(res.taskId)
+      .filter((e) => e.kind === 'AgentStarted' && 'objective' in e.payload);
+    expect(events[0]!.payload['executionBrief']).toBeUndefined();
   });
 
   it('requestHumanInput raises an inbox item through the command API', async () => {
