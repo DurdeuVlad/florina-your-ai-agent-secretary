@@ -115,6 +115,16 @@ export interface MemoryItem {
   readonly supersedes?: EntityId;
   /** Id(s) of active items this one contradicts, when `status: conflict`. */
   readonly conflictsWith?: readonly EntityId[];
+  /**
+   * Topic tags (e.g. `frontend`, `bugfix`, `security`, `provider-choice`,
+   * `verification`) assigned at write time — inferred from the
+   * conversation that produced the item, or explicit. Drives the
+   * Execution Brief compiler's tag-match retrieval step (§ 6.2, #207);
+   * an item with no tags is never tag-matched. Added alongside the
+   * compiler rather than #204 because #204 predates §6's design and had
+   * no consumer for it yet.
+   */
+  readonly tags?: readonly string[];
 }
 
 /** True when two scopes refer to the same place (used for retrieval/matching). */
