@@ -19,6 +19,7 @@
  *   the command (DEC-002, DEC-011).
  */
 import type { AdapterFidelityTier } from '../../../domain/enums.js';
+import type { ExecutionBrief } from '../../../domain/execution-brief.js';
 import { TaskState } from '../../../domain/enums.js';
 import type { TaskState as TaskStateType } from '../../../domain/enums.js';
 import type { Approval, ConversationMessage, Event, Session, Task } from '../../../domain/types.js';
@@ -112,6 +113,13 @@ export interface SessionConfig {
    * manager agent can call `florina_spawn_task` et al.
    */
   readonly mcpServers?: readonly McpServerSpec[];
+  /**
+   * The compiled Execution Brief for this dispatch (§6.4, DEC-039, issue
+   * #209), when one was compiled by the caller. Attached to the
+   * `AgentStarted` event so it's journaled at dispatch time, not
+   * reconstructed after the fact.
+   */
+  readonly executionBrief?: ExecutionBrief;
 }
 
 /**
@@ -1573,6 +1581,7 @@ export class CommandApi {
       workingDir: cmd.sessionConfig.workingDir,
       model: cmd.sessionConfig.model,
       autonomyLevel: cmd.sessionConfig.autonomyLevel,
+      executionBrief: cmd.sessionConfig.executionBrief,
     };
     this.eventBus.publish(event);
 

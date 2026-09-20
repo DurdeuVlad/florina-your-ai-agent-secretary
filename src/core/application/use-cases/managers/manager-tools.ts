@@ -22,6 +22,7 @@ import type { AttentionItemSnapshot, CommandExecutor, TaskSnapshot } from '../ta
 import type { CapacityRouter } from '../routing/capacity-router.js';
 import type { AttentionItemPriority } from '../attention/attention-item.js';
 import type { McpServerSpec } from '../../ports/outbound/agent-runtime.js';
+import type { ExecutionBrief } from '../../../domain/execution-brief.js';
 import {
   preferencePromptText,
   type PreferenceProfilePort,
@@ -115,6 +116,14 @@ export interface SpawnTaskInput {
   readonly preferModel?: string;
   /** Providers to exclude (e.g. already tried on a retried task). */
   readonly excludeProviders?: readonly string[];
+  /**
+   * A pre-compiled Execution Brief (issue #207's `compileExecutionBrief`,
+   * issue #209) for this dispatch, when the caller compiled one. This
+   * service does not compile it itself — it has no memory store or topic
+   * inference — it only carries an already-compiled Brief through to the
+   * dispatch event so it gets journaled (#208).
+   */
+  readonly executionBrief?: ExecutionBrief;
 }
 
 /** Result of {@link ManagerToolService.spawnTask}. */
@@ -152,7 +161,10 @@ export class ManagerToolService {
    * later retry (DEC-024 prune policy).
    */
   async spawnTask(input: SpawnTaskInput): Promise<SpawnTaskResult> {
-    return this.spawnTaskWithConfig(input, { workType: input.workType });
+    return this.spawnTaskWithConfig(input, {
+      workType: input.workType,
+      executionBrief: input.executionBrief,
+    });
   }
 
   /**
@@ -170,6 +182,7 @@ export class ManagerToolService {
       workType: input.workType ?? 'manage',
       mcpServers: [florinaMcpSpec(this.deps.mcpUrl, this.deps.projectId)],
       prompt: this.managerPrompt(input.objective),
+      executionBrief: input.executionBrief,
     });
   }
 
@@ -195,6 +208,7 @@ export class ManagerToolService {
       workType?: string;
       mcpServers?: readonly McpServerSpec[];
       prompt?: string;
+      executionBrief?: ExecutionBrief;
     },
   ): Promise<SpawnTaskResult> {
     if (!input.objective || input.objective.trim().length === 0) {
@@ -255,6 +269,7 @@ export class ManagerToolService {
         model: decision.model,
         ...(launch.mcpServers !== undefined ? { mcpServers: launch.mcpServers } : {}),
         ...(launch.prompt !== undefined ? { prompt: launch.prompt } : {}),
+        ...(launch.executionBrief !== undefined ? { executionBrief: launch.executionBrief } : {}),
       },
     });
     if (!res.ok || !('sessionId' in res) || typeof res.sessionId !== 'string') {
