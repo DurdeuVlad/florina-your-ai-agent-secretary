@@ -30,7 +30,7 @@ import { renderInspectorView, renderTimelineRow } from './views/inspector-view.j
 import { renderFleetScreen } from './views/fleet-screen.js';
 import { renderPrefsScreen } from './views/prefs-screen.js';
 import { renderMemorySettingsView } from './views/memory-settings-view.js';
-import { preferenceProfileToMemoryItems } from '../../../core/application/use-cases/memory/preference-bridge.js';
+import { preferenceProfileToMemoryRows } from '../../../core/application/use-cases/memory/preference-memory-actions.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
@@ -957,6 +957,26 @@ export class DesktopApp {
         return { error: 'malformed prefcmd payload' };
       }
     }
+    // `memcmd:<uri-encoded JSON>` — inline memory-row forget/promote
+    // actions (issue #224). Same shape and validation as `prefcmd:`
+    // since both carry `update-preference` commands; kept as a distinct
+    // verb so the Memory view and the Preferences view stay independent
+    // wire contracts even though they share a command type today.
+    if (cmd.startsWith('memcmd:')) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cmd.slice('memcmd:'.length))) as unknown;
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          (parsed as { kind?: unknown }).kind === 'update-preference'
+        ) {
+          return parsed as Command;
+        }
+        return { error: 'memcmd payload must be an update-preference command' };
+      } catch {
+        return { error: 'malformed memcmd payload' };
+      }
+    }
     // `ideacmd:<uri-encoded JSON>` — same pattern for the ideas screen,
     // whitelisted to the idea/brief command kinds (issue #129).
     if (cmd.startsWith('ideacmd:')) {
@@ -1482,19 +1502,20 @@ export class DesktopApp {
     if (prefsRes !== null && prefsRes.ok && 'profile' in prefsRes) {
       const profile = prefsRes.profile as PreferenceProfile;
       this.bridge.sendToRenderer('prefs:update', renderPrefsScreen(profile));
-      // Settings memory/rules browse (issue #223): the same profile,
-      // re-expressed as preference-kind MemoryItems via #205's bridge --
+      // Settings memory/rules browse (issue #223) with inline forget/
+      // promote actions (issue #224): the same profile, re-expressed as
+      // preference-kind rows via #224's preferenceProfileToMemoryRows --
       // no new query, no change to the routing-rule/deny commands above.
       // Ids only need to stay stable within one render (they key the
       // Forget/Promote command targets sent back this same refresh
       // cycle), so a fresh per-render counter is enough -- no persistent
       // id generator exists for memory items yet (#204 has no adapter).
-      const memoryItems = preferenceProfileToMemoryItems(
+      const memoryRows = preferenceProfileToMemoryRows(
         profile,
         { generate: (prefix) => `${prefix}-${++this.memoryItemIdCounter}` },
         { now: () => new Date() },
       );
-      this.bridge.sendToRenderer('memory:update', renderMemorySettingsView(memoryItems));
+      this.bridge.sendToRenderer('memory:update', renderMemorySettingsView(memoryRows));
     }
     // Ideas screen (#129): ledger directory + awaiting-decision briefs.
     if (ideasRes !== null && briefsRes !== null && 'ideas' in ideasRes && 'briefs' in briefsRes) {
