@@ -144,8 +144,17 @@ export class AttentionAggregator {
    *
    * Exposed publicly so callers can feed events directly (e.g. when
    * replaying the event journal on startup) without going through the bus.
+   *
+   * `provenance: 'observed'` events (DEC-041, issue #197 — provider-native
+   * activity Florina did not dispatch) never reach the switch below: no
+   * auto-approval evaluation, no attention item of any kind. They remain
+   * visible only in the journal/inspector's raw event stream, which reads
+   * the journal directly rather than through this pipeline.
    */
   handleEvent(event: SupervisorEvent): void {
+    if (event.provenance === 'observed') {
+      return;
+    }
     switch (event.type) {
       case 'ApprovalRequested':
         this.addApprovalItem(event);

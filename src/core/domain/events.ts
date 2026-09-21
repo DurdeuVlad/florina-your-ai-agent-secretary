@@ -91,6 +91,18 @@ export interface SupervisorEventBase {
   agentId: string;
   /** Fidelity tier of the adapter that normalized this event. */
   adapterFidelityTier: AdapterFidelityTier;
+  /**
+   * Dispatch provenance (DEC-041, issue #197): `undefined`/`'managed'`
+   * (the default — every event today) means Florina/a manager dispatched
+   * this through `florina_spawn_task` (DEC-018), full journal/policy/quota
+   * accounting applies. `'observed'` means an adapter is reporting
+   * read-only visibility into provider-native activity Florina did **not**
+   * dispatch (e.g. a user running Claude Code's Agent View directly) —
+   * informational only: never eligible for auto-approval, never counted
+   * toward quota, never surfaced as an actionable attention item. See
+   * `docs/PROVIDER_TOPOLOGY.md` §§ 2-3. No adapter emits `'observed'` yet.
+   */
+  provenance?: 'managed' | 'observed';
 }
 
 /**
@@ -746,6 +758,9 @@ export function validateEvent(value: unknown): SupervisorEvent {
   }
   if (!isOneOf(value['adapterFidelityTier'], ADAPTER_FIDELITY_TIERS)) {
     problems.push('Field "adapterFidelityTier" must be one of A, B, C, D, E.');
+  }
+  if (value['provenance'] !== undefined && !isOneOf(value['provenance'], ['managed', 'observed'])) {
+    problems.push('Field "provenance", when present, must be "managed" or "observed".');
   }
 
   const type = value['type'];
