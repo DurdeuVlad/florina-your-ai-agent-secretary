@@ -1894,7 +1894,9 @@ describe('repo roots (issue #253)', () => {
       this.config = { roots };
       return true;
     }
+    throwOnSave = false;
     async save(): Promise<void> {
+      if (this.throwOnSave) throw new Error('disk write failed');
       this.saved++;
     }
   }
@@ -2098,6 +2100,15 @@ describe('repo roots (issue #253)', () => {
     expect(res.error).toContain('path');
   });
 
+  it('add-repo-root returns ok:false (not an unhandled rejection) when persisting fails', async () => {
+    const repoRoots = new FakeRepoRoots();
+    repoRoots.throwOnSave = true;
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    const res = (await api.execute({ kind: 'add-repo-root', path: '/repos/a' })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('disk write failed');
+  });
+
   it('a malformed move-repo-root direction (neither "up" nor "down") is rejected at the runtime boundary', async () => {
     const repoRoots = new FakeRepoRoots();
     const api = apiWith(repoRoots, new FakeRepoScanner({}));
@@ -2109,5 +2120,30 @@ describe('repo roots (issue #253)', () => {
     })) as ReposResponse;
     expect(res.ok).toBe(false);
     expect(res.error).toContain('direction');
+  });
+
+  it('remove-repo-root returns ok:false (not an unhandled rejection) when persisting fails', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    repoRoots.throwOnSave = true;
+    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('disk write failed');
+  });
+
+  it('move-repo-root returns ok:false (not an unhandled rejection) when persisting fails', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    await api.execute({ kind: 'add-repo-root', path: '/repos/b' });
+    repoRoots.throwOnSave = true;
+    const res = (await api.execute({
+      kind: 'move-repo-root',
+      path: '/repos/a',
+      direction: 'down',
+    })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('disk write failed');
   });
 });

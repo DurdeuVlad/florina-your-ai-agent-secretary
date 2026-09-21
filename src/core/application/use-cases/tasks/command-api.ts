@@ -2460,8 +2460,12 @@ export class CommandApi {
       return { ok: false, error: 'path is required' };
     }
     const removed = this.repoRoots.removeRoot(cmd.path);
-    if (removed) await this.repoRoots.save();
-    return { ok: true, roots: this.repoRoots.toConfig() };
+    try {
+      if (removed) await this.repoRoots.save();
+      return { ok: true, roots: this.repoRoots.toConfig() };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
   }
 
   /**
@@ -2482,8 +2486,12 @@ export class CommandApi {
       return { ok: false, error: 'direction must be "up" or "down"' };
     }
     const moved = this.repoRoots.moveRoot(cmd.path, cmd.direction);
-    if (moved) await this.repoRoots.save();
-    return { ok: true, roots: this.repoRoots.toConfig() };
+    try {
+      if (moved) await this.repoRoots.save();
+      return { ok: true, roots: this.repoRoots.toConfig() };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
   }
 
   /**
