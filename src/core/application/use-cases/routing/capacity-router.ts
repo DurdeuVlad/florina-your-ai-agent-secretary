@@ -162,12 +162,12 @@ export class CapacityRouter {
   }
 
   private isDenied(rule: RoutingRule, projectId?: string): boolean {
-    return this.profile.denied.some(
-      (deny) =>
-        inScope(deny, projectId) &&
-        deny.provider === rule.provider &&
-        (deny.model === undefined || deny.model === rule.model),
-    );
+    return this.profile.denied.some((deny) => {
+      if (!inScope(deny, projectId) || deny.provider !== rule.provider) return false;
+      if (deny.model === undefined) return true;
+      const family = modelFamilyOf(deny.provider);
+      return family(deny.model) === family(rule.model ?? '');
+    });
   }
 
   /**
@@ -200,4 +200,40 @@ function describeRule(rule: RoutingRule): string {
   const model = rule.model !== undefined ? ` model=${rule.model}` : '';
   const work = rule.workTypes !== undefined ? ` work=[${rule.workTypes.join(',')}]` : '';
   return `${rule.provider}${model}${work}`;
+}
+
+/**
+ * Per-provider model-alias normalizers (issue #250): some provider CLIs
+ * treat a short alias and a full model id as the same model — e.g. Claude
+ * Code's `--model opus` and `--model claude-opus-5` launch the same
+ * session — so a deny on one form must also block the other. Keyed by
+ * provider so adding another provider's alias scheme later is a one-line
+ * table entry, not another branch in {@link CapacityRouter.isDenied}.
+ * Providers with no entry fall back to exact-string matching (the historic
+ * behavior), which is correct for providers with no documented alias
+ * convention (Codex, Devin, Gemini, Antigravity, as of #250).
+ */
+const MODEL_FAMILY_NORMALIZERS: Readonly<Record<string, (model: string) => string>> = {
+  'claude-code': claudeModelFamily,
+};
+
+/** Exact-string fallback for providers with no registered alias scheme (unchanged pre-#250 behavior). */
+function identityFamily(model: string): string {
+  return model;
+}
+
+function modelFamilyOf(provider: string): (model: string) => string {
+  return MODEL_FAMILY_NORMALIZERS[provider] ?? identityFamily;
+}
+
+/**
+ * Strips a `claude-<family>-...` prefix down to `<family>`, so `opus`,
+ * `claude-opus-5`, and any future `claude-opus-*` id all normalize to
+ * `opus`. A bare alias has no such prefix and normalizes to itself, so
+ * both forms converge.
+ */
+function claudeModelFamily(model: string): string {
+  const lower = model.toLowerCase();
+  const match = /^claude-([a-z]+)(?:-|$)/.exec(lower);
+  return match ? match[1]! : lower;
 }

@@ -295,7 +295,12 @@ export async function attachLocalAgentProviders(
     const command = d === null ? resolveCommand('FLORINA_AGY_CMD', 'agy', [], env, platform) : null;
     if (d !== null) skip(id, d);
     else if (command === null) {
-      skip(id, '`agy` headless CLI not found — Antigravity IDE does not ship one on this machine');
+      skip(
+        id,
+        '`agy` headless CLI not found on PATH. It is a standalone CLI install, not bundled ' +
+          'inside the Antigravity IDE app folder (checked: no agy under Programs/Antigravity IDE). ' +
+          'Once installed, either put it on PATH or set FLORINA_AGY_CMD to its path.',
+      );
     } else {
       registry.register(id, () => new AgyAdapter(null, { command }));
       attached.push({ id, command });
