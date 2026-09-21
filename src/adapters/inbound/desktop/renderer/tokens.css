@@ -115,6 +115,40 @@ nav {
   background: var(--panel-raised);
   color: var(--muted);
 }
+/* Work view sub-tabs (issue #220): Tasks/Fleet/Ideas inside one entry
+   point, styled like a lighter-weight sibling of .navitem rather than a
+   second nav bar. */
+.worksubnav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.worksubtab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  padding: 8px 4px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.worksubtab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.worksubpanel {
+  display: none;
+}
+.worksubpanel.active {
+  display: block;
+}
 .sidefoot {
   margin-top: auto;
   padding: 10px;

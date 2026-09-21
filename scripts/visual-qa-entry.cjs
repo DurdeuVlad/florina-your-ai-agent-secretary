@@ -31,16 +31,25 @@ const HEIGHT = 760;
 const SETTLE_MS = 600;
 const APP_SETTLE_MS = 3500;
 
-/* view name -> keys after 'g' (renderer keymap, DG-01 §4) */
+/*
+ * Top-level view name -> keys after 'g' (renderer keymap, DG-01 §4,
+ * remapped to the 5-item IA by issue #219: docs/UX_GUIDELINES.md §4).
+ * fleet/ideas/secretary have no top-level nav entry as of #219/#220 —
+ * fleet/ideas are captured below as Work sub-tabs instead; secretary has
+ * no capture until a future issue merges it into Florina.
+ */
 const APP_VIEWS = {
   chat: null, // default launch view (#160) — no keys needed
-  inbox: 'i',
-  tasks: 't',
-  fleet: 'f',
-  ideas: 'd',
-  prefs: 'p',
-  secretary: 's',
+  inbox: 'a',
+  tasks: 'w',
+  history: 'h',
+  prefs: 's',
 };
+
+/* Work (tasks) sub-tabs (issue #220) — captured after navigating to
+ * 'tasks', via a real DOM click on the tab button (not a product hook —
+ * the same event listener a user's click fires). */
+const WORK_SUBTABS = ['fleet', 'ideas'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -109,6 +118,22 @@ async function shotApp() {
     }
     await captureWindow(win, path.join(SHOTS, `app-${view}.png`));
     console.log(`[visual-qa] captured view ${view}`);
+  }
+
+  // Work sub-tabs (issue #220): already on 'tasks' from the loop above
+  // (it's the last APP_VIEWS entry before prefs... actually prefs is
+  // last, so re-select tasks explicitly before clicking sub-tabs).
+  pressKey(win, 'g');
+  await sleep(80);
+  pressKey(win, 'w');
+  await sleep(SETTLE_MS);
+  for (const sub of WORK_SUBTABS) {
+    await win.webContents.executeJavaScript(
+      `document.querySelector('[data-worksub="${sub}"]')?.click()`,
+    );
+    await sleep(SETTLE_MS);
+    await captureWindow(win, path.join(SHOTS, `app-work-${sub}.png`));
+    console.log(`[visual-qa] captured Work sub-tab ${sub}`);
   }
 }
 

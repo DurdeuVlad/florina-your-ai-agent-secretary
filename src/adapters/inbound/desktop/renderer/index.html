@@ -503,7 +503,7 @@
       </nav>
       <main>
         <header>
-          <h1 id="viewTitle">Chat</h1>
+          <h1 id="viewTitle">Florina</h1>
           <span class="sub" id="viewSub">one conversation with your Secretary</span>
           <span class="spacer"></span>
           <button
@@ -560,7 +560,25 @@
               </div>
             </section>
             <section class="view" id="v-inbox"><div id="inbox"></div></section>
-            <section class="view" id="v-tasks"><div id="inspector"></div></section>
+            <!--
+              Work (issue #220, docs/UX_INFORMATION_ARCHITECTURE.md §2):
+              a single entry point over Tasks/Fleet/Ideas via sub-tabs,
+              rather than three separate top-level nav destinations. The
+              Session Inspector (#inspector) is reused completely
+              unmodified internally -- only its container's siblings
+              changed, per #220's explicit "reused unmodified internally"
+              acceptance criterion.
+            -->
+            <section class="view" id="v-tasks">
+              <div class="worksubnav">
+                <button class="worksubtab active" data-worksub="inspector">Tasks</button>
+                <button class="worksubtab" data-worksub="fleet">Fleet</button>
+                <button class="worksubtab" data-worksub="ideas">Ideas</button>
+              </div>
+              <div id="inspector" class="worksubpanel active"></div>
+              <div id="fleet" class="worksubpanel"></div>
+              <div id="ideas" class="worksubpanel"></div>
+            </section>
             <!--
               History (issue #219 stub, docs/UX_INFORMATION_ARCHITECTURE.md
               §2): the real surface (completed deliverables, resolved
@@ -575,8 +593,8 @@
                 <div class="empty-hint">Completed work, resolved decisions, and evidence trails will live here.</div>
               </div>
             </section>
-            <section class="view" id="v-fleet"><div id="fleet"></div></section>
-            <section class="view" id="v-ideas"><div id="ideas"></div></section>
+            <!-- v-fleet/v-ideas removed (#220): #fleet/#ideas now live as
+                 sub-panels inside v-tasks (Work), see above. -->
             <section class="view" id="v-prefs">
               <div id="prefs"></div>
               <!-- Desktop-local settings (issue #163): not part of the
