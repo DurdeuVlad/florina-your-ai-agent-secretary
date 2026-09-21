@@ -288,6 +288,7 @@ describe('IpcBridge', () => {
       'prefs:update',
       'ideas:update',
       'history:update',
+      'history:search-results',
       'secretary:update',
       'chat:update',
       'chat:activity',

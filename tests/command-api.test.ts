@@ -22,6 +22,7 @@ import type {
   DigestResponse,
   CatchUpResponse,
   ConfirmCatchUpResponse,
+  SearchJournalResponse,
   SecretaryResponse,
   MemoryWriteResponse,
   UnknownCommandResponse,
@@ -1441,6 +1442,46 @@ describe('CommandApi', () => {
       const res = (await fixture.api.execute({ kind: 'confirm-catchup', until: '' })) as ConfirmCatchUpResponse;
       expect(res.ok).toBe(false);
       expect(res.error).toContain('until is required');
+    });
+  });
+
+  describe('search-journal (issue #222)', () => {
+    it('finds a journaled event by text, across tasks (not task-scoped)', async () => {
+      const { task, sessionId, agentId } = createTaskWithSession(fixture);
+      fixture.taskStateMachine.transition(task.id, TaskState.Created, TaskState.Delegated, {
+        sessionId,
+        agentId,
+      });
+
+      const res = (await fixture.api.execute({
+        kind: 'search-journal',
+        text: 'AgentStarted',
+      })) as SearchJournalResponse;
+
+      expect(res.ok).toBe(true);
+      expect(res.events.some((e) => e.taskId === task.id)).toBe(true);
+    });
+
+    it('returns no events for text that matches nothing', async () => {
+      const { task, sessionId, agentId } = createTaskWithSession(fixture);
+      fixture.taskStateMachine.transition(task.id, TaskState.Created, TaskState.Delegated, {
+        sessionId,
+        agentId,
+      });
+
+      const res = (await fixture.api.execute({
+        kind: 'search-journal',
+        text: 'no-such-thing-xyz',
+      })) as SearchJournalResponse;
+
+      expect(res.ok).toBe(true);
+      expect(res.events).toEqual([]);
+    });
+
+    it('with no query at all, returns events without throwing (bounded default range)', async () => {
+      const res = (await fixture.api.execute({ kind: 'search-journal' })) as SearchJournalResponse;
+      expect(res.ok).toBe(true);
+      expect(Array.isArray(res.events)).toBe(true);
     });
   });
 

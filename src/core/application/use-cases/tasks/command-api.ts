@@ -41,6 +41,7 @@ import {
 import type { AttentionInbox, AttentionInboxFilter } from '../attention/attention-inbox.js';
 import type { CompletionDigest } from '../attention/completion-digest.js';
 import { computeCatchUpDigest, watermarkOrEpoch, advanceWatermark } from '../resumption/catchup-digest.js';
+import { searchJournalEvents } from '../journal/journal-search.js';
 import type { CatchUpDigest } from '../resumption/catchup-digest.js';
 import type { CatchUpWatermarkPort } from '../../ports/outbound/catchup-watermark.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
@@ -266,6 +267,17 @@ export interface QueryTaskCommand {
 export interface QueryEventsCommand {
   readonly kind: 'query-events';
   readonly taskId: string;
+}
+
+/**
+ * Text/date-range search over the whole journal, for History's search
+ * surface (issue #222) — unlike `query-events`, not scoped to one task.
+ */
+export interface SearchJournalCommand {
+  readonly kind: 'search-journal';
+  readonly text?: string;
+  readonly since?: string;
+  readonly until?: string;
 }
 
 /**
@@ -608,6 +620,7 @@ export type Command =
   | GetDigestCommand
   | GetCatchUpCommand
   | ConfirmCatchUpCommand
+  | SearchJournalCommand
   | CreatePrCommand
   | DelegateTaskCommand
   | ChatSendCommand
@@ -925,6 +938,13 @@ export interface EventsResponse {
   readonly error?: string;
 }
 
+/** Response to a `search-journal` command (issue #222). */
+export interface SearchJournalResponse {
+  readonly ok: boolean;
+  readonly events: readonly Event[];
+  readonly error?: string;
+}
+
 /** One provider's quota line for the fleet view (issue #127). */
 export interface FleetProviderView {
   readonly provider: string;
@@ -1004,6 +1024,7 @@ export interface ChatClearResponse {
 export type Response =
   | StartTaskResponse
   | EventsResponse
+  | SearchJournalResponse
   | FleetResponse
   | StopTaskResponse
   | ApproveResponse
@@ -1355,6 +1376,8 @@ export class CommandApi {
         return this.handleQueryTask(command);
       case 'query-events':
         return this.handleQueryEvents(command);
+      case 'search-journal':
+        return this.handleSearchJournal(command);
       case 'query-fleet':
         return this.handleQueryFleet();
       case 'list-tasks':
@@ -1918,6 +1941,24 @@ export class CommandApi {
       return { ok: false, taskId: cmd.taskId, events: [], error: `Task not found: ${cmd.taskId}` };
     }
     return { ok: true, taskId: cmd.taskId, events: this.eventRepository.listByTask(cmd.taskId) };
+  }
+
+  /**
+   * search-journal (issue #222): text/date-range search over the whole
+   * journal for History's search surface. Reads via
+   * `listByTimestampRange` (defaulting to "all time" when unbounded) and
+   * delegates the actual filter/sort/cap to the pure `searchJournalEvents`.
+   */
+  private handleSearchJournal(cmd: SearchJournalCommand): SearchJournalResponse {
+    try {
+      const since = cmd.since ?? new Date(0).toISOString();
+      const until = cmd.until ?? new Date().toISOString();
+      const candidates = this.eventRepository.listByTimestampRange(since, until);
+      const events = searchJournalEvents(candidates, { text: cmd.text, since: cmd.since, until: cmd.until });
+      return { ok: true, events };
+    } catch (err) {
+      return { ok: false, events: [], error: `Failed to search journal: ${errorMessage(err)}` };
+    }
   }
 
   /**

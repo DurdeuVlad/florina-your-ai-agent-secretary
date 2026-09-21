@@ -108,7 +108,8 @@ function renderTaskRow(task: TaskSnapshot, selected: boolean): RenderTree {
   );
 }
 
-function renderTimelineRow(e: Event, index: number, selected: boolean): RenderTree {
+/** Exported for reuse by History's journal search (issue #222) — same row shape everywhere an event appears. */
+export function renderTimelineRow(e: Event, index: number, selected: boolean): RenderTree {
   if (e.kind === 'TaskFailedOver') {
     return renderProviderTransitionRow(
       {

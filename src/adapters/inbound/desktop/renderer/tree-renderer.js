@@ -62,6 +62,7 @@ const TAG_CLASS = {
   HistoryDecisionRow: 'taskrow',
   HistoryDecisionKind: 'obj',
   HistoryDecisionMeta: 'stat',
+  HistorySearchResults: 'history-search-results',
   /* session inspector (issue #126) */
   Inspector: 'cols',
   InspectorCol: 'col',
