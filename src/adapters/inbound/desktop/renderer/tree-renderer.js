@@ -156,6 +156,9 @@ function renderNode(node) {
     else if (props && props.variant === 'ghost') el.classList.add('ghost');
   }
   if (props && props.command) el.dataset.command = String(props.command);
+  // Inline memory Promote button (issue #224): flags the click handler to
+  // confirm before sending, since promote is a scope-widening action.
+  if (props && props.confirmPromote) el.dataset.confirmPromote = 'true';
   // Stable identity for entrance-animation diffing (chat messages) — the
   // renderer decides what's "new since last render", never the tree.
   if (props && props.id !== undefined) el.dataset.id = String(props.id);

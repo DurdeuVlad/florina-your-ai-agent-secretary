@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { renderMemorySettingsView } from '../src/adapters/inbound/desktop/views/memory-settings-view.js';
+import type { MemoryRowInput } from '../src/adapters/inbound/desktop/views/memory-settings-view.js';
 import type { MemoryItem } from '../src/core/domain/memory.js';
+import type { UpdatePreferenceCommand } from '../src/core/application/use-cases/tasks/command-api.js';
 
 function item(overrides: Partial<MemoryItem> & Pick<MemoryItem, 'id' | 'kind'>): MemoryItem {
   return {
@@ -12,6 +14,25 @@ function item(overrides: Partial<MemoryItem> & Pick<MemoryItem, 'id' | 'kind'>):
     createdAt: '2026-09-21T00:00:00.000Z',
     updatedAt: '2026-09-21T00:00:00.000Z',
     ...overrides,
+  };
+}
+
+const forgetCmd: UpdatePreferenceCommand = {
+  kind: 'update-preference',
+  action: 'remove-rule',
+  provider: 'codex',
+};
+const promoteCmd: UpdatePreferenceCommand = {
+  kind: 'update-preference',
+  action: 'add-rule',
+  provider: 'codex',
+};
+
+function row(memItem: MemoryItem, opts: { withForget?: boolean; withPromote?: boolean } = {}): MemoryRowInput {
+  return {
+    item: memItem,
+    ...(opts.withForget ? { forgetCommand: forgetCmd } : {}),
+    ...(opts.withPromote ? { promoteCommand: promoteCmd } : {}),
   };
 }
 
@@ -27,7 +48,7 @@ function flatten(tree: ReturnType<typeof renderMemorySettingsView>): string[] {
 }
 
 describe('renderMemorySettingsView', () => {
-  it('shows an explicit empty state with no items, but still renders the filter bar', () => {
+  it('shows an explicit empty state with no rows, but still renders the filter bar', () => {
     const tree = renderMemorySettingsView([]);
     expect(flatten(tree)).toContain('EmptyState');
     expect(flatten(tree)).toContain('MemoryFilterBar');
@@ -47,8 +68,8 @@ describe('renderMemorySettingsView', () => {
 
   it('renders one row per item, most-recently-updated first', () => {
     const tree = renderMemorySettingsView([
-      item({ id: 'm-old', kind: 'preference', updatedAt: '2026-09-19T00:00:00.000Z' }),
-      item({ id: 'm-new', kind: 'preference', updatedAt: '2026-09-20T00:00:00.000Z' }),
+      row(item({ id: 'm-old', kind: 'preference', updatedAt: '2026-09-19T00:00:00.000Z' })),
+      row(item({ id: 'm-new', kind: 'preference', updatedAt: '2026-09-20T00:00:00.000Z' })),
     ]);
     const rows = tree.children?.filter((c) => typeof c !== 'string' && c.tag === 'MemoryRow') ?? [];
     const ids = rows.map((r) => (typeof r === 'string' ? undefined : r.props?.['itemId']));
@@ -57,13 +78,13 @@ describe('renderMemorySettingsView', () => {
 
   it('renders provenance and confidence as chips on each row', () => {
     const tree = renderMemorySettingsView([
-      item({ id: 'm1', kind: 'preference', provenance: 'inferred-repeated', confidence: 'medium' }),
+      row(item({ id: 'm1', kind: 'preference', provenance: 'inferred-repeated', confidence: 'medium' })),
     ]);
-    const row = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
+    const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
     const meta =
-      typeof row === 'string' || row === undefined
+      typeof memRow === 'string' || memRow === undefined
         ? undefined
-        : row.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryMeta');
+        : memRow.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryMeta');
     const chipTexts =
       typeof meta === 'string' || meta === undefined
         ? []
@@ -72,45 +93,66 @@ describe('renderMemorySettingsView', () => {
     expect(chipTexts).toContain('confidence: medium');
   });
 
-  it('a preference-kind item gets Forget and (when project-scoped) Promote actions', () => {
+  it('a row with both forgetCommand and promoteCommand renders both action buttons', () => {
     const tree = renderMemorySettingsView([
-      item({ id: 'm1', kind: 'preference', scope: { type: 'project', projectId: 'proj-1' } }),
+      row(item({ id: 'm1', kind: 'preference', scope: { type: 'project', projectId: 'proj-1' } }), {
+        withForget: true,
+        withPromote: true,
+      }),
     ]);
-    const row = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
+    const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
     const actions =
-      typeof row === 'string' || row === undefined
+      typeof memRow === 'string' || memRow === undefined
         ? undefined
-        : row.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
+        : memRow.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
     expect(typeof actions === 'string' ? undefined : actions?.children).toHaveLength(2);
   });
 
-  it('a global-scoped preference item gets Forget but not Promote (already global)', () => {
-    const tree = renderMemorySettingsView([item({ id: 'm1', kind: 'preference', scope: { type: 'global' } })]);
-    const row = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
+  it('a row with only forgetCommand renders only Forget (e.g. already-global item)', () => {
+    const tree = renderMemorySettingsView([
+      row(item({ id: 'm1', kind: 'preference', scope: { type: 'global' } }), { withForget: true }),
+    ]);
+    const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
     const actions =
-      typeof row === 'string' || row === undefined
+      typeof memRow === 'string' || memRow === undefined
         ? undefined
-        : row.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
+        : memRow.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
     expect(typeof actions === 'string' ? undefined : actions?.children).toHaveLength(1);
   });
 
-  it('a non-preference kind item (no real write path yet) gets no actions', () => {
-    const tree = renderMemorySettingsView([item({ id: 'm1', kind: 'rule' })]);
-    const row = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
+  it('a row with neither command (no real write path for this kind yet) gets no actions', () => {
+    const tree = renderMemorySettingsView([row(item({ id: 'm1', kind: 'rule' }))]);
+    const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
     const actions =
-      typeof row === 'string' || row === undefined
+      typeof memRow === 'string' || memRow === undefined
         ? undefined
-        : row.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
+        : memRow.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
     expect(actions).toBeUndefined();
   });
 
-  it('a non-active status renders an extra status chip', () => {
-    const tree = renderMemorySettingsView([item({ id: 'm1', kind: 'preference', status: 'proposed' })]);
-    const row = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
-    const meta =
-      typeof row === 'string' || row === undefined
+  it('the Promote button carries confirmPromote so the renderer knows to confirm first', () => {
+    const tree = renderMemorySettingsView([
+      row(item({ id: 'm1', kind: 'preference' }), { withForget: true, withPromote: true }),
+    ]);
+    const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
+    const actions =
+      typeof memRow === 'string' || memRow === undefined
         ? undefined
-        : row.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryMeta');
+        : memRow.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
+    const buttons = typeof actions === 'string' || actions === undefined ? [] : (actions.children ?? []);
+    const promoteButton = buttons.find(
+      (b) => typeof b !== 'string' && b.children?.[0] === 'Promote to global',
+    );
+    expect(typeof promoteButton === 'string' ? undefined : promoteButton?.props?.['confirmPromote']).toBe(true);
+  });
+
+  it('a non-active status renders an extra status chip', () => {
+    const tree = renderMemorySettingsView([row(item({ id: 'm1', kind: 'preference', status: 'proposed' }))]);
+    const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
+    const meta =
+      typeof memRow === 'string' || memRow === undefined
+        ? undefined
+        : memRow.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryMeta');
     const chipTexts =
       typeof meta === 'string' || meta === undefined
         ? []

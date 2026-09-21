@@ -1,5 +1,5 @@
 /**
- * Settings' Memory/Rules browse view (issue #200/#223,
+ * Settings' Memory/Rules browse view (issue #200/#223/#224,
  * docs/RULES_MEMORY_AND_SUPERVISION.md § 12).
  *
  * Lists memory rows (active/proposed/candidate/conflict) with provenance
@@ -17,8 +17,16 @@
  * adapter yet (#204 landed the port, not an adapter, as an explicit,
  * documented follow-up) — this view renders an honest empty state for
  * them rather than fabricating rows.
+ *
+ * Forget/Promote (issue #224) encode the *real* `UpdatePreferenceCommand`
+ * the caller built (via #224's `preferenceProfileToMemoryRows`) as a
+ * `memcmd:<uri-encoded JSON>` command — the same wire-verb pattern as
+ * `prefcmd:`/`chatcmd:`/`ideacmd:`, so the memory action goes through the
+ * exact same daemon-side `update-preference` handler the conversational
+ * path and the existing routing-rule cards use. No parallel write path.
  */
 import type { MemoryItem, MemoryKind, MemoryScope } from '../../../../core/domain/memory.js';
+import type { UpdatePreferenceCommand } from '../../../../core/application/use-cases/tasks/command-api.js';
 import type { RenderTree } from './view-types.js';
 
 function el(
@@ -35,6 +43,11 @@ function scopeLabel(scope: MemoryScope): string {
   return `task:${scope.taskId}`;
 }
 
+/** URI-encode a command payload for the `memcmd:` wire verb. */
+export function encodeMemoryCommand(cmd: UpdatePreferenceCommand): string {
+  return `memcmd:${encodeURIComponent(JSON.stringify(cmd))}`;
+}
+
 /** Every kind #204 defined — the filter bar always offers all of them, even ones with zero live items today. */
 const ALL_KINDS: readonly MemoryKind[] = [
   'fact',
@@ -47,21 +60,29 @@ const ALL_KINDS: readonly MemoryKind[] = [
   'learned-pattern',
 ];
 
-function memoryRow(item: MemoryItem): RenderTree {
+/** One memory row plus whatever real write commands the caller has for it (#224). */
+export interface MemoryRowInput {
+  readonly item: MemoryItem;
+  readonly forgetCommand?: UpdatePreferenceCommand;
+  readonly promoteCommand?: UpdatePreferenceCommand;
+}
+
+function memoryRow(row: MemoryRowInput): RenderTree {
+  const { item } = row;
   const actions: RenderTree[] = [];
-  // Only preference-kind items have a real write path today (mapped 1:1
-  // onto the existing routing-rule/deny commands by the caller, issue
-  // #224) -- other kinds render read-only until a MemoryStorePort
-  // adapter exists to persist a mutation against.
-  if (item.kind === 'preference') {
+  if (row.forgetCommand !== undefined) {
+    actions.push(el('Button', { variant: 'ghost', command: encodeMemoryCommand(row.forgetCommand) }, ['Forget']));
+  }
+  if (row.promoteCommand !== undefined) {
+    // Client confirms before sending (issue #224: "never silent") — the
+    // command carries `confirm: 'promote'` so app.js knows to prompt.
     actions.push(
-      el('Button', { variant: 'ghost', command: `memforget:${item.id}` }, ['Forget']),
+      el(
+        'Button',
+        { variant: 'ghost', command: encodeMemoryCommand(row.promoteCommand), confirmPromote: true },
+        ['Promote to global'],
+      ),
     );
-    if (item.scope.type === 'project') {
-      actions.push(
-        el('Button', { variant: 'ghost', command: `mempromote:${item.id}` }, ['Promote to global']),
-      );
-    }
   }
   return el(
     'MemoryRow',
@@ -83,12 +104,12 @@ function memoryRow(item: MemoryItem): RenderTree {
 }
 
 /**
- * Build the Memory/Rules browse view. `items` should already include
- * every kind the caller has a live source for (today: `preference` via
- * the PreferenceProfile bridge); kinds with zero items simply render
+ * Build the Memory/Rules browse view. `rows` should already include
+ * every kind the caller has a live source for (today: `preference`, via
+ * `preferenceProfileToMemoryRows`); kinds with zero items simply render
  * with nothing under them, not an error.
  */
-export function renderMemorySettingsView(items: readonly MemoryItem[]): RenderTree {
+export function renderMemorySettingsView(rows: readonly MemoryRowInput[]): RenderTree {
   const filterBar = el(
     'MemoryFilterBar',
     {},
@@ -101,13 +122,13 @@ export function renderMemorySettingsView(items: readonly MemoryItem[]): RenderTr
     ],
   );
 
-  if (items.length === 0) {
+  if (rows.length === 0) {
     return el('MemorySettingsView', {}, [
       filterBar,
       el('EmptyState', {}, [el('EmptyHint', {}, ['nothing remembered yet'])]),
     ]);
   }
 
-  const sorted = [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const sorted = [...rows].sort((a, b) => b.item.updatedAt.localeCompare(a.item.updatedAt));
   return el('MemorySettingsView', {}, [filterBar, ...sorted.map(memoryRow)]);
 }

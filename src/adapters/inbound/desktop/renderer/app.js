@@ -229,6 +229,10 @@ document.addEventListener('click', (e) => {
     openIdeaCompiler(btn.closest('.card'), cmd.slice('ideacompile:'.length));
     return;
   }
+  /* inline memory Promote (issue #224): widens scope to global, confirm first */
+  if (btn.dataset.confirmPromote && !confirm('Promote this rule to global scope?')) {
+    return;
+  }
   void bridge.command(cmd).then((res) => {
     if (res && res.ok === false) toast(res.error || 'command failed');
   });
