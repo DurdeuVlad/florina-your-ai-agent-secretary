@@ -28,9 +28,12 @@ import type {
   ItemMutationResponse,
   PruneResponse,
   DigestResponse,
+  CatchUpResponse,
+  ConfirmCatchUpResponse,
 } from '../src/daemon/command-api.js';
 import type { MetricsSnapshot } from '../src/daemon/metrics.js';
 import type { CompletionDigest } from '../src/attention/completion-digest.js';
+import type { CatchUpDigest } from '../src/core/application/use-cases/resumption/catchup-digest.js';
 
 /* ================================================================== *
  * Helpers / fixtures
@@ -809,6 +812,67 @@ describe('subcommand dispatch (mocked transport)', () => {
     const code = await mainWithTransport(['digest'], transport);
     expect(code).toBe(1);
     expect(transport).not.toHaveBeenCalled();
+  });
+
+  function makeCatchUpDigest(overrides: Partial<CatchUpDigest> = {}): CatchUpDigest {
+    return {
+      since: '2026-09-20T00:00:00.000Z',
+      until: '2026-09-21T00:00:00.000Z',
+      notable: [],
+      stillRunning: [],
+      pendingAttention: [],
+      failovers: [],
+      isEmpty: true,
+      ...overrides,
+    };
+  }
+
+  it('catchup sends get-catchup then confirm-catchup after printing, in order', async () => {
+    const digest = makeCatchUpDigest();
+    const calls: unknown[] = [];
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      calls.push(command);
+      const cmd = command as { kind: string };
+      if (cmd.kind === 'get-catchup') {
+        return { ok: true, digest } satisfies CatchUpResponse;
+      }
+      return { ok: true } satisfies ConfirmCatchUpResponse;
+    }) as unknown as WebSocketTransport;
+
+    const code = await mainWithTransport(['catchup'], transport);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      { kind: 'get-catchup' },
+      { kind: 'confirm-catchup', until: digest.until },
+    ]);
+  });
+
+  it('catchup does not send confirm-catchup when get-catchup fails (no false delivery confirmation)', async () => {
+    const calls: unknown[] = [];
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      calls.push(command);
+      return { ok: false, digest: null, error: 'daemon unavailable' } satisfies CatchUpResponse;
+    }) as unknown as WebSocketTransport;
+
+    const code = await mainWithTransport(['catchup'], transport);
+
+    expect(code).toBe(1);
+    expect(calls).toEqual([{ kind: 'get-catchup' }]);
+  });
+
+  it('catchup exits 0 and warns (but does not fail the command) when confirm-catchup itself fails', async () => {
+    const digest = makeCatchUpDigest();
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const cmd = command as { kind: string };
+      if (cmd.kind === 'get-catchup') {
+        return { ok: true, digest } satisfies CatchUpResponse;
+      }
+      return { ok: false, error: 'watermark store unavailable' } satisfies ConfirmCatchUpResponse;
+    }) as unknown as WebSocketTransport;
+
+    const code = await mainWithTransport(['catchup'], transport);
+    expect(code).toBe(0);
   });
 
   it('inbox --priority filter is passed to the command', async () => {

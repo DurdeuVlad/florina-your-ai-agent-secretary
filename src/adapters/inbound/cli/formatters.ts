@@ -18,6 +18,7 @@ import type {
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 import type { CompletionDigest } from '../../../core/application/use-cases/attention/completion-digest.js';
 import type { ContextHealthSnapshot } from '../../../core/application/use-cases/context/context-health-monitor.js';
+import type { CatchUpDigest } from '../../../core/application/use-cases/resumption/catchup-digest.js';
 
 /* ------------------------------------------------------------------ *
  * ANSI color helpers (sparing usage per PRODUCT_DESIGN.md tone)
@@ -244,6 +245,63 @@ export function formatDigest(digest: CompletionDigest): string {
     }
   }
 
+  return lines.join('\n') + '\n';
+}
+
+/* ------------------------------------------------------------------ *
+ * Catch-up digest formatting (DEC-042, issue #217)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Format a catch-up digest for `florina catchup`. Follows §9's shape: N
+ * notable / M running / K pending, one line per item, then an explicit
+ * "nothing else needs you" close when the digest is empty.
+ */
+export function formatCatchUp(digest: CatchUpDigest): string {
+  if (digest.isEmpty) {
+    return `${BOLD('Since you were last active:')}\n\nNothing needs you.\n`;
+  }
+
+  const lines: string[] = [];
+  lines.push(
+    `${BOLD('Since you were last active:')} ${digest.notable.length} notable, ` +
+      `${digest.stillRunning.length} still running, ${digest.pendingAttention.length} need your attention.`,
+  );
+
+  if (digest.notable.length > 0) {
+    lines.push('');
+    lines.push(BOLD('Notable:'));
+    for (const t of digest.notable) {
+      lines.push(`  [${t.state}] ${t.objective} (${t.taskId})`);
+    }
+  }
+
+  if (digest.stillRunning.length > 0) {
+    lines.push('');
+    lines.push(BOLD('Still running:'));
+    for (const t of digest.stillRunning) {
+      lines.push(`  ${t.objective} (${t.taskId})`);
+    }
+  }
+
+  if (digest.pendingAttention.length > 0) {
+    lines.push('');
+    lines.push(BOLD('Needs your decision:'));
+    for (const item of digest.pendingAttention) {
+      lines.push(`  [${item.priority}] ${item.kind} — task ${item.taskId}`);
+    }
+  }
+
+  if (digest.failovers.length > 0) {
+    lines.push('');
+    lines.push(BOLD('Provider failovers:'));
+    for (const f of digest.failovers) {
+      lines.push(`  task ${f.taskId}: ${f.fromProvider} -> ${f.toProvider} (${f.reason})`);
+    }
+  }
+
+  lines.push('');
+  lines.push('Nothing else needs you.');
   return lines.join('\n') + '\n';
 }
 

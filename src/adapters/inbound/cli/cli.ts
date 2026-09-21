@@ -19,6 +19,7 @@ import {
   formatMetrics,
   formatStatus,
   formatContextHealth,
+  formatCatchUp,
   setColorEnabled,
 } from './formatters.js';
 import type { CliDependencies } from './deps.js';
@@ -45,6 +46,8 @@ import type {
   DigestResponse,
   ContextHealthResponse,
   PreferenceResponse,
+  CatchUpResponse,
+  ConfirmCatchUpResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { TaskState } from '../../../core/domain/enums.js';
 import type {
@@ -162,6 +165,7 @@ Commands:
   tasks [--status <state>]    List tasks
   task <taskId>               Show task details
   digest <taskId>             Show completion digest for a task
+  catchup                     Show what happened since you were last active
   metrics [--since <ms>]      Show metrics snapshot
   preferences [--project <id>]  Show routing preference rules + deny list
   prune <taskId>              Prune the worktree for a task
@@ -234,6 +238,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdTask(ctx);
     case 'digest':
       return cmdDigest(ctx);
+    case 'catchup':
+      return cmdCatchUp(ctx);
     case 'metrics':
       return cmdMetrics(ctx);
     case 'preferences':
@@ -430,6 +436,38 @@ async function cmdDigest(ctx: CommandContext): Promise<CommandResult> {
     return { exitCode: 0, message: `No completion digest found for task ${taskId}.\n` };
   }
   return { exitCode: 0, message: formatDigest(r.digest) };
+}
+
+/**
+ * `florina catchup` — the "since you were last active" digest (DEC-042,
+ * issue #217). Delivery-gated watermark advance: the digest is printed
+ * directly here (not via the returned `message`, which the caller prints
+ * *after* this function returns) so `confirm-catchup` is only sent once
+ * the write has actually happened. If the write throws (e.g. a closed
+ * stdout pipe), `confirm-catchup` is skipped — a crash before delivery
+ * must not advance the watermark.
+ */
+async function cmdCatchUp(ctx: CommandContext): Promise<CommandResult> {
+  const response = await sendCommand(ctx.deps.client, { kind: 'get-catchup' });
+  if (!response.ok) {
+    return { exitCode: 1, message: `Failed to compute catch-up digest: ${errorOf(response)}\n` };
+  }
+  const r = response as CatchUpResponse;
+  if (!r.digest) {
+    return { exitCode: 1, message: 'Failed to compute catch-up digest: no digest returned.\n' };
+  }
+
+  out(formatCatchUp(r.digest));
+
+  const confirmed = await sendCommand(ctx.deps.client, {
+    kind: 'confirm-catchup',
+    until: r.digest.until,
+  });
+  if (!confirmed.ok) {
+    err(`Warning: failed to advance the catch-up watermark: ${errorOf(confirmed)}\n`);
+  }
+
+  return { exitCode: 0 };
 }
 
 /* --- metrics --- */
@@ -646,6 +684,8 @@ async function sendCommand(
   | ShutdownResponse
   | DigestResponse
   | ContextHealthResponse
+  | CatchUpResponse
+  | ConfirmCatchUpResponse
   | { ok: false; error: string }
 > {
   try {
