@@ -59,6 +59,7 @@ if (bridge) {
 
   /* ideas screen (issue #129) */
   bridge.on('ideas:update', (tree) => mount(tree, $('ideas')));
+  bridge.on('history:update', (tree) => mount(tree, $('history')));
 
   /* secretary screen (issue #130) */
   bridge.on('secretary:update', (tree) => mount(tree, $('secretary')));

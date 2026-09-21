@@ -25,6 +25,7 @@ import type { ConversationMessage, Event } from '../../../core/domain/types.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
 import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
 import { renderHomeView } from './views/home-view.js';
+import { renderHistoryView } from './views/history-view.js';
 import { renderInspectorView } from './views/inspector-view.js';
 import { renderFleetScreen } from './views/fleet-screen.js';
 import { renderPrefsScreen } from './views/prefs-screen.js';
@@ -1457,6 +1458,10 @@ export class DesktopApp {
         }),
       );
     }
+    // History screen (issue #221): completed tasks + resolved decisions,
+    // pure read-composition over the same task/inbox data already
+    // fetched above -- no new query, no new data model.
+    this.bridge.sendToRenderer('history:update', renderHistoryView({ tasks, resolvedItems: items as AttentionItem[] }));
     // Secretary screen (#130): plan, research, memory writes, health.
     if (secretaryRes !== null && secretaryRes.ok && 'plan' in secretaryRes) {
       this.bridge.sendToRenderer(

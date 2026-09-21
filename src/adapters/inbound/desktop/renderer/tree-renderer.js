@@ -56,6 +56,12 @@ const TAG_CLASS = {
   FilterLabel: 'sect-label',
   FilterChip: 'chip',
   ChipClear: 'chip-clear',
+  /* history view (issue #221) */
+  HistoryView: 'history-view',
+  HistorySection: null, // header line added below, rows follow directly
+  HistoryDecisionRow: 'taskrow',
+  HistoryDecisionKind: 'obj',
+  HistoryDecisionMeta: 'stat',
   /* session inspector (issue #126) */
   Inspector: 'cols',
   InspectorCol: 'col',
@@ -148,6 +154,14 @@ function renderNode(node) {
   if (tag === 'InboxItem' || tag === 'TaskRow' || (props && props.selectable)) {
     el.dataset.selectable = 'true';
     el.style.cursor = 'pointer';
+  }
+
+  /* --- history view section header (issue #221) --- */
+  if (tag === 'HistorySection' && props && props.title) {
+    const head = document.createElement('div');
+    head.className = 'sect';
+    head.textContent = String(props.title);
+    el.appendChild(head);
   }
 
   /* --- session inspector rows (issue #126) --- */
