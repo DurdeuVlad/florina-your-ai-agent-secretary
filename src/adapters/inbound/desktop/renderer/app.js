@@ -775,13 +775,21 @@ function toast(msg) {
 
 /* ---------- view navigation ---------- */
 
+// 5-item IA labels (docs/UX_INFORMATION_ARCHITECTURE.md §2, issue #219).
+// View ids (map keys) are unchanged from before the relabel to avoid
+// touching the routing/focus/mic-listing logic keyed off them elsewhere
+// in this file — only the displayed title/subtitle text changed.
+// fleet/ideas/secretary keep their entries (still reachable via
+// bridge.command / showView programmatically) even though they no
+// longer have a top-level nav button, pending issue #220's merge.
 const TITLES = {
-  chat: ['Chat', 'one conversation with your Secretary'],
-  inbox: ['Attention Inbox', 'what needs you right now'],
-  tasks: ['Tasks', 'delegated work and its state'],
+  chat: ['Florina', 'one conversation with your Secretary'],
+  inbox: ['Attention', 'what needs you right now'],
+  tasks: ['Work', 'delegated work and its state'],
+  history: ['History', 'completed work, resolved decisions, and evidence trails'],
   fleet: ['Fleet', 'provider capacity and routing'],
   ideas: ['Ideas', 'ledger entries — compile a Brief when one is ready'],
-  prefs: ['Preferences', 'durable routing rules and denies'],
+  prefs: ['Settings', 'durable routing rules and denies'],
   secretary: ['Secretary', 'her plan, research, and memory — context health is first-class'],
 };
 
@@ -883,14 +891,19 @@ document.addEventListener('keydown', (e) => {
     return;
   if (gPending) {
     gPending = false;
+    // Remapped to the 5-item IA (docs/UX_GUIDELINES.md §4, issue #219):
+    // g f Florina, g a Attention, g w Work, g h History, g s Settings.
+    // This breaks some old single-letter muscle memory (g c/i/t/p) in
+    // exchange for each letter matching its new, clearer name (the same
+    // tradeoff the IA doc makes for the nav labels themselves) — fleet
+    // and ideas lose a dedicated chord entirely, pending #220's merge
+    // into Work.
     const map = {
-      c: 'chat',
-      i: 'inbox',
-      t: 'tasks',
-      f: 'fleet',
-      d: 'ideas',
-      p: 'prefs',
-      s: 'secretary',
+      f: 'chat',
+      a: 'inbox',
+      w: 'tasks',
+      h: 'history',
+      s: 'prefs',
     };
     if (map[e.key]) showView(map[e.key]);
     return;
