@@ -109,13 +109,22 @@ default, tinted only when carrying priority meaning.
 └──────────┴─────────────────────────────────────────┘
 ```
 
-- **Sidebar**: nav (Chat, Inbox w/ count badge, Tasks, Fleet, Ideas,
-  Preferences, Secretary) + daemon status footer (dot + one word). Never
-  shows project pickers or filters — the inbox decides what matters.
-- **Chat is the launch view** — the single Secretary conversation is the
-  product's center; inbox/fleet/etc. are support surfaces. Launch flow:
-  the window opens on Chat, the daemon auto-starts if absent, and
-  journaled history hydrates via `chat-read` — resume is automatic,
+- **Sidebar**: 5-item nav — **Florina** (home, the conversation), **Attention**
+  (inbox, w/ count badge), **Work** (tasks, w/ count badge), **History**,
+  **Settings** — plus daemon status footer (dot + one word). Never shows
+  project pickers or filters — the inbox decides what matters. This
+  replaces the earlier 7-item nav (Chat, Inbox, Tasks, Fleet, Ideas,
+  Preferences, Secretary) per `docs/UX_INFORMATION_ARCHITECTURE.md` §2
+  (issue #219): infrastructure (Fleet, Ideas) is absorbed into Work,
+  Secretary into Florina, rather than staying a top-level peer. As of
+  #219, this is a relabel of the nav surface only — the underlying Fleet/
+  Ideas/Secretary views still exist and are reachable programmatically,
+  but not yet from a nav button; issue #220 wires them in as Work/Florina
+  sub-views. History is a stub pending issue #199's children.
+- **Florina is the launch view** — the single Secretary conversation is
+  the product's center; Attention/Work/etc. are support surfaces. Launch
+  flow: the window opens on Florina, the daemon auto-starts if absent,
+  and journaled history hydrates via `chat-read` — resume is automatic,
   there is no thread picker. Desktop voice prefs (mic device, dictation
   language, voice-mode default) load from
   `~/.florina/desktop-settings.json` and push to the renderer on
@@ -241,9 +250,12 @@ pick. History is journaled; resume on launch is automatic.
 ## 4. Interaction model
 
 - **Keyboard-first**: `j/k` move selection, `Enter` drills, `Esc` pops,
-  `g c/i/t/f/d/p/s` jump to views, `a` applies the card's primary action,
-  the global hotkey (`FLORINA_PTT_HOTKEY`, default Space-hold) toggles
-  the PTT HUD.
+  `g f/a/w/h/s` jump to views (Florina/Attention/Work/History/Settings —
+  remapped from the old 7-item `g c/i/t/f/d/p/s` per issue #219; letters
+  now match each view's name rather than preserving the old positions),
+  `a` (standalone, not part of a `g` chord) applies the card's primary
+  action, the global hotkey (`FLORINA_PTT_HOTKEY`, default Space-hold)
+  toggles the PTT HUD.
 - **Composer keys** (chat): `Enter` sends, `Shift+Enter` newline; the
   mic button toggles dictation, `🔊 voice` toggles voice mode.
 - **Pointer**: single click selects; double/`Enter` drills. Cards show
