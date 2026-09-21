@@ -17,3 +17,4 @@ export * from './idea-ledger.js';
 export * from './memory-store.js';
 export * from './agent-profile-store.js';
 export * from './catchup-watermark.js';
+export * from './repo-roots.js';

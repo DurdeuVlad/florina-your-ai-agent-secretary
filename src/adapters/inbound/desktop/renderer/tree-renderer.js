@@ -112,6 +112,18 @@ const TAG_CLASS = {
   WorkDot: 'dot wait',
   /* chat activity/diff drawer (issue #181) */
   ActivityDrawerList: null, // plain div — layout owned by #chatDrawerList
+  /* Settings > Repos (issue #253) */
+  ReposView: 'repos-view',
+  ReposAddRow: 'pref-addbar',
+  ReposRootsSection: 'repos-roots',
+  ReposRootRow: 'taskrow',
+  ReposRootPriority: 'n',
+  ReposRootPath: 'obj mono',
+  ReposRootActions: 'actions',
+  ReposRepoList: 'repos-repo-list',
+  ReposRepoRow: 'card',
+  ReposRepoName: 'title',
+  ReposRepoPath: 'summary mono',
 };
 
 function propsToClass(tag, props) {

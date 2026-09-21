@@ -135,6 +135,28 @@ async function shotApp() {
     await captureWindow(win, path.join(SHOTS, `app-work-${sub}.png`));
     console.log(`[visual-qa] captured Work sub-tab ${sub}`);
   }
+
+  // Settings > Repos (issue #253): scrolled below Routing rules/Memory,
+  // so it needs its own capture beyond the top-of-page app-prefs.png.
+  // Waits for #reposView to actually have content (the repos:update push
+  // is a real daemon round trip, slower than the SETTLE_MS UI-only wait).
+  pressKey(win, 'g');
+  await sleep(80);
+  pressKey(win, 's');
+  await sleep(SETTLE_MS);
+  for (let i = 0; i < 20; i++) {
+    const hasContent = await win.webContents.executeJavaScript(
+      `document.getElementById('reposView')?.children.length > 0`,
+    );
+    if (hasContent) break;
+    await sleep(300);
+  }
+  await win.webContents.executeJavaScript(
+    `document.getElementById('reposView')?.scrollIntoView({block: 'start'})`,
+  );
+  await sleep(SETTLE_MS);
+  await captureWindow(win, path.join(SHOTS, 'app-settings-repos.png'));
+  console.log('[visual-qa] captured Settings > Repos');
 }
 
 app.whenReady().then(async () => {

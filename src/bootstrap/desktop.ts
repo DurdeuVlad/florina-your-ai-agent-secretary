@@ -35,6 +35,7 @@ import { ElectronWindowBackend } from '../adapters/inbound/desktop/electron/wind
 import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-transport.js';
 import { ElectronKeyboardBackend } from '../adapters/inbound/desktop/electron/keyboard-backend.js';
 import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-backend.js';
+import { ElectronFolderPicker } from '../adapters/inbound/desktop/electron/folder-picker.js';
 import { HotkeyManager, DEFAULT_HOTKEYS } from '../adapters/inbound/desktop/hotkeys.js';
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
@@ -307,6 +308,8 @@ async function main(): Promise<void> {
       read: () => readDesktopSettings(),
       write: (s) => writeDesktopSettings(s),
     },
+    // Settings > Repos "+ Add folder"/"Use default folder" (issue #253).
+    folderPicker: new ElectronFolderPicker(),
     onTrayAction: (action: TrayAction) => {
       switch (action) {
         case 'show-window':

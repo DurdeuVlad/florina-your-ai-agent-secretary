@@ -22,3 +22,4 @@ export * from './ideas/index.js';
 export * from './managers/index.js';
 export * from './memory/index.js';
 export * from './resumption/index.js';
+export * from './repos/index.js';

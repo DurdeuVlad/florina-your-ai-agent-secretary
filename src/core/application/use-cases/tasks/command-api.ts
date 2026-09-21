@@ -67,6 +67,13 @@ import {
   type PreferenceProfile,
   type PreferenceProfilePort,
 } from '../../ports/outbound/preference-profile.js';
+import type { RepoRootsConfig, RepoRootsPort } from '../../ports/outbound/repo-roots.js';
+import {
+  discoverRepos,
+  searchRepos,
+  type DiscoveredRepo,
+  type RepoScannerPort,
+} from '../repos/discover-repos.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { QuotaLedger } from '../routing/quota-ledger.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
@@ -472,6 +479,47 @@ export interface QueryPreferencesCommand {
   readonly projectId?: string;
 }
 
+/**
+ * Append a repo root (issue #253). Atomic, idempotent -- a no-op if the
+ * path is already configured. Deliberately not a "replace the whole
+ * list" command: that shape required a client-side read-then-write that
+ * had a real lost-update race between concurrent add/remove/reorder
+ * actions (see {@link RepoRootsPort}'s doc comment).
+ */
+export interface AddRepoRootCommand {
+  readonly kind: 'add-repo-root';
+  readonly path: string;
+}
+
+/** Remove a repo root by path (issue #253). Atomic; a no-op if not found. */
+export interface RemoveRepoRootCommand {
+  readonly kind: 'remove-repo-root';
+  readonly path: string;
+}
+
+/**
+ * Swap a repo root with its neighbor (issue #253). Atomic, resolved by
+ * path identity against whatever the current order is at execution time
+ * -- safe even when the caller's view of the order (e.g. a precomputed
+ * row button) is stale, since it isn't a "here is the whole new array"
+ * command that could clobber a concurrent edit.
+ */
+export interface MoveRepoRootCommand {
+  readonly kind: 'move-repo-root';
+  readonly path: string;
+  readonly direction: 'up' | 'down';
+}
+
+/**
+ * Read the configured repo roots and the repos discovered under them
+ * (issue #253). `query` narrows the discovered list to a case-insensitive
+ * substring match on repo name ("search for repos there").
+ */
+export interface QueryReposCommand {
+  readonly kind: 'query-repos';
+  readonly query?: string;
+}
+
 /** Query the latest completion digest for a task (issue #37). */
 export interface GetDigestCommand {
   readonly kind: 'get-digest';
@@ -626,7 +674,11 @@ export type Command =
   | ChatSendCommand
   | ChatReadCommand
   | ChatClearCommand
-  | ChatAppendCommand;
+  | ChatAppendCommand
+  | AddRepoRootCommand
+  | RemoveRepoRootCommand
+  | MoveRepoRootCommand
+  | QueryReposCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -667,6 +719,10 @@ export const COMMAND_KINDS: readonly string[] = [
   'chat-read',
   'chat-clear',
   'chat-append',
+  'add-repo-root',
+  'remove-repo-root',
+  'move-repo-root',
+  'query-repos',
 ] as const;
 
 /* ================================================================== *
@@ -902,6 +958,15 @@ export interface PreferenceResponse {
   readonly error?: string;
 }
 
+/** Response to `add-repo-root`/`remove-repo-root`/`move-repo-root`/`query-repos` (issue #253). */
+export interface ReposResponse {
+  readonly ok: boolean;
+  readonly roots?: RepoRootsConfig;
+  /** Discovered repos (query-repos only), filtered by `query` when given. */
+  readonly repos?: readonly DiscoveredRepo[];
+  readonly error?: string;
+}
+
 /**
  * Response to `delegate-task` (issue #78): the child-side result of
  * accepting a remote delegation — mirrors `SpawnTaskResult` so the
@@ -1056,6 +1121,7 @@ export type Response =
   | ChatReadResponse
   | ChatClearResponse
   | ChatAppendResponse
+  | ReposResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -1225,6 +1291,15 @@ export interface CommandApiDeps {
    */
   readonly preferences?: PreferenceProfilePort;
   /**
+   * Durable repo-roots config + filesystem scanner (issue #253). When
+   * both are wired, `set-repo-roots`/`query-repos` are served; when
+   * either is absent the commands fail cleanly. Two separate optional
+   * deps (not one bundled port) because the config is daemon-portable
+   * state but the scanner is a thin fs adapter with no state of its own.
+   */
+  readonly repoRoots?: RepoRootsPort;
+  readonly repoScanner?: RepoScannerPort;
+  /**
    * Federated delegation service (DEC-036, issue #78). When wired,
    * `delegate-task` accepts remote delegations from a parent Florina;
    * when absent the command fails cleanly — this daemon is not a child.
@@ -1294,6 +1369,8 @@ export class CommandApi {
   private readonly voiceStateSink?: (report: Omit<ReportVoiceStateCommand, 'kind'>) => void;
   private readonly ideas?: IdeaService;
   private readonly preferences?: PreferenceProfilePort;
+  private readonly repoRoots?: RepoRootsPort;
+  private readonly repoScanner?: RepoScannerPort;
   private readonly delegation?: DelegationService;
   private readonly quotaLedger?: QuotaLedger;
   private readonly chatStore?: ChatMessageRepositoryPort;
@@ -1325,6 +1402,8 @@ export class CommandApi {
     this.voiceStateSink = deps.voiceStateSink;
     this.ideas = deps.ideas;
     this.preferences = deps.preferences;
+    this.repoRoots = deps.repoRoots;
+    this.repoScanner = deps.repoScanner;
     this.delegation = deps.delegation;
     this.quotaLedger = deps.quotaLedger;
     this.chatStore = deps.chatStore;
@@ -1433,6 +1512,14 @@ export class CommandApi {
         return this.handleChatClear();
       case 'chat-append':
         return this.handleChatAppend(command);
+      case 'add-repo-root':
+        return this.handleAddRepoRoot(command);
+      case 'remove-repo-root':
+        return this.handleRemoveRepoRoot(command);
+      case 'move-repo-root':
+        return this.handleMoveRepoRoot(command);
+      case 'query-repos':
+        return this.handleQueryRepos(command);
       default:
         return {
           ok: false,
@@ -2342,6 +2429,88 @@ export class CommandApi {
     };
   }
 
+  /**
+   * add-repo-root: append a repo root (issue #253). Atomic, idempotent.
+   * Validated at this runtime boundary (not just the TS type) since the
+   * payload can arrive as arbitrary JSON from the renderer's `reposcmd:`
+   * wire verb.
+   */
+  private async handleAddRepoRoot(cmd: AddRepoRootCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    if (typeof cmd.path !== 'string' || cmd.path.trim().length === 0) {
+      return { ok: false, error: 'path is required' };
+    }
+    try {
+      this.repoRoots.addRoot(cmd.path);
+      await this.repoRoots.save();
+      return { ok: true, roots: this.repoRoots.toConfig() };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+  }
+
+  /** remove-repo-root: remove a repo root by path (issue #253). Atomic; a no-op if not found. */
+  private async handleRemoveRepoRoot(cmd: RemoveRepoRootCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    if (typeof cmd.path !== 'string' || cmd.path.trim().length === 0) {
+      return { ok: false, error: 'path is required' };
+    }
+    const removed = this.repoRoots.removeRoot(cmd.path);
+    try {
+      if (removed) await this.repoRoots.save();
+      return { ok: true, roots: this.repoRoots.toConfig() };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+  }
+
+  /**
+   * move-repo-root: swap a repo root with its neighbor (issue #253).
+   * Atomic and resolved by path identity, so a stale caller-side view of
+   * the order (e.g. a precomputed row button) can't clobber a
+   * concurrent edit -- it either applies against current state or is a
+   * safe no-op.
+   */
+  private async handleMoveRepoRoot(cmd: MoveRepoRootCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    if (typeof cmd.path !== 'string' || cmd.path.trim().length === 0) {
+      return { ok: false, error: 'path is required' };
+    }
+    if (cmd.direction !== 'up' && cmd.direction !== 'down') {
+      return { ok: false, error: 'direction must be "up" or "down"' };
+    }
+    const moved = this.repoRoots.moveRoot(cmd.path, cmd.direction);
+    try {
+      if (moved) await this.repoRoots.save();
+      return { ok: true, roots: this.repoRoots.toConfig() };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+  }
+
+  /**
+   * query-repos: read the configured roots and the repos discovered
+   * under them (issue #253), optionally narrowed by `query`.
+   */
+  private async handleQueryRepos(cmd: QueryReposCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    if (this.repoScanner === undefined) {
+      return { ok: false, error: 'repo scanner is not wired into this daemon' };
+    }
+    const roots = this.repoRoots.toConfig();
+    const discovered = discoverRepos(roots, this.repoScanner);
+    const repos = cmd.query !== undefined ? searchRepos(discovered, cmd.query) : discovered;
+    return { ok: true, roots, repos };
+  }
+
   /** get-digest: return the latest completion digest for a task (issue #37). */
   private async handleGetDigest(cmd: GetDigestCommand): Promise<DigestResponse> {
     if (!cmd.taskId) {
@@ -2767,7 +2936,13 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                               ? DigestResponse
                                               : C extends CreatePrCommand
                                                 ? CreatePrResponse
-                                                : Response;
+                                                : C extends
+                                                      | AddRepoRootCommand
+                                                      | RemoveRepoRootCommand
+                                                      | MoveRepoRootCommand
+                                                      | QueryReposCommand
+                                                  ? ReposResponse
+                                                  : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the
