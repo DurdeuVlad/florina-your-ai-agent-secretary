@@ -29,6 +29,8 @@ import { renderHistoryView } from './views/history-view.js';
 import { renderInspectorView, renderTimelineRow } from './views/inspector-view.js';
 import { renderFleetScreen } from './views/fleet-screen.js';
 import { renderPrefsScreen } from './views/prefs-screen.js';
+import { renderMemorySettingsView } from './views/memory-settings-view.js';
+import { preferenceProfileToMemoryItems } from '../../../core/application/use-cases/memory/preference-bridge.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
@@ -253,6 +255,8 @@ export class DesktopApp {
   private tasks: TaskSnapshot[] = [];
   /** Session inspector selection state (#126). */
   private inspectorTaskId: string | null = null;
+  /** Reset each refresh cycle's use is fine — ids only need to stay stable within one render (issue #223). */
+  private memoryItemIdCounter = 0;
   private inspectorEventIndex: number | null = null;
   private inspectorEvents: readonly Event[] = [];
   /** Open ledger reader on the ideas screen (#129), if any. */
@@ -1476,10 +1480,21 @@ export class DesktopApp {
     }
     // Preferences screen (#128): durable routing rules + denies.
     if (prefsRes !== null && prefsRes.ok && 'profile' in prefsRes) {
-      this.bridge.sendToRenderer(
-        'prefs:update',
-        renderPrefsScreen(prefsRes.profile as PreferenceProfile),
+      const profile = prefsRes.profile as PreferenceProfile;
+      this.bridge.sendToRenderer('prefs:update', renderPrefsScreen(profile));
+      // Settings memory/rules browse (issue #223): the same profile,
+      // re-expressed as preference-kind MemoryItems via #205's bridge --
+      // no new query, no change to the routing-rule/deny commands above.
+      // Ids only need to stay stable within one render (they key the
+      // Forget/Promote command targets sent back this same refresh
+      // cycle), so a fresh per-render counter is enough -- no persistent
+      // id generator exists for memory items yet (#204 has no adapter).
+      const memoryItems = preferenceProfileToMemoryItems(
+        profile,
+        { generate: (prefix) => `${prefix}-${++this.memoryItemIdCounter}` },
+        { now: () => new Date() },
       );
+      this.bridge.sendToRenderer('memory:update', renderMemorySettingsView(memoryItems));
     }
     // Ideas screen (#129): ledger directory + awaiting-decision briefs.
     if (ideasRes !== null && briefsRes !== null && 'ideas' in ideasRes && 'briefs' in briefsRes) {

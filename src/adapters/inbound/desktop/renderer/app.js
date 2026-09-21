@@ -61,6 +61,10 @@ if (bridge) {
   bridge.on('ideas:update', (tree) => mount(tree, $('ideas')));
   bridge.on('history:update', (tree) => mount(tree, $('history')));
   bridge.on('history:search-results', (tree) => mount(tree, $('historySearchResults')));
+  bridge.on('memory:update', (tree) => {
+    mount(tree, $('memorySettings'));
+    wireMemoryFilters();
+  });
 
   /* secretary screen (issue #130) */
   bridge.on('secretary:update', (tree) => mount(tree, $('secretary')));
@@ -839,6 +843,36 @@ function showWorkSub(name) {
 document
   .querySelectorAll('.worksubtab')
   .forEach((b) => b.addEventListener('click', () => showWorkSub(b.dataset.worksub)));
+
+/* ---------- Settings memory/rules browse: client-side filters (issue #223) ---------- */
+
+let memoryScopeFilter = '';
+let memoryKindFilter = '';
+
+function applyMemoryFilters() {
+  const rows = document.querySelectorAll('#memorySettings [data-scope]');
+  rows.forEach((row) => {
+    const scopeOk = !memoryScopeFilter || row.dataset.scope.startsWith(memoryScopeFilter);
+    const kindOk = !memoryKindFilter || row.dataset.kind === memoryKindFilter;
+    row.style.display = scopeOk && kindOk ? '' : 'none';
+  });
+}
+
+function wireMemoryFilters() {
+  document.querySelectorAll('#memorySettings [data-filter-kind]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const kind = chip.dataset.filterKind;
+      const value = chip.dataset.value || '';
+      if (kind === 'scope') memoryScopeFilter = value;
+      else memoryKindFilter = value;
+      document
+        .querySelectorAll(`#memorySettings [data-filter-kind="${kind}"]`)
+        .forEach((c) => c.classList.toggle('active', c.dataset.value === value));
+      applyMemoryFilters();
+    });
+  });
+  applyMemoryFilters();
+}
 
 /* ---------- History journal search (issue #222) ---------- */
 

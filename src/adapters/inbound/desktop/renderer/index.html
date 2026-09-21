@@ -630,6 +630,14 @@
                  sub-panels inside v-tasks (Work), see above. -->
             <section class="view" id="v-prefs">
               <div id="prefs"></div>
+              <!--
+                Memory/rules browse (issue #200/#223): the same routing
+                rules above, re-expressed in taxonomy terms (provenance,
+                confidence, scope). Filter chips are handled client-side
+                in app.js -- no new daemon round trip.
+              -->
+              <div class="sect" style="margin-top: 18px">Memory &amp; rules</div>
+              <div id="memorySettings"></div>
               <!-- Desktop-local settings (issue #163): not part of the
                    daemon profile — persisted to ~/.florina/desktop-
                    settings.json via the deskset: verb. Static DOM like
