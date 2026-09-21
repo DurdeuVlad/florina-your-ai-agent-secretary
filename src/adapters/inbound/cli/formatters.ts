@@ -16,6 +16,7 @@ import type {
   TaskSnapshot,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { MetricsSnapshot } from '../../../core/application/use-cases/metrics.js';
+import { checkSupervisionCostDiscipline } from '../../../core/application/use-cases/metrics.js';
 import type { CompletionDigest } from '../../../core/application/use-cases/attention/completion-digest.js';
 import type { ContextHealthSnapshot } from '../../../core/application/use-cases/context/context-health-monitor.js';
 import type { CatchUpDigest } from '../../../core/application/use-cases/resumption/catchup-digest.js';
@@ -364,6 +365,18 @@ export function formatMetrics(snapshot: MetricsSnapshot): string {
   lines.push(`  task duration:          ${histSummary(h.taskDuration)}`);
   lines.push(`  approval response time: ${histSummary(h.approvalResponseTime)}`);
   lines.push(`  tool duration:          ${histSummary(h.toolDuration)}`);
+
+  lines.push('');
+  lines.push(`${BOLD('Supervision cost')} (§7 model calls per stage)`);
+  const sc = snapshot.supervisionCost;
+  lines.push(`  L1 classification:      ${sc.modelCallsByStage['l1-classification']}`);
+  lines.push(`  Execution Brief compile: ${sc.modelCallsByStage['execution-brief-compile']}`);
+  lines.push(`  L2 manager reasoning:    ${sc.modelCallsByStage['l2-manager-reasoning']}`);
+  lines.push(`  L3 Florina reasoning:    ${sc.modelCallsByStage['l3-florina-reasoning']}`);
+  const costCheck = checkSupervisionCostDiscipline(snapshot);
+  if (!costCheck.ok) {
+    lines.push(`  ${RED('!')} ${costCheck.reason}`);
+  }
 
   return lines.join('\n') + '\n';
 }

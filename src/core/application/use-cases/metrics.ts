@@ -189,7 +189,39 @@ export interface MetricsSnapshot {
     /** `ToolStarted` → `ToolFinished` duration. */
     readonly toolDuration: HistogramSummary;
   };
+  /**
+   * Supervision-ladder model-call cost (§7, issue #194/#203) — the
+   * empirical check for the cost-bounded design claim: rule count and
+   * concurrent task count should not translate into a proportional
+   * explosion of model calls. Recorded explicitly via
+   * {@link MetricsCollector.recordSupervisionStage} (the ladder/compiler
+   * are pure functions, not bus events — same pattern as approval
+   * granted/denied).
+   */
+  readonly supervisionCost: {
+    /** Model calls per pipeline stage, summed across all tasks. */
+    readonly modelCallsByStage: Readonly<Record<SupervisionStage, number>>;
+    /** Total model calls per task, across every stage. */
+    readonly modelCallsByTask: Readonly<Record<string, number>>;
+  };
 }
+
+/**
+ * The supervision-ladder pipeline stages this metric tracks (§7's table):
+ * L0 (deterministic) makes no model call and is intentionally absent here.
+ */
+export type SupervisionStage =
+  | 'l1-classification'
+  | 'execution-brief-compile'
+  | 'l2-manager-reasoning'
+  | 'l3-florina-reasoning';
+
+const SUPERVISION_STAGES: readonly SupervisionStage[] = [
+  'l1-classification',
+  'execution-brief-compile',
+  'l2-manager-reasoning',
+  'l3-florina-reasoning',
+];
 
 /* ------------------------------------------------------------------ *
  * MetricsCollector
@@ -246,6 +278,8 @@ export class MetricsCollector {
   private approvalsDenied = 0;
   private readonly toolsInvoked = new Map<string, number>();
   private readonly contextHealthByStatus = new Map<string, number>();
+  private readonly supervisionCallsByStage = new Map<SupervisionStage, number>();
+  private readonly supervisionCallsByTask = new Map<string, number>();
 
   // --- Gauges ---------------------------------------------------------
   private activeSessions = 0;
@@ -324,6 +358,19 @@ export class MetricsCollector {
   }
 
   /**
+   * Record one model call at a supervision-ladder pipeline stage for a
+   * task (§7, issue #203). Call this from wherever the ladder/compiler
+   * actually invokes a model — the ladder and compiler themselves are
+   * pure functions with no metrics dependency (DEC-014's "deterministic
+   * first" — instrumentation lives at the call site, not inside the
+   * pure decision logic).
+   */
+  recordSupervisionStage(stage: SupervisionStage, taskId: string): void {
+    this.supervisionCallsByStage.set(stage, (this.supervisionCallsByStage.get(stage) ?? 0) + 1);
+    this.supervisionCallsByTask.set(taskId, (this.supervisionCallsByTask.get(taskId) ?? 0) + 1);
+  }
+
+  /**
    * Return a serializable snapshot of all metrics at the current instant.
    */
   snapshot(): MetricsSnapshot {
@@ -351,7 +398,20 @@ export class MetricsCollector {
         approvalResponseTime: this.approvalResponseTime.summary(),
         toolDuration: this.toolDuration.summary(),
       },
+      supervisionCost: {
+        modelCallsByStage: this.supervisionCallsByStageRecord(),
+        modelCallsByTask: { ...this.mapToRecord(this.supervisionCallsByTask) },
+      },
     };
+  }
+
+  /** Every stage present in the record, even at 0 — a missing key reads ambiguously as "never happened" vs "zero." */
+  private supervisionCallsByStageRecord(): Record<SupervisionStage, number> {
+    const record = {} as Record<SupervisionStage, number>;
+    for (const stage of SUPERVISION_STAGES) {
+      record[stage] = this.supervisionCallsByStage.get(stage) ?? 0;
+    }
+    return record;
   }
 
   /** Clear all collected metrics and in-flight tracking state. */
@@ -359,6 +419,8 @@ export class MetricsCollector {
     this.eventsEmitted.clear();
     this.toolsInvoked.clear();
     this.contextHealthByStatus.clear();
+    this.supervisionCallsByStage.clear();
+    this.supervisionCallsByTask.clear();
     this.tasksStarted = 0;
     this.tasksCompleted = 0;
     this.tasksFailed = 0;
@@ -491,4 +553,38 @@ export class MetricsCollector {
     }
     return record;
   }
+}
+
+/**
+ * Result of {@link checkSupervisionCostDiscipline}.
+ */
+export interface SupervisionCostCheck {
+  readonly ok: boolean;
+  /** Present only when `ok` is `false` — explains which invariant broke. */
+  readonly reason?: string;
+}
+
+/**
+ * The specific failure mode §7 is designed to prevent: L1 (cheap
+ * classification) is supposed to fire only on events L0 already flagged
+ * as ambiguous — a *subset* of total event volume, never more. If
+ * L1 call count ever exceeds total events emitted, classification is
+ * structurally running more than once per event (or on events that were
+ * never emitted), which is exactly "L1-classification call volume
+ * growing faster than event volume." A documented manual process for
+ * the harder trend-over-time question (is the *ratio* creeping up
+ * release over release) is described in this function's doc rather than
+ * automated here — that needs historical snapshots this single-point
+ * check doesn't have.
+ */
+export function checkSupervisionCostDiscipline(snapshot: MetricsSnapshot): SupervisionCostCheck {
+  const totalEvents = Object.values(snapshot.counters.eventsEmitted).reduce((a, b) => a + b, 0);
+  const l1Calls = snapshot.supervisionCost.modelCallsByStage['l1-classification'];
+  if (l1Calls > totalEvents) {
+    return {
+      ok: false,
+      reason: `L1 classification calls (${l1Calls}) exceed total events emitted (${totalEvents}) — L1 must fire on a subset of events, never more.`,
+    };
+  }
+  return { ok: true };
 }
