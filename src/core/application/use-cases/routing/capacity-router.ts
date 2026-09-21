@@ -165,8 +165,13 @@ export class CapacityRouter {
     return this.profile.denied.some((deny) => {
       if (!inScope(deny, projectId) || deny.provider !== rule.provider) return false;
       if (deny.model === undefined) return true;
+      // A rule with no model pin was never matched by a model-scoped deny
+      // (pre-#250 behavior, preserved for every provider) -- only the
+      // family-normalized comparison below is new, and only for providers
+      // with a registered normalizer.
+      if (rule.model === undefined) return false;
       const family = modelFamilyOf(deny.provider);
-      return family(deny.model) === family(rule.model ?? '');
+      return family(deny.model) === family(rule.model);
     });
   }
 
@@ -227,13 +232,35 @@ function modelFamilyOf(provider: string): (model: string) => string {
 }
 
 /**
- * Strips a `claude-<family>-...` prefix down to `<family>`, so `opus`,
- * `claude-opus-5`, and any future `claude-opus-*` id all normalize to
- * `opus`. A bare alias has no such prefix and normalizes to itself, so
- * both forms converge.
+ * Known Claude model family names (the tier a deny like "never Opus"
+ * actually refers to). A fixed positional regex (`claude-<family>-...`)
+ * broke on dated ids where the family isn't the first segment, e.g.
+ * `claude-3-opus-20240229` or `claude-3-5-sonnet-20241022` — so this
+ * matches the family as a hyphen-delimited segment anywhere in the model
+ * id instead of assuming a naming scheme.
+ *
+ * ponytail: whitelist has a ceiling — a future family name not listed
+ * here falls through to exact-string comparison (safe: under-matches,
+ * never over-matches). Add it here when Anthropic ships one.
+ */
+const CLAUDE_MODEL_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'] as const;
+
+/**
+ * Normalizes any spelling of a Claude model id down to its family name,
+ * so `opus`, `claude-opus-5`, and `claude-3-opus-20240229` all converge.
+ * A bare alias or an unrecognized string returns itself lowercased.
  */
 function claudeModelFamily(model: string): string {
   const lower = model.toLowerCase();
-  const match = /^claude-([a-z]+)(?:-|$)/.exec(lower);
-  return match ? match[1]! : lower;
+  for (const family of CLAUDE_MODEL_FAMILIES) {
+    if (
+      lower === family ||
+      lower.startsWith(`${family}-`) ||
+      lower.endsWith(`-${family}`) ||
+      lower.includes(`-${family}-`)
+    ) {
+      return family;
+    }
+  }
+  return lower;
 }
