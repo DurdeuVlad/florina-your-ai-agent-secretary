@@ -60,6 +60,7 @@ if (bridge) {
   /* ideas screen (issue #129) */
   bridge.on('ideas:update', (tree) => mount(tree, $('ideas')));
   bridge.on('history:update', (tree) => mount(tree, $('history')));
+  bridge.on('history:search-results', (tree) => mount(tree, $('historySearchResults')));
 
   /* secretary screen (issue #130) */
   bridge.on('secretary:update', (tree) => mount(tree, $('secretary')));
@@ -838,6 +839,32 @@ function showWorkSub(name) {
 document
   .querySelectorAll('.worksubtab')
   .forEach((b) => b.addEventListener('click', () => showWorkSub(b.dataset.worksub)));
+
+/* ---------- History journal search (issue #222) ---------- */
+
+/** Wrap a search-journal payload in the historysearch: wire verb. */
+function historySearchCmd(payload) {
+  return 'historysearch:' + encodeURIComponent(JSON.stringify(payload));
+}
+
+function runHistorySearch() {
+  if (!bridge) return;
+  const text = $('historySearchText').value.trim();
+  const since = $('historySearchSince').value; // yyyy-mm-dd or ''
+  const until = $('historySearchUntil').value;
+  const payload = { kind: 'search-journal' };
+  if (text) payload.text = text;
+  if (since) payload.since = since + 'T00:00:00.000Z';
+  if (until) payload.until = until + 'T23:59:59.999Z';
+  void bridge.command(historySearchCmd(payload)).then((res) => {
+    if (res && res.ok === false) toast(res.error || 'search failed');
+  });
+}
+
+$('historySearchGo').addEventListener('click', runHistorySearch);
+$('historySearchText').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runHistorySearch();
+});
 
 /* ---------- keyboard nav (DG-01 §4) ---------- */
 

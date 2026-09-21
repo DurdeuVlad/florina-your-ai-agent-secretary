@@ -26,7 +26,7 @@ import type { MetricsSnapshot } from '../../../core/application/use-cases/metric
 import type { AttentionItem } from '../../../core/application/use-cases/attention/attention-item.js';
 import { renderHomeView } from './views/home-view.js';
 import { renderHistoryView } from './views/history-view.js';
-import { renderInspectorView } from './views/inspector-view.js';
+import { renderInspectorView, renderTimelineRow } from './views/inspector-view.js';
 import { renderFleetScreen } from './views/fleet-screen.js';
 import { renderPrefsScreen } from './views/prefs-screen.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
@@ -896,6 +896,23 @@ export class DesktopApp {
       this.chatTool = undefined;
       this.pushChat();
     }
+    // History journal search (issue #222): results are pushed as a
+    // pre-built RenderTree over the dedicated 'history:search-results'
+    // channel, reusing the Session Inspector's renderTimelineRow --
+    // command:result only resolves the triggering promise, the raw
+    // events aren't rendered client-side (RenderTree building is a
+    // main-process-only concern, same as every other view here).
+    if (res.ok && cmd.kind === 'search-journal' && 'events' in res) {
+      const events = res.events as readonly Event[];
+      this.bridge.sendToRenderer('history:search-results', {
+        tag: 'HistorySearchResults',
+        props: { count: events.length },
+        children:
+          events.length === 0
+            ? [{ tag: 'EmptyHint', children: ['no matching events'] }]
+            : events.map((e, i) => renderTimelineRow(e, i, false)),
+      });
+    }
     // Committed mutations re-pull their view data so the screen reflects
     // the journaled change immediately (#128 preferences, #129 ideas,
     // #130 memory-write gate).
@@ -963,6 +980,23 @@ export class DesktopApp {
         return { error: 'chatcmd payload must be a chat-send or chat-clear command' };
       } catch {
         return { error: 'malformed chatcmd payload' };
+      }
+    }
+    // `historysearch:<uri-encoded JSON>` — History's journal search
+    // (issue #222). Whitelisted to search-journal only.
+    if (cmd.startsWith('historysearch:')) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cmd.slice('historysearch:'.length))) as unknown;
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          (parsed as { kind?: unknown }).kind === 'search-journal'
+        ) {
+          return parsed as Command;
+        }
+        return { error: 'historysearch payload must be a search-journal command' };
+      } catch {
+        return { error: 'malformed historysearch payload' };
       }
     }
     // `memwrite:confirm:<id>` / `memwrite:reject:<id>` — memory-write

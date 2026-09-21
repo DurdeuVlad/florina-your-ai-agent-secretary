@@ -65,6 +65,30 @@
       .pref-addform select:focus {
         border-color: var(--accent);
       }
+      .historysearch {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .historysearch input {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .historysearch input:focus {
+        border-color: var(--accent);
+      }
+      .historysearch input[type='text'] {
+        flex: 1;
+      }
+      .historysearch input[type='date'] {
+        color-scheme: dark;
+      }
       .pref-addform select {
         flex: 1;
         background: var(--panel);
@@ -585,7 +609,23 @@
               history:update (desktop-app.ts). Journal search (#222) adds
               to this same container later.
             -->
-            <section class="view" id="v-history"><div id="history"></div></section>
+            <section class="view" id="v-history">
+              <div id="history"></div>
+              <!--
+                Journal search (issue #222): static composer-style inputs
+                (dynamic content, so no data-command delegation) wired
+                directly in app.js. Results are pushed pre-rendered via
+                history:search-results, reusing renderTimelineRow.
+              -->
+              <div class="sect">Search journal</div>
+              <div class="historysearch">
+                <input type="text" id="historySearchText" placeholder="text (e.g. task id, kind, error)" />
+                <input type="date" id="historySearchSince" title="since" />
+                <input type="date" id="historySearchUntil" title="until" />
+                <button id="historySearchGo">Search</button>
+              </div>
+              <div id="historySearchResults"></div>
+            </section>
             <!-- v-fleet/v-ideas removed (#220): #fleet/#ideas now live as
                  sub-panels inside v-tasks (Work), see above. -->
             <section class="view" id="v-prefs">
