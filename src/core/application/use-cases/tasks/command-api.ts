@@ -40,6 +40,9 @@ import {
 } from '../attention/attention-item.js';
 import type { AttentionInbox, AttentionInboxFilter } from '../attention/attention-inbox.js';
 import type { CompletionDigest } from '../attention/completion-digest.js';
+import { computeCatchUpDigest, watermarkOrEpoch, advanceWatermark } from '../resumption/catchup-digest.js';
+import type { CatchUpDigest } from '../resumption/catchup-digest.js';
+import type { CatchUpWatermarkPort } from '../../ports/outbound/catchup-watermark.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
 import type {
   AgentRuntimePort,
@@ -464,6 +467,28 @@ export interface GetDigestCommand {
 }
 
 /**
+ * Compute the "since you were last active" digest from the current
+ * watermark to now (DEC-042, issue #217). Does **not** advance the
+ * watermark — that only happens via {@link ConfirmCatchUpCommand}, once
+ * the caller has actually delivered the digest.
+ */
+export interface GetCatchUpCommand {
+  readonly kind: 'get-catchup';
+}
+
+/**
+ * Confirm the catch-up digest was delivered (read/spoken/printed) and
+ * advance the watermark to `until`. A client that crashes between
+ * `get-catchup` and this command never advances the watermark, so the
+ * next catch-up recomputes the same window rather than silently
+ * skipping it.
+ */
+export interface ConfirmCatchUpCommand {
+  readonly kind: 'confirm-catchup';
+  readonly until: string;
+}
+
+/**
  * Create a pull request for a task's branch (issue #27).
  *
  * Invoked by the side-by-side digest & diff viewer's "Create PR" action. The
@@ -581,6 +606,8 @@ export type Command =
   | UpdatePreferenceCommand
   | QueryPreferencesCommand
   | GetDigestCommand
+  | GetCatchUpCommand
+  | ConfirmCatchUpCommand
   | CreatePrCommand
   | DelegateTaskCommand
   | ChatSendCommand
@@ -701,6 +728,19 @@ export interface ShutdownResponse {
 export interface DigestResponse {
   readonly ok: boolean;
   readonly digest: CompletionDigest | null;
+  readonly error?: string;
+}
+
+/** Response to a `get-catchup` command (issue #217). */
+export interface CatchUpResponse {
+  readonly ok: boolean;
+  readonly digest: CatchUpDigest | null;
+  readonly error?: string;
+}
+
+/** Response to a `confirm-catchup` command (issue #217). */
+export interface ConfirmCatchUpResponse {
+  readonly ok: boolean;
   readonly error?: string;
 }
 
@@ -976,6 +1016,8 @@ export type Response =
   | PruneResponse
   | ShutdownResponse
   | DigestResponse
+  | CatchUpResponse
+  | ConfirmCatchUpResponse
   | CreatePrResponse
   | ContextHealthResponse
   | IdeaResponse
@@ -1119,6 +1161,12 @@ export interface CommandApiDeps {
    */
   readonly completionDigestRepository?: CompletionDigestRepositoryPort<CompletionDigest>;
   /**
+   * Optional catch-up watermark store (DEC-042, issue #217). When
+   * present, `get-catchup`/`confirm-catchup` are usable; when absent,
+   * both commands return an error rather than silently no-op-ing.
+   */
+  readonly catchUpWatermark?: CatchUpWatermarkPort;
+  /**
    * Optional attention-metrics query service (DEC-015, issue #18). When
    * present, `query-metrics` computes the ACR + supplemental metrics report
    * for the requested time window / project / task and returns it as
@@ -1218,6 +1266,7 @@ export class CommandApi {
   private readonly adapterRegistry?: AgentRuntimeRegistryPort;
   private readonly sessionManager?: SessionManager;
   private readonly completionDigestRepository?: CompletionDigestRepositoryPort<CompletionDigest>;
+  private readonly catchUpWatermark?: CatchUpWatermarkPort;
   private readonly metricsQueryService?: MetricsQueryService;
   private readonly contextHealth?: ContextHealthReadPort;
   private readonly secretaryOps?: SecretaryOpsPort;
@@ -1248,6 +1297,7 @@ export class CommandApi {
     this.adapterRegistry = deps.adapterRegistry;
     this.sessionManager = deps.sessionManager;
     this.completionDigestRepository = deps.completionDigestRepository;
+    this.catchUpWatermark = deps.catchUpWatermark;
     this.metricsQueryService = deps.metricsQueryService;
     this.contextHealth = deps.contextHealth;
     this.secretaryOps = deps.secretaryOps;
@@ -1344,6 +1394,10 @@ export class CommandApi {
         return this.handleQueryPreferences(command);
       case 'get-digest':
         return this.handleGetDigest(command);
+      case 'get-catchup':
+        return this.handleGetCatchUp(command);
+      case 'confirm-catchup':
+        return this.handleConfirmCatchUp(command);
       case 'create-pr':
         return this.handleCreatePr(command);
       case 'delegate-task':
@@ -2268,6 +2322,49 @@ export class CommandApi {
         digest: null,
         error: `Failed to query digest: ${errorMessage(err)}`,
       };
+    }
+  }
+
+  /**
+   * get-catchup: compute the since-you-were-last-active digest (DEC-042,
+   * issue #217). Read-only — does not advance the watermark.
+   */
+  private async handleGetCatchUp(_cmd: GetCatchUpCommand): Promise<CatchUpResponse> {
+    if (!this.catchUpWatermark) {
+      return { ok: false, digest: null, error: 'Catch-up watermark store is not configured' };
+    }
+    try {
+      const since = watermarkOrEpoch(this.catchUpWatermark.get());
+      const until = new Date().toISOString();
+      const digest = computeCatchUpDigest(
+        { taskStore: this.taskStore, inbox: this.attentionInbox, journal: this.eventRepository },
+        since,
+        until,
+      );
+      return { ok: true, digest };
+    } catch (err) {
+      return { ok: false, digest: null, error: `Failed to compute catch-up digest: ${errorMessage(err)}` };
+    }
+  }
+
+  /**
+   * confirm-catchup: advance the watermark after the caller has actually
+   * delivered the digest (issue #217). A client that never sends this
+   * (crash before delivery) leaves the watermark untouched, so the next
+   * `get-catchup` recomputes the same window rather than skipping it.
+   */
+  private async handleConfirmCatchUp(cmd: ConfirmCatchUpCommand): Promise<ConfirmCatchUpResponse> {
+    if (!this.catchUpWatermark) {
+      return { ok: false, error: 'Catch-up watermark store is not configured' };
+    }
+    if (!cmd.until) {
+      return { ok: false, error: 'until is required' };
+    }
+    try {
+      advanceWatermark(this.catchUpWatermark, cmd.until);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: `Failed to advance catch-up watermark: ${errorMessage(err)}` };
     }
   }
 

@@ -20,6 +20,8 @@ import type {
   PruneResponse,
   ShutdownResponse,
   DigestResponse,
+  CatchUpResponse,
+  ConfirmCatchUpResponse,
   SecretaryResponse,
   MemoryWriteResponse,
   UnknownCommandResponse,
@@ -108,6 +110,16 @@ class InMemoryApprovalStore implements ApprovalStore {
 /**
  * Mock WorktreeManager that records calls and can simulate dirty worktrees.
  */
+class InMemoryCatchUpWatermarkStore {
+  private value: string | null = null;
+  get(): string | null {
+    return this.value;
+  }
+  set(value: string): void {
+    this.value = value;
+  }
+}
+
 class MockWorktreeManager {
   pruneWorktree = vi.fn<(path: string) => void>();
   detectDirty = vi.fn<(path: string) => boolean>();
@@ -147,6 +159,7 @@ interface Fixture {
   onShutdown: ReturnType<typeof vi.fn>;
   db: StorageDatabase;
   completionDigestRepository: CompletionDigestRepository;
+  catchUpWatermark: InMemoryCatchUpWatermarkStore;
   chatStore: ChatMessageRepository;
   chatMessageSink: ReturnType<typeof vi.fn>;
   /** The project ID created in the fixture (for task creation). */
@@ -217,6 +230,7 @@ function createFixture(): Fixture {
   const approvalStore = new InMemoryApprovalStore();
   const sessionStore: SessionStore = sessionRepo;
   const onShutdown = vi.fn();
+  const catchUpWatermark = new InMemoryCatchUpWatermarkStore();
 
   const deps: CommandApiDeps = {
     eventBus,
@@ -229,6 +243,7 @@ function createFixture(): Fixture {
     approvalStore,
     sessionStore,
     completionDigestRepository: completionDigestRepo,
+    catchUpWatermark,
     chatStore,
     chatMessageSink,
     onShutdown,
@@ -260,6 +275,7 @@ function createFixture(): Fixture {
     onShutdown,
     db,
     completionDigestRepository: completionDigestRepo,
+    catchUpWatermark,
     chatStore,
     chatMessageSink,
     projectId: project.id,
@@ -1369,6 +1385,62 @@ describe('CommandApi', () => {
       expect(r.ok).toBe(false);
       expect(r.digest).toBeNull();
       expect(r.error).toContain('taskId is required');
+    });
+  });
+
+  describe('get-catchup / confirm-catchup (issue #217)', () => {
+    it('get-catchup computes a digest without advancing the watermark', async () => {
+      const { task, sessionId, agentId } = createTaskWithSession(fixture);
+      fixture.taskStateMachine.transition(task.id, TaskState.Created, TaskState.Delegated, {
+        sessionId,
+        agentId,
+      });
+
+      const before = fixture.catchUpWatermark.get();
+      const res = (await fixture.api.execute({ kind: 'get-catchup' })) as CatchUpResponse;
+
+      expect(res.ok).toBe(true);
+      expect(res.digest).not.toBeNull();
+      expect(fixture.catchUpWatermark.get()).toBe(before);
+    });
+
+    it('confirm-catchup advances the watermark to the given timestamp', async () => {
+      expect(fixture.catchUpWatermark.get()).toBeNull();
+
+      const res = (await fixture.api.execute({
+        kind: 'confirm-catchup',
+        until: '2026-09-21T00:00:00.000Z',
+      })) as ConfirmCatchUpResponse;
+
+      expect(res.ok).toBe(true);
+      expect(fixture.catchUpWatermark.get()).toBe('2026-09-21T00:00:00.000Z');
+    });
+
+    it('crash-before-delivery: watermark stays put if confirm-catchup is never sent', async () => {
+      const first = (await fixture.api.execute({ kind: 'get-catchup' })) as CatchUpResponse;
+      expect(first.ok).toBe(true);
+      // Simulate the client crashing right after get-catchup, before it could
+      // render/deliver the digest and send confirm-catchup.
+      expect(fixture.catchUpWatermark.get()).toBeNull();
+
+      // The next get-catchup recomputes from the same (unmoved) starting
+      // point rather than silently skipping the missed window.
+      const second = (await fixture.api.execute({ kind: 'get-catchup' })) as CatchUpResponse;
+      expect(second.ok).toBe(true);
+      expect(second.digest?.since).toBe(first.digest?.since);
+    });
+
+    it('confirm-catchup never regresses the watermark on a stale call', async () => {
+      await fixture.api.execute({ kind: 'confirm-catchup', until: '2026-09-21T12:00:00.000Z' });
+      await fixture.api.execute({ kind: 'confirm-catchup', until: '2026-09-21T00:00:00.000Z' });
+
+      expect(fixture.catchUpWatermark.get()).toBe('2026-09-21T12:00:00.000Z');
+    });
+
+    it('confirm-catchup returns an error when until is empty', async () => {
+      const res = (await fixture.api.execute({ kind: 'confirm-catchup', until: '' })) as ConfirmCatchUpResponse;
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('until is required');
     });
   });
 
