@@ -71,6 +71,77 @@ describe('CapacityRouter', () => {
     expect(result).toMatchObject({ kind: 'routed', provider: 'codex' });
   });
 
+  it('a claude-code deny on the short alias also blocks the full model id (issue #250)', () => {
+    const profile: PreferenceProfile = {
+      rules: [{ provider: 'claude-code', model: 'claude-opus-5' }, { provider: 'codex' }],
+      denied: [{ provider: 'claude-code', model: 'opus' }],
+    };
+    const result = router(profile).route({});
+    expect(result).toMatchObject({ kind: 'routed', provider: 'codex' });
+  });
+
+  it('a claude-code deny on the full model id also blocks the short alias (issue #250)', () => {
+    const profile: PreferenceProfile = {
+      rules: [{ provider: 'claude-code', model: 'opus' }, { provider: 'codex' }],
+      denied: [{ provider: 'claude-code', model: 'claude-opus-5' }],
+    };
+    const result = router(profile).route({});
+    expect(result).toMatchObject({ kind: 'routed', provider: 'codex' });
+  });
+
+  it('claude-code alias-family matching does not deny other model families', () => {
+    const profile: PreferenceProfile = {
+      rules: [{ provider: 'claude-code', model: 'claude-sonnet-5' }],
+      denied: [{ provider: 'claude-code', model: 'opus' }],
+    };
+    const result = router(profile).route({});
+    expect(result).toMatchObject({ kind: 'routed', provider: 'claude-code', model: 'claude-sonnet-5' });
+  });
+
+  it('a claude-code deny on the alias also blocks dated-style full ids (family not the first segment)', () => {
+    const profile: PreferenceProfile = {
+      rules: [
+        { provider: 'claude-code', model: 'claude-3-opus-20240229' },
+        { provider: 'codex' },
+      ],
+      denied: [{ provider: 'claude-code', model: 'opus' }],
+    };
+    const result = router(profile).route({});
+    expect(result).toMatchObject({ kind: 'routed', provider: 'codex' });
+  });
+
+  it('a claude-code deny on a dated full id also blocks a differently-dated id of the same family', () => {
+    const profile: PreferenceProfile = {
+      rules: [
+        { provider: 'claude-code', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'codex' },
+      ],
+      denied: [{ provider: 'claude-code', model: 'claude-sonnet-5' }],
+    };
+    const result = router(profile).route({});
+    expect(result).toMatchObject({ kind: 'routed', provider: 'codex' });
+  });
+
+  it('a deny with a model does not match a catch-all rule with no model pin, for any provider', () => {
+    const profile: PreferenceProfile = {
+      rules: [{ provider: 'claude-code' }],
+      denied: [{ provider: 'claude-code', model: 'opus' }],
+    };
+    const result = router(profile).route({});
+    expect(result).toMatchObject({ kind: 'routed', provider: 'claude-code' });
+  });
+
+  it('alias-family matching is scoped to claude-code and does not affect other providers', () => {
+    const profile: PreferenceProfile = {
+      // "opus" is a plausible-but-unrelated model string on another provider;
+      // a claude-code deny must never leak into it.
+      rules: [{ provider: 'antigravity', model: 'opus' }],
+      denied: [{ provider: 'claude-code', model: 'opus' }],
+    };
+    const result = router(profile).route({});
+    expect(result).toMatchObject({ kind: 'routed', provider: 'antigravity', model: 'opus' });
+  });
+
   it('a deny rule without a model removes the provider entirely', () => {
     const profile: PreferenceProfile = {
       rules: [{ provider: 'gemini' }, { provider: 'codex' }],

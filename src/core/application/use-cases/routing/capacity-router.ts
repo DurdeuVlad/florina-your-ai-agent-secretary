@@ -162,12 +162,17 @@ export class CapacityRouter {
   }
 
   private isDenied(rule: RoutingRule, projectId?: string): boolean {
-    return this.profile.denied.some(
-      (deny) =>
-        inScope(deny, projectId) &&
-        deny.provider === rule.provider &&
-        (deny.model === undefined || deny.model === rule.model),
-    );
+    return this.profile.denied.some((deny) => {
+      if (!inScope(deny, projectId) || deny.provider !== rule.provider) return false;
+      if (deny.model === undefined) return true;
+      // A rule with no model pin was never matched by a model-scoped deny
+      // (pre-#250 behavior, preserved for every provider) -- only the
+      // family-normalized comparison below is new, and only for providers
+      // with a registered normalizer.
+      if (rule.model === undefined) return false;
+      const family = modelFamilyOf(deny.provider);
+      return family(deny.model) === family(rule.model);
+    });
   }
 
   /**
@@ -200,4 +205,62 @@ function describeRule(rule: RoutingRule): string {
   const model = rule.model !== undefined ? ` model=${rule.model}` : '';
   const work = rule.workTypes !== undefined ? ` work=[${rule.workTypes.join(',')}]` : '';
   return `${rule.provider}${model}${work}`;
+}
+
+/**
+ * Per-provider model-alias normalizers (issue #250): some provider CLIs
+ * treat a short alias and a full model id as the same model — e.g. Claude
+ * Code's `--model opus` and `--model claude-opus-5` launch the same
+ * session — so a deny on one form must also block the other. Keyed by
+ * provider so adding another provider's alias scheme later is a one-line
+ * table entry, not another branch in {@link CapacityRouter.isDenied}.
+ * Providers with no entry fall back to exact-string matching (the historic
+ * behavior), which is correct for providers with no documented alias
+ * convention (Codex, Devin, Gemini, Antigravity, as of #250).
+ */
+const MODEL_FAMILY_NORMALIZERS: Readonly<Record<string, (model: string) => string>> = {
+  'claude-code': claudeModelFamily,
+};
+
+/** Exact-string fallback for providers with no registered alias scheme (unchanged pre-#250 behavior). */
+function identityFamily(model: string): string {
+  return model;
+}
+
+function modelFamilyOf(provider: string): (model: string) => string {
+  return MODEL_FAMILY_NORMALIZERS[provider] ?? identityFamily;
+}
+
+/**
+ * Known Claude model family names (the tier a deny like "never Opus"
+ * actually refers to). A fixed positional regex (`claude-<family>-...`)
+ * broke on dated ids where the family isn't the first segment, e.g.
+ * `claude-3-opus-20240229` or `claude-3-5-sonnet-20241022` — so this
+ * matches the family as a hyphen-delimited segment anywhere in the model
+ * id instead of assuming a naming scheme.
+ *
+ * ponytail: whitelist has a ceiling — a future family name not listed
+ * here falls through to exact-string comparison (safe: under-matches,
+ * never over-matches). Add it here when Anthropic ships one.
+ */
+const CLAUDE_MODEL_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'] as const;
+
+/**
+ * Normalizes any spelling of a Claude model id down to its family name,
+ * so `opus`, `claude-opus-5`, and `claude-3-opus-20240229` all converge.
+ * A bare alias or an unrecognized string returns itself lowercased.
+ */
+function claudeModelFamily(model: string): string {
+  const lower = model.toLowerCase();
+  for (const family of CLAUDE_MODEL_FAMILIES) {
+    if (
+      lower === family ||
+      lower.startsWith(`${family}-`) ||
+      lower.endsWith(`-${family}`) ||
+      lower.includes(`-${family}-`)
+    ) {
+      return family;
+    }
+  }
+  return lower;
 }

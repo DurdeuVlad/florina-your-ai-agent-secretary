@@ -154,6 +154,21 @@ describe('attachLocalAgentProviders', () => {
     }
   });
 
+  it('the agy skip reason is actionable: mentions FLORINA_AGY_CMD and that it is not IDE-bundled (issue #251)', async () => {
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv(),
+      platform: 'win32',
+      homeDir: tmp(),
+      localAppData: tmp(),
+      codexReadyTimeoutMs: 200,
+      codexSpawner: () => spawn(process.execPath, ['-e', '']),
+    });
+    const reason = result.skipped.find((p) => p.id === 'antigravity')?.reason;
+    expect(reason).toContain('FLORINA_AGY_CMD');
+    expect(reason).toContain('not bundled');
+  });
+
   it('a path-valued env override must exist; a bare name is trusted', async () => {
     const registry = new AdapterRegistry();
     const result = await attachLocalAgentProviders(registry, {
