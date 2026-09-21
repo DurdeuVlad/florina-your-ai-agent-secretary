@@ -823,6 +823,21 @@ document
   .querySelectorAll('.navitem')
   .forEach((n) => n.addEventListener('click', () => showView(n.dataset.view)));
 
+/* ---------- Work sub-tabs: Tasks/Fleet/Ideas (issue #220) ---------- */
+
+function showWorkSub(name) {
+  document
+    .querySelectorAll('.worksubtab')
+    .forEach((b) => b.classList.toggle('active', b.dataset.worksub === name));
+  document
+    .querySelectorAll('.worksubpanel')
+    .forEach((p) => p.classList.toggle('active', p.id === name));
+}
+
+document
+  .querySelectorAll('.worksubtab')
+  .forEach((b) => b.addEventListener('click', () => showWorkSub(b.dataset.worksub)));
+
 /* ---------- keyboard nav (DG-01 §4) ---------- */
 
 let sel = -1;
