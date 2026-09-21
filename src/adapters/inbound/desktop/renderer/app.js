@@ -66,6 +66,9 @@ if (bridge) {
     wireMemoryFilters();
   });
 
+  /* Settings > Repos (issue #253) */
+  bridge.on('repos:update', (tree) => mount(tree, $('reposView')));
+
   /* secretary screen (issue #130) */
   bridge.on('secretary:update', (tree) => mount(tree, $('secretary')));
 
@@ -902,6 +905,26 @@ function runHistorySearch() {
 $('historySearchGo').addEventListener('click', runHistorySearch);
 $('historySearchText').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') runHistorySearch();
+});
+
+/* ---------- Settings > Repos search (issue #253) ---------- */
+
+/** Wrap a query-repos payload in the reposcmd: wire verb. */
+function reposCmd(payload) {
+  return 'reposcmd:' + encodeURIComponent(JSON.stringify(payload));
+}
+
+function runReposSearch() {
+  if (!bridge) return;
+  const query = $('reposSearchText').value.trim();
+  void bridge.command(reposCmd({ kind: 'query-repos', query })).then((res) => {
+    if (res && res.ok === false) toast(res.error || 'search failed');
+  });
+}
+
+$('reposSearchGo').addEventListener('click', runReposSearch);
+$('reposSearchText').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runReposSearch();
 });
 
 /* ---------- keyboard nav (DG-01 §4) ---------- */

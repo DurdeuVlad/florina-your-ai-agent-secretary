@@ -638,6 +638,20 @@
               -->
               <div class="sect" style="margin-top: 18px">Memory &amp; rules</div>
               <div id="memorySettings"></div>
+              <!--
+                Repos (issue #253): the folders Florina searches for repos,
+                in scan/search priority order, plus what it found. "+ Add
+                folder"/"Use default folder" run a native dialog in the
+                main process (pickfolders/defaultfolder local verbs); the
+                root list and discovered repos are server-rendered into
+                #reposView on every repos:update push.
+              -->
+              <div class="sect" style="margin-top: 18px">Repos</div>
+              <div class="historysearch">
+                <input type="text" id="reposSearchText" placeholder="search repos by name" />
+                <button id="reposSearchGo">Search</button>
+              </div>
+              <div id="reposView"></div>
               <!-- Desktop-local settings (issue #163): not part of the
                    daemon profile — persisted to ~/.florina/desktop-
                    settings.json via the deskset: verb. Static DOM like

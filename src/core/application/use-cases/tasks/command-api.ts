@@ -67,6 +67,13 @@ import {
   type PreferenceProfile,
   type PreferenceProfilePort,
 } from '../../ports/outbound/preference-profile.js';
+import type { RepoRootsConfig, RepoRootsPort } from '../../ports/outbound/repo-roots.js';
+import {
+  discoverRepos,
+  searchRepos,
+  type DiscoveredRepo,
+  type RepoScannerPort,
+} from '../repos/discover-repos.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 import type { QuotaLedger } from '../routing/quota-ledger.js';
 import type { MetricsCollector, MetricsSnapshot } from '../metrics.js';
@@ -472,6 +479,27 @@ export interface QueryPreferencesCommand {
   readonly projectId?: string;
 }
 
+/**
+ * Replace the user's configured repo roots (issue #253): the desktop
+ * onboarding/Settings UI always sends the full ordered list back after an
+ * add/remove/reorder, so this is the only mutation the roots config needs.
+ */
+export interface SetRepoRootsCommand {
+  readonly kind: 'set-repo-roots';
+  /** Ordered folder paths — index 0 is highest scan/search priority. */
+  readonly paths: readonly string[];
+}
+
+/**
+ * Read the configured repo roots and the repos discovered under them
+ * (issue #253). `query` narrows the discovered list to a case-insensitive
+ * substring match on repo name ("search for repos there").
+ */
+export interface QueryReposCommand {
+  readonly kind: 'query-repos';
+  readonly query?: string;
+}
+
 /** Query the latest completion digest for a task (issue #37). */
 export interface GetDigestCommand {
   readonly kind: 'get-digest';
@@ -626,7 +654,9 @@ export type Command =
   | ChatSendCommand
   | ChatReadCommand
   | ChatClearCommand
-  | ChatAppendCommand;
+  | ChatAppendCommand
+  | SetRepoRootsCommand
+  | QueryReposCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -667,6 +697,8 @@ export const COMMAND_KINDS: readonly string[] = [
   'chat-read',
   'chat-clear',
   'chat-append',
+  'set-repo-roots',
+  'query-repos',
 ] as const;
 
 /* ================================================================== *
@@ -902,6 +934,15 @@ export interface PreferenceResponse {
   readonly error?: string;
 }
 
+/** Response to `set-repo-roots`/`query-repos` (issue #253). */
+export interface ReposResponse {
+  readonly ok: boolean;
+  readonly roots?: RepoRootsConfig;
+  /** Discovered repos (query-repos only), filtered by `query` when given. */
+  readonly repos?: readonly DiscoveredRepo[];
+  readonly error?: string;
+}
+
 /**
  * Response to `delegate-task` (issue #78): the child-side result of
  * accepting a remote delegation — mirrors `SpawnTaskResult` so the
@@ -1056,6 +1097,7 @@ export type Response =
   | ChatReadResponse
   | ChatClearResponse
   | ChatAppendResponse
+  | ReposResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -1225,6 +1267,15 @@ export interface CommandApiDeps {
    */
   readonly preferences?: PreferenceProfilePort;
   /**
+   * Durable repo-roots config + filesystem scanner (issue #253). When
+   * both are wired, `set-repo-roots`/`query-repos` are served; when
+   * either is absent the commands fail cleanly. Two separate optional
+   * deps (not one bundled port) because the config is daemon-portable
+   * state but the scanner is a thin fs adapter with no state of its own.
+   */
+  readonly repoRoots?: RepoRootsPort;
+  readonly repoScanner?: RepoScannerPort;
+  /**
    * Federated delegation service (DEC-036, issue #78). When wired,
    * `delegate-task` accepts remote delegations from a parent Florina;
    * when absent the command fails cleanly — this daemon is not a child.
@@ -1294,6 +1345,8 @@ export class CommandApi {
   private readonly voiceStateSink?: (report: Omit<ReportVoiceStateCommand, 'kind'>) => void;
   private readonly ideas?: IdeaService;
   private readonly preferences?: PreferenceProfilePort;
+  private readonly repoRoots?: RepoRootsPort;
+  private readonly repoScanner?: RepoScannerPort;
   private readonly delegation?: DelegationService;
   private readonly quotaLedger?: QuotaLedger;
   private readonly chatStore?: ChatMessageRepositoryPort;
@@ -1325,6 +1378,8 @@ export class CommandApi {
     this.voiceStateSink = deps.voiceStateSink;
     this.ideas = deps.ideas;
     this.preferences = deps.preferences;
+    this.repoRoots = deps.repoRoots;
+    this.repoScanner = deps.repoScanner;
     this.delegation = deps.delegation;
     this.quotaLedger = deps.quotaLedger;
     this.chatStore = deps.chatStore;
@@ -1433,6 +1488,10 @@ export class CommandApi {
         return this.handleChatClear();
       case 'chat-append':
         return this.handleChatAppend(command);
+      case 'set-repo-roots':
+        return this.handleSetRepoRoots(command);
+      case 'query-repos':
+        return this.handleQueryRepos(command);
       default:
         return {
           ok: false,
@@ -2342,6 +2401,41 @@ export class CommandApi {
     };
   }
 
+  /**
+   * set-repo-roots: replace the ordered repo-roots list (issue #253).
+   * Persists immediately, same "a written preference is a durable fact"
+   * discipline as `update-preference`.
+   */
+  private async handleSetRepoRoots(cmd: SetRepoRootsCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    try {
+      this.repoRoots.setRoots(cmd.paths);
+      await this.repoRoots.save();
+      return { ok: true, roots: this.repoRoots.toConfig() };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+  }
+
+  /**
+   * query-repos: read the configured roots and the repos discovered
+   * under them (issue #253), optionally narrowed by `query`.
+   */
+  private async handleQueryRepos(cmd: QueryReposCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    if (this.repoScanner === undefined) {
+      return { ok: false, error: 'repo scanner is not wired into this daemon' };
+    }
+    const roots = this.repoRoots.toConfig();
+    const discovered = discoverRepos(roots, this.repoScanner);
+    const repos = cmd.query !== undefined ? searchRepos(discovered, cmd.query) : discovered;
+    return { ok: true, roots, repos };
+  }
+
   /** get-digest: return the latest completion digest for a task (issue #37). */
   private async handleGetDigest(cmd: GetDigestCommand): Promise<DigestResponse> {
     if (!cmd.taskId) {
@@ -2767,7 +2861,10 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                               ? DigestResponse
                                               : C extends CreatePrCommand
                                                 ? CreatePrResponse
-                                                : Response;
+                                                : C extends
+                                                      SetRepoRootsCommand | QueryReposCommand
+                                                  ? ReposResponse
+                                                  : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the

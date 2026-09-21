@@ -30,7 +30,10 @@ import type {
   ChatReadResponse,
   ChatClearResponse,
   ChatAppendResponse,
+  ReposResponse,
 } from '../src/daemon/command-api.js';
+import type { RepoRootsConfig, RepoRootsPort } from '../src/core/application/ports/outbound/repo-roots.js';
+import type { RepoScannerPort } from '../src/core/application/use-cases/repos/discover-repos.js';
 import { EventBus } from '../src/daemon/event-stream.js';
 import { QuotaLedger } from '../src/core/application/use-cases/routing/quota-ledger.js';
 import { AttentionInbox } from '../src/attention/attention-inbox.js';
@@ -1858,5 +1861,106 @@ describe('chat-append (issue #162)', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain('role must be user or assistant');
     expect(chatStore.listVisible()).toHaveLength(0);
+  });
+});
+
+describe('repo roots (issue #253)', () => {
+  class FakeRepoRoots implements RepoRootsPort {
+    private config: RepoRootsConfig = { roots: [] };
+    saved = 0;
+    toConfig(): RepoRootsConfig {
+      return { roots: [...this.config.roots] };
+    }
+    setRoots(paths: readonly string[]): void {
+      if (paths.some((p) => p.length === 0)) {
+        throw new Error('root path must be non-empty');
+      }
+      this.config = { roots: paths.map((path) => ({ path })) };
+    }
+    async save(): Promise<void> {
+      this.saved++;
+    }
+  }
+
+  class FakeRepoScanner implements RepoScannerPort {
+    constructor(private readonly map: Record<string, readonly string[]>) {}
+    listRepoDirs(dir: string): readonly string[] {
+      return this.map[dir] ?? [];
+    }
+  }
+
+  function apiWith(repoRoots?: RepoRootsPort, repoScanner?: RepoScannerPort): CommandApi {
+    const { deps } = createFixture();
+    return new CommandApi({ ...deps, repoRoots, repoScanner });
+  }
+
+  it('set-repo-roots persists the ordered list and returns it', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+
+    const res = (await api.execute({
+      kind: 'set-repo-roots',
+      paths: ['/repos/a', '/repos/b'],
+    })) as ReposResponse;
+
+    expect(res.ok).toBe(true);
+    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/a', '/repos/b']);
+    expect(repoRoots.saved).toBe(1);
+  });
+
+  it('query-repos returns the configured roots and the repos discovered under them', async () => {
+    const repoRoots = new FakeRepoRoots();
+    repoRoots.setRoots(['/repos']);
+    const api = apiWith(
+      repoRoots,
+      new FakeRepoScanner({ '/repos': ['/repos/agent-secretary', '/repos/website'] }),
+    );
+
+    const res = (await api.execute({ kind: 'query-repos' })) as ReposResponse;
+    expect(res.ok).toBe(true);
+    expect(res.repos?.map((r) => r.name)).toEqual(['agent-secretary', 'website']);
+  });
+
+  it('query-repos narrows results by the search query', async () => {
+    const repoRoots = new FakeRepoRoots();
+    repoRoots.setRoots(['/repos']);
+    const api = apiWith(
+      repoRoots,
+      new FakeRepoScanner({ '/repos': ['/repos/agent-secretary', '/repos/website'] }),
+    );
+
+    const res = (await api.execute({ kind: 'query-repos', query: 'agent' })) as ReposResponse;
+    expect(res.ok).toBe(true);
+    expect(res.repos?.map((r) => r.name)).toEqual(['agent-secretary']);
+  });
+
+  it('set-repo-roots fails cleanly when repo roots are not wired', async () => {
+    const api = apiWith(undefined, new FakeRepoScanner({}));
+    const res = (await api.execute({ kind: 'set-repo-roots', paths: ['/repos/a'] })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('not wired');
+  });
+
+  it('query-repos fails cleanly when the scanner is not wired', async () => {
+    const api = apiWith(new FakeRepoRoots(), undefined);
+    const res = (await api.execute({ kind: 'query-repos' })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('not wired');
+  });
+
+  it('query-repos fails cleanly when repo roots are not wired', async () => {
+    const api = apiWith(undefined, new FakeRepoScanner({}));
+    const res = (await api.execute({ kind: 'query-repos' })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('not wired');
+  });
+
+  it('a malformed set-repo-roots (blank path) returns an error, not a throw', async () => {
+    const api = apiWith(new FakeRepoRoots(), new FakeRepoScanner({}));
+    const res = (await api.execute({
+      kind: 'set-repo-roots',
+      paths: ['/repos/a', ''],
+    })) as ReposResponse;
+    expect(res.ok).toBe(false);
   });
 });

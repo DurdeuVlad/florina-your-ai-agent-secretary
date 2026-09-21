@@ -32,6 +32,9 @@ import { renderPrefsScreen } from './views/prefs-screen.js';
 import { renderMemorySettingsView } from './views/memory-settings-view.js';
 import { preferenceProfileToMemoryRows } from '../../../core/application/use-cases/memory/preference-memory-actions.js';
 import type { PreferenceProfile } from '../../../core/application/ports/outbound/preference-profile.js';
+import { renderReposView } from './views/repos-view.js';
+import type { RepoRootsConfig } from '../../../core/application/ports/outbound/repo-roots.js';
+import type { DiscoveredRepo } from '../../../core/application/use-cases/repos/discover-repos.js';
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
 import { renderChatActivityDrawer } from './views/chat-activity-drawer.js';
@@ -168,6 +171,24 @@ export interface DesktopAppOptions {
    * renderer sees. Absent → deskset fails honestly.
    */
   readonly desktopSettings?: DesktopSettingsStore;
+  /**
+   * Native folder picker (issue #253): the Settings > Repos "+ Add
+   * folder"/"Use default folder" actions call through this port.
+   * Absent → those verbs fail honestly.
+   */
+  readonly folderPicker?: FolderPickerPort;
+}
+
+/**
+ * Native folder-selection port (issue #253). Electron-specific (a real
+ * OS dialog), so it stays behind a port the same way `desktopSettings`
+ * does — {@link DesktopApp} never imports Electron directly.
+ */
+export interface FolderPickerPort {
+  /** Open a native multi-select directory dialog. `[]` if the user cancels. */
+  pickFolders(): Promise<readonly string[]>;
+  /** A sensible default repos folder (e.g. `~/repos`) if it exists, else `null`. */
+  defaultFolder(): string | null;
 }
 
 /**
@@ -242,6 +263,7 @@ export class DesktopApp {
   private readonly voiceSession: DesktopVoiceSession | undefined;
   private readonly voiceConfig: DesktopAppOptions['voiceConfig'];
   private readonly desktopSettings: DesktopSettingsStore | undefined;
+  private readonly folderPicker: FolderPickerPort | undefined;
   /** Voice-mode on/off + whether a talk turn is capturing (issue #162). */
   private voiceActive = false;
   private voiceListening = false;
@@ -282,6 +304,7 @@ export class DesktopApp {
     this.voiceSession = options.voiceSession;
     this.voiceConfig = options.voiceConfig;
     this.desktopSettings = options.desktopSettings;
+    this.folderPicker = options.folderPicker;
     // Voice-mode state + live transcript captions reach the renderer on
     // voice:update (issue #162). Finals ALSO journal into the chat thread
     // via chat-append (wired in the composition root) — the preview is
@@ -867,6 +890,10 @@ export class DesktopApp {
       this.handleDesktopSettingsCommand(m.cmd, m.id);
       return;
     }
+    if (m.cmd === 'pickfolders' || m.cmd === 'defaultfolder') {
+      await this.handleAddRepoFolders(m.cmd, m.id);
+      return;
+    }
     const cmd = this.resolveRendererCommand(m.cmd);
     if (cmd === null) {
       // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
@@ -917,6 +944,21 @@ export class DesktopApp {
             : events.map((e, i) => renderTimelineRow(e, i, false)),
       });
     }
+    // Repos search (issue #253): re-render the same Settings > Repos view
+    // in place with the narrowed results -- unlike History's search (a
+    // separate results list layered over static content), Repos search
+    // narrows the one management view itself, so it reuses `repos:update`
+    // rather than a dedicated results channel.
+    if (res.ok && cmd.kind === 'query-repos' && 'roots' in res && 'repos' in res) {
+      this.bridge.sendToRenderer(
+        'repos:update',
+        renderReposView({
+          roots: res.roots as RepoRootsConfig,
+          repos: res.repos as readonly DiscoveredRepo[],
+          ...(cmd.query !== undefined ? { query: cmd.query } : {}),
+        }),
+      );
+    }
     // Committed mutations re-pull their view data so the screen reflects
     // the journaled change immediately (#128 preferences, #129 ideas,
     // #130 memory-write gate).
@@ -925,6 +967,7 @@ export class DesktopApp {
       (cmd.kind === 'update-preference' ||
         cmd.kind === 'memory-confirm' ||
         cmd.kind === 'memory-reject' ||
+        cmd.kind === 'set-repo-roots' ||
         IDEACMD_KINDS.has(cmd.kind))
     ) {
       void this.refreshViews();
@@ -975,6 +1018,22 @@ export class DesktopApp {
         return { error: 'memcmd payload must be an update-preference command' };
       } catch {
         return { error: 'malformed memcmd payload' };
+      }
+    }
+    // `reposcmd:<uri-encoded JSON>` — Settings > Repos row actions
+    // (move/remove) and search (issue #253). Whitelisted to the
+    // repo-roots command kinds; the renderer can't mint arbitrary
+    // commands through this verb (DEC-011).
+    if (cmd.startsWith('reposcmd:')) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cmd.slice('reposcmd:'.length))) as unknown;
+        const kind = (parsed as { kind?: unknown }).kind;
+        if (kind === 'set-repo-roots' || kind === 'query-repos') {
+          return parsed as Command;
+        }
+        return { error: 'reposcmd payload must be a set-repo-roots or query-repos command' };
+      } catch {
+        return { error: 'malformed reposcmd payload' };
       }
     }
     // `ideacmd:<uri-encoded JSON>` — same pattern for the ideas screen,
@@ -1365,6 +1424,46 @@ export class DesktopApp {
   }
 
   /**
+   * `pickfolders` / `defaultfolder` (issue #253): resolve candidate
+   * folder path(s) through the native {@link FolderPickerPort}, merge
+   * them onto the daemon's current repo roots (append + let
+   * `set-repo-roots`'s own dedup keep each path's first/highest-priority
+   * occurrence), and persist. All the array bookkeeping happens here so
+   * the renderer never needs to know the current root order to add one.
+   */
+  private async handleAddRepoFolders(cmd: 'pickfolders' | 'defaultfolder', id: unknown): Promise<void> {
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      this.bridge.sendToRenderer('command:result', { id, res });
+    };
+    if (this.folderPicker === undefined) {
+      ack({ ok: false, error: 'folder picker is not wired' });
+      return;
+    }
+    let picked: readonly string[];
+    if (cmd === 'pickfolders') {
+      picked = await this.folderPicker.pickFolders();
+    } else {
+      const def = this.folderPicker.defaultFolder();
+      picked = def !== null ? [def] : [];
+    }
+    if (picked.length === 0) {
+      ack({ ok: true }); // cancelled, or no default folder found -- not an error
+      return;
+    }
+    const current = await this.sendCommand({ kind: 'query-repos' }).catch(() => null);
+    const currentPaths =
+      current !== null && current.ok && 'roots' in current
+        ? (current.roots as RepoRootsConfig).roots.map((r) => r.path)
+        : [];
+    const res = await this.sendCommand({
+      kind: 'set-repo-roots',
+      paths: [...currentPaths, ...picked],
+    }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+    ack(res);
+    if (res.ok) void this.refreshViews();
+  }
+
+  /**
    * Open the session inspector on `taskId`: switch the renderer to the
    * Tasks view, pull the task's journaled events (`query-events`), and
    * push the rendered three-column tree. Keeps last-known events when the
@@ -1453,17 +1552,27 @@ export class DesktopApp {
     // A dropped socket mid-refresh is normal (reconnect races) — treat a
     // failed send as "no answer" and keep the last known state rather than
     // blanking the renderer or throwing an unhandled rejection.
-    const [inboxRes, tasksRes, fleetRes, prefsRes, ideasRes, briefsRes, secretaryRes, chatRes] =
-      await Promise.all([
-        this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
-        this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
-        this.sendCommand({ kind: 'query-fleet' }).catch(() => null),
-        this.sendCommand({ kind: 'query-preferences' }).catch(() => null),
-        this.sendCommand({ kind: 'idea-list' }).catch(() => null),
-        this.sendCommand({ kind: 'brief-list' }).catch(() => null),
-        this.sendCommand({ kind: 'query-secretary' }).catch(() => null),
-        this.sendCommand({ kind: 'chat-read' }).catch(() => null),
-      ]);
+    const [
+      inboxRes,
+      tasksRes,
+      fleetRes,
+      prefsRes,
+      ideasRes,
+      briefsRes,
+      secretaryRes,
+      chatRes,
+      reposRes,
+    ] = await Promise.all([
+      this.sendCommand({ kind: 'query-inbox' }).catch(() => null),
+      this.sendCommand({ kind: 'list-tasks' }).catch(() => null),
+      this.sendCommand({ kind: 'query-fleet' }).catch(() => null),
+      this.sendCommand({ kind: 'query-preferences' }).catch(() => null),
+      this.sendCommand({ kind: 'idea-list' }).catch(() => null),
+      this.sendCommand({ kind: 'brief-list' }).catch(() => null),
+      this.sendCommand({ kind: 'query-secretary' }).catch(() => null),
+      this.sendCommand({ kind: 'chat-read' }).catch(() => null),
+      this.sendCommand({ kind: 'query-repos' }).catch(() => null),
+    ]);
     if (
       inboxRes === null &&
       tasksRes === null &&
@@ -1472,7 +1581,8 @@ export class DesktopApp {
       ideasRes === null &&
       briefsRes === null &&
       secretaryRes === null &&
-      chatRes === null
+      chatRes === null &&
+      reposRes === null
     ) {
       return; // offline — keep last known
     }
@@ -1516,6 +1626,16 @@ export class DesktopApp {
         { now: () => new Date() },
       );
       this.bridge.sendToRenderer('memory:update', renderMemorySettingsView(memoryRows));
+    }
+    // Settings > Repos (issue #253): configured roots + discovered repos.
+    if (reposRes !== null && reposRes.ok && 'roots' in reposRes && 'repos' in reposRes) {
+      this.bridge.sendToRenderer(
+        'repos:update',
+        renderReposView({
+          roots: reposRes.roots as RepoRootsConfig,
+          repos: reposRes.repos as readonly DiscoveredRepo[],
+        }),
+      );
     }
     // Ideas screen (#129): ledger directory + awaiting-decision briefs.
     if (ideasRes !== null && briefsRes !== null && 'ideas' in ideasRes && 'briefs' in briefsRes) {

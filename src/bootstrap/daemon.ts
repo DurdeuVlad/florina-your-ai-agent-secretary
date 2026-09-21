@@ -83,6 +83,8 @@ import { DelegationService } from '../core/application/use-cases/federation/dele
 import { RemoteFlorinaAdapter } from '../adapters/outbound/federation/remote-florina-adapter.js';
 import { CapsuleRollupService } from '../core/application/use-cases/context/capsule-rollup.js';
 import { PreferenceProfileStore } from '../adapters/outbound/preferences/json-preference-profile.js';
+import { RepoRootsStore } from '../adapters/outbound/repos/json-repo-roots.js';
+import { FsRepoScanner } from '../adapters/outbound/repos/fs-repo-scanner.js';
 import { FlorinaMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
 import { managerServiceFactory } from './mcp-server.js';
 import type { SupervisorEvent } from '../core/domain/events.js';
@@ -124,6 +126,12 @@ export interface DaemonOptions {
    * Defaults to `~/.florina/preferences.json`.
    */
   readonly preferenceProfilePath?: string;
+  /**
+   * Repo-roots JSON path (issue #253) -- the folders the user keeps their
+   * repos in, scanned for `set-repo-roots`/`query-repos`. Defaults to
+   * `~/.florina/repo-roots.json`.
+   */
+  readonly repoRootsPath?: string;
   /** When true, do not install SIGINT/SIGTERM handlers (useful for tests). */
   readonly installSignalHandlers?: boolean;
   /**
@@ -194,6 +202,7 @@ export class FlorinaDaemon extends EventEmitter {
     dbPath: string;
     mcpPort: number | null;
     preferenceProfilePath: string;
+    repoRootsPath: string;
     installSignalHandlers: boolean;
     ideasDir?: string;
     authToken?: string;
@@ -219,6 +228,8 @@ export class FlorinaDaemon extends EventEmitter {
   private sessionManager: SessionManager | null = null;
   private quotaLedger: QuotaLedger | null = null;
   private preferenceStore: PreferenceProfileStore | null = null;
+  private repoRootsStore: RepoRootsStore | null = null;
+  private readonly repoScanner = new FsRepoScanner();
   private failoverService: FailoverService | null = null;
   private capsuleRollup: CapsuleRollupService | null = null;
   private grantService: GrantService | null = null;
@@ -240,6 +251,7 @@ export class FlorinaDaemon extends EventEmitter {
       mcpPort: options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort,
       preferenceProfilePath:
         options.preferenceProfilePath ?? path.join(os.homedir(), '.florina', 'preferences.json'),
+      repoRootsPath: options.repoRootsPath ?? path.join(os.homedir(), '.florina', 'repo-roots.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
       ...(options.ideasDir !== undefined ? { ideasDir: options.ideasDir } : {}),
       ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
@@ -548,6 +560,7 @@ export class FlorinaDaemon extends EventEmitter {
       // `update-preference` mutates the store (DEC-029, issues #63/#73).
       this.quotaLedger = new QuotaLedger();
       this.preferenceStore = await PreferenceProfileStore.load(this.options.preferenceProfilePath);
+      this.repoRootsStore = await RepoRootsStore.load(this.options.repoRootsPath);
 
       this.ideaService = new IdeaService({
         ledger: new FsIdeaLedger(this.ideasRootDir()),
@@ -596,6 +609,8 @@ export class FlorinaDaemon extends EventEmitter {
         contextHealth: this.contextHealth ?? undefined,
         ideas: this.ideaService,
         preferences: this.preferenceStore,
+        repoRoots: this.repoRootsStore,
+        repoScanner: this.repoScanner,
         delegation,
         quotaLedger: this.quotaLedger ?? undefined,
         // Voice sessions report live state here (issue #131); it is
@@ -933,6 +948,7 @@ export class FlorinaDaemon extends EventEmitter {
     this.adapterRegistry = null;
     this.quotaLedger = null;
     this.preferenceStore = null;
+    this.repoRootsStore = null;
     this.failoverService = null;
     this.capsuleRollup = null;
     this.grantService = null;
