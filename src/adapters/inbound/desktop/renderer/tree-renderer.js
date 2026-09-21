@@ -63,6 +63,14 @@ const TAG_CLASS = {
   HistoryDecisionKind: 'obj',
   HistoryDecisionMeta: 'stat',
   HistorySearchResults: 'history-search-results',
+  /* settings memory/rules browse (issue #223) */
+  MemorySettingsView: 'memory-settings',
+  MemoryFilterBar: 'pref-form',
+  MemoryFilterChip: 'chip',
+  MemoryRow: 'card',
+  MemoryStatement: 'title',
+  MemoryMeta: 'actions',
+  MemoryActions: 'actions',
   /* session inspector (issue #126) */
   Inspector: 'cols',
   InspectorCol: 'col',
@@ -155,6 +163,18 @@ function renderNode(node) {
   if (tag === 'InboxItem' || tag === 'TaskRow' || (props && props.selectable)) {
     el.dataset.selectable = 'true';
     el.style.cursor = 'pointer';
+  }
+
+  /* --- settings memory/rules browse (issue #223) --- */
+  if (tag === 'MemoryRow' && props) {
+    if (props.scope !== undefined) el.dataset.scope = String(props.scope);
+    if (props.kind !== undefined) el.dataset.kind = String(props.kind);
+  }
+  if (tag === 'MemoryFilterChip' && props) {
+    el.dataset.filterKind = String(props.filterKind || '');
+    el.dataset.value = String(props.value || '');
+    el.style.cursor = 'pointer';
+    if (props.value === '') el.classList.add('active');
   }
 
   /* --- history view section header (issue #221) --- */
