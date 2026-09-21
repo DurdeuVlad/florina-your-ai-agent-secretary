@@ -16,6 +16,7 @@ import type { AttentionItem } from '../../../../core/application/use-cases/atten
 import type { RenderTree } from './view-types.js';
 import { InboxViewModel } from './inbox-view.js';
 import { renderInboxItem } from './inbox-templates.js';
+import { renderProveItAffordance } from './provenance-trail.js';
 
 function el(
   tag: string,
@@ -58,6 +59,9 @@ export function renderTaskRow(task: TaskSnapshot): RenderTree {
     el('TaskObjective', {}, [task.objective]),
     ...(provider !== '' ? [el('ProviderChip', {}, [provider])] : []),
     el('StatusWord', { done }, [word]),
+    // "Prove it" (issue #201) only on rows carrying a completion claim —
+    // running/blocked tasks have no evidence to drill into yet.
+    ...(done ? [renderProveItAffordance(task.id)] : []),
   ]);
 }
 
