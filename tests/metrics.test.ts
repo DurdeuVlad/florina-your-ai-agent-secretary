@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { EventBus } from '../src/daemon/event-stream.js';
-import { MetricsCollector, type MetricsSnapshot } from '../src/daemon/metrics.js';
+import {
+  MetricsCollector,
+  checkSupervisionCostDiscipline,
+  type MetricsSnapshot,
+} from '../src/daemon/metrics.js';
 import { StorageDatabase, MetricsRepository } from '../src/storage/index.js';
 import type {
   AgentStartedEvent,
@@ -439,6 +443,96 @@ describe('MetricsCollector', () => {
       expect(collector.snapshot().counters.tasksStarted).toBe(1);
       collector.detach();
     });
+  });
+
+  describe('supervision cost (§7, issue #203)', () => {
+    it('recordSupervisionStage increments both the by-stage and by-task counters', () => {
+      collector.recordSupervisionStage('l1-classification', 'task-1');
+      collector.recordSupervisionStage('l1-classification', 'task-2');
+      collector.recordSupervisionStage('execution-brief-compile', 'task-1');
+
+      const snap = collector.snapshot();
+      expect(snap.supervisionCost.modelCallsByStage['l1-classification']).toBe(2);
+      expect(snap.supervisionCost.modelCallsByStage['execution-brief-compile']).toBe(1);
+      expect(snap.supervisionCost.modelCallsByStage['l2-manager-reasoning']).toBe(0);
+      expect(snap.supervisionCost.modelCallsByStage['l3-florina-reasoning']).toBe(0);
+      expect(snap.supervisionCost.modelCallsByTask['task-1']).toBe(2);
+      expect(snap.supervisionCost.modelCallsByTask['task-2']).toBe(1);
+    });
+
+    it('every stage key is present even at 0 (not silently missing)', () => {
+      const snap = collector.snapshot();
+      expect(Object.keys(snap.supervisionCost.modelCallsByStage).sort()).toEqual(
+        ['execution-brief-compile', 'l1-classification', 'l2-manager-reasoning', 'l3-florina-reasoning'].sort(),
+      );
+    });
+
+    it('reset() clears supervision-cost counters', () => {
+      collector.recordSupervisionStage('l1-classification', 'task-1');
+      collector.reset();
+      const snap = collector.snapshot();
+      expect(snap.supervisionCost.modelCallsByStage['l1-classification']).toBe(0);
+      expect(snap.supervisionCost.modelCallsByTask).toEqual({});
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * checkSupervisionCostDiscipline (§7, issue #203)
+ * ------------------------------------------------------------------ */
+
+describe('checkSupervisionCostDiscipline', () => {
+  function snapshotWith(eventsEmitted: Record<string, number>, l1Calls: number): MetricsSnapshot {
+    return {
+      timestamp: '2026-09-21T00:00:00.000Z',
+      counters: {
+        eventsEmitted,
+        tasksStarted: 0,
+        tasksCompleted: 0,
+        tasksFailed: 0,
+        approvalsRequested: 0,
+        approvalsGranted: 0,
+        approvalsDenied: 0,
+        toolsInvoked: {},
+        contextHealthByStatus: {},
+      },
+      gauges: { activeSessions: 0, pendingApprovals: 0, inboxSize: 0, attentionItemsPending: 0 },
+      histograms: {
+        taskDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
+        approvalResponseTime: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
+        toolDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
+      },
+      supervisionCost: {
+        modelCallsByStage: {
+          'l1-classification': l1Calls,
+          'execution-brief-compile': 0,
+          'l2-manager-reasoning': 0,
+          'l3-florina-reasoning': 0,
+        },
+        modelCallsByTask: {},
+      },
+    };
+  }
+
+  it('passes when L1 calls are a subset of total events', () => {
+    const check = checkSupervisionCostDiscipline(snapshotWith({ AgentStarted: 10, ToolStarted: 5 }, 3));
+    expect(check.ok).toBe(true);
+  });
+
+  it('passes at the boundary — L1 calls equal to total events', () => {
+    const check = checkSupervisionCostDiscipline(snapshotWith({ AgentStarted: 5 }, 5));
+    expect(check.ok).toBe(true);
+  });
+
+  it('fails when L1 calls exceed total events emitted', () => {
+    const check = checkSupervisionCostDiscipline(snapshotWith({ AgentStarted: 5 }, 6));
+    expect(check.ok).toBe(false);
+    expect(check.reason).toContain('exceed total events emitted');
+  });
+
+  it('fails when there are L1 calls but zero events emitted at all', () => {
+    const check = checkSupervisionCostDiscipline(snapshotWith({}, 1));
+    expect(check.ok).toBe(false);
   });
 });
 

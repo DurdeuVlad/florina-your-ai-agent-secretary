@@ -118,6 +118,15 @@ function emptyMetrics(): MetricsSnapshot {
       approvalResponseTime: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
       toolDuration: { count: 0, min: 0, max: 0, mean: 0, sum: 0, buckets: {} },
     },
+    supervisionCost: {
+      modelCallsByStage: {
+        'l1-classification': 0,
+        'execution-brief-compile': 0,
+        'l2-manager-reasoning': 0,
+        'l3-florina-reasoning': 0,
+      },
+      modelCallsByTask: {},
+    },
   };
 }
 
