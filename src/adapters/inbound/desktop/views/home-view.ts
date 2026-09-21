@@ -17,6 +17,7 @@ import type { RenderTree } from './view-types.js';
 import { InboxViewModel } from './inbox-view.js';
 import { renderInboxItem } from './inbox-templates.js';
 import { renderProveItAffordance } from './provenance-trail.js';
+import { currentProvider } from './provider-transition.js';
 
 function el(
   tag: string,
@@ -54,7 +55,11 @@ function statusWord(task: TaskSnapshot): string {
 export function renderTaskRow(task: TaskSnapshot): RenderTree {
   const word = statusWord(task);
   const done = DONE_STATES.has(task.state);
-  const provider = task.agentIds[0] ?? '';
+  // Current provider = most recently appended agent id — a failover
+  // (DEC-029) appends the new provider rather than replacing agentIds[0],
+  // so agentIds[0] was showing the *original* provider forever, even
+  // after a mid-run transition (issue #202).
+  const provider = currentProvider(task.agentIds);
   return el('TaskRow', { taskId: task.id, state: task.state, command: `inspect-task:${task.id}` }, [
     el('TaskObjective', {}, [task.objective]),
     ...(provider !== '' ? [el('ProviderChip', {}, [provider])] : []),

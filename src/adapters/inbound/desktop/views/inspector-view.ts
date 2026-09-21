@@ -20,8 +20,10 @@
  * closures, JSON-serializable across the IPC boundary.
  */
 import type { Event } from '../../../../core/domain/types.js';
+import type { FailoverReason } from '../../../../core/domain/events.js';
 import type { TaskSnapshot } from '../../../../core/application/use-cases/tasks/command-api.js';
 import type { RenderTree } from './view-types.js';
+import { renderProviderTransitionRow, currentProvider, priorProviders } from './provider-transition.js';
 
 function el(
   tag: string,
@@ -42,6 +44,9 @@ const TERMINAL_KINDS = new Set([
   'AgentStopped',
   'VerificationObserved',
   'TestFinished',
+  // A provider transition is a structural fact about the run, not raw
+  // agent chatter — it stays visible even in verified-output-only mode.
+  'TaskFailedOver',
 ]);
 
 /** Inspector view input. */
@@ -84,13 +89,17 @@ function timeOf(e: Event): string {
 }
 
 function renderTaskRow(task: TaskSnapshot, selected: boolean): RenderTree {
-  const provider = task.agentIds[0] ?? '';
+  const provider = currentProvider(task.agentIds);
+  const prior = priorProviders(task.agentIds);
   return el(
     'InspRow',
     {
       command: `inspect-task:${task.id}`,
       selected,
       selectable: true,
+      // Hover/expand target for prior providers + implicit transition
+      // history (#202) — empty when the task never failed over.
+      ...(prior.length > 0 ? { priorProviders: prior.join(', ') } : {}),
     },
     [
       el('InspRowTitle', {}, [task.objective]),
@@ -100,6 +109,17 @@ function renderTaskRow(task: TaskSnapshot, selected: boolean): RenderTree {
 }
 
 function renderTimelineRow(e: Event, index: number, selected: boolean): RenderTree {
+  if (e.kind === 'TaskFailedOver') {
+    return renderProviderTransitionRow(
+      {
+        fromProvider: String(e.payload['fromProvider'] ?? '?'),
+        toProvider: String(e.payload['toProvider'] ?? '?'),
+        reason: (e.payload['reason'] as FailoverReason | undefined) ?? 'error',
+      },
+      timeOf(e),
+      { command: `inspect-event:${index}`, selected },
+    );
+  }
   if (e.kind === 'ContextCondensed') {
     const forgotten = e.payload['forgottenEventIds'];
     const n = Array.isArray(forgotten) ? forgotten.length : 0;
