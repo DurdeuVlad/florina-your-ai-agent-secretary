@@ -958,7 +958,7 @@ export interface PreferenceResponse {
   readonly error?: string;
 }
 
-/** Response to `set-repo-roots`/`query-repos` (issue #253). */
+/** Response to `add-repo-root`/`remove-repo-root`/`move-repo-root`/`query-repos` (issue #253). */
 export interface ReposResponse {
   readonly ok: boolean;
   readonly roots?: RepoRootsConfig;
