@@ -580,19 +580,12 @@
               <div id="ideas" class="worksubpanel"></div>
             </section>
             <!--
-              History (issue #219 stub, docs/UX_INFORMATION_ARCHITECTURE.md
-              §2): the real surface (completed deliverables, resolved
-              decisions, journal search, evidence trails) is issue #199's
-              children (#221/#222), not yet built. This placeholder exists
-              only so the 5th nav item has somewhere to route to without
-              a broken/blank click target.
+              History (issue #199/#221, docs/UX_INFORMATION_ARCHITECTURE.md
+              §2): completed tasks + resolved decisions, pushed via
+              history:update (desktop-app.ts). Journal search (#222) adds
+              to this same container later.
             -->
-            <section class="view" id="v-history">
-              <div class="empty">
-                <div class="empty-big">History is coming soon</div>
-                <div class="empty-hint">Completed work, resolved decisions, and evidence trails will live here.</div>
-              </div>
-            </section>
+            <section class="view" id="v-history"><div id="history"></div></section>
             <!-- v-fleet/v-ideas removed (#220): #fleet/#ideas now live as
                  sub-panels inside v-tasks (Work), see above. -->
             <section class="view" id="v-prefs">

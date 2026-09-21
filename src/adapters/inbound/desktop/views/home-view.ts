@@ -30,7 +30,7 @@ function el(
 /** Task states that count as "live" — shared with the chat activity drawer
  * (#181) so the two surfaces can't silently diverge. */
 export const ACTIVE_STATES = new Set(['delegated', 'running', 'blocked', 'attention-needed']);
-const DONE_STATES = new Set(['completed', 'reviewed', 'accepted']);
+export const DONE_STATES = new Set(['completed', 'reviewed', 'accepted']);
 
 /** Display word for a task row's live status (plain language, DG-01 §3.3). */
 function statusWord(task: TaskSnapshot): string {
