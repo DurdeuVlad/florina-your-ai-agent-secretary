@@ -967,7 +967,9 @@ export class DesktopApp {
       (cmd.kind === 'update-preference' ||
         cmd.kind === 'memory-confirm' ||
         cmd.kind === 'memory-reject' ||
-        cmd.kind === 'set-repo-roots' ||
+        cmd.kind === 'add-repo-root' ||
+        cmd.kind === 'remove-repo-root' ||
+        cmd.kind === 'move-repo-root' ||
         IDEACMD_KINDS.has(cmd.kind))
     ) {
       void this.refreshViews();
@@ -1023,15 +1025,23 @@ export class DesktopApp {
     // `reposcmd:<uri-encoded JSON>` — Settings > Repos row actions
     // (move/remove) and search (issue #253). Whitelisted to the
     // repo-roots command kinds; the renderer can't mint arbitrary
-    // commands through this verb (DEC-011).
+    // commands through this verb (DEC-011). Each row action is an
+    // atomic, identity-by-path command (never a "replace the whole
+    // list") precisely so a stale precomputed command can't clobber a
+    // concurrent edit -- see RepoRootsPort's doc comment.
     if (cmd.startsWith('reposcmd:')) {
       try {
         const parsed = JSON.parse(decodeURIComponent(cmd.slice('reposcmd:'.length))) as unknown;
         const kind = (parsed as { kind?: unknown }).kind;
-        if (kind === 'set-repo-roots' || kind === 'query-repos') {
+        if (
+          kind === 'add-repo-root' ||
+          kind === 'remove-repo-root' ||
+          kind === 'move-repo-root' ||
+          kind === 'query-repos'
+        ) {
           return parsed as Command;
         }
-        return { error: 'reposcmd payload must be a set-repo-roots or query-repos command' };
+        return { error: 'reposcmd payload must be a repo-roots or query-repos command' };
       } catch {
         return { error: 'malformed reposcmd payload' };
       }
@@ -1425,11 +1435,14 @@ export class DesktopApp {
 
   /**
    * `pickfolders` / `defaultfolder` (issue #253): resolve candidate
-   * folder path(s) through the native {@link FolderPickerPort}, merge
-   * them onto the daemon's current repo roots (append + let
-   * `set-repo-roots`'s own dedup keep each path's first/highest-priority
-   * occurrence), and persist. All the array bookkeeping happens here so
-   * the renderer never needs to know the current root order to add one.
+   * folder path(s) through the native {@link FolderPickerPort} and send
+   * each as its own atomic `add-repo-root` command. Deliberately not a
+   * "read current roots, compute the merged array, replace the whole
+   * list" flow -- that shape had a real lost-update race between two
+   * concurrent add actions (each could compute its "new whole list" from
+   * the same stale read, and the second write would silently discard the
+   * first). `add-repo-root` is atomic and idempotent per call, so there
+   * is no read-then-write gap left to race across.
    */
   private async handleAddRepoFolders(cmd: 'pickfolders' | 'defaultfolder', id: unknown): Promise<void> {
     const ack = (res: { ok: boolean; error?: string }): void => {
@@ -1450,15 +1463,14 @@ export class DesktopApp {
       ack({ ok: true }); // cancelled, or no default folder found -- not an error
       return;
     }
-    const current = await this.sendCommand({ kind: 'query-repos' }).catch(() => null);
-    const currentPaths =
-      current !== null && current.ok && 'roots' in current
-        ? (current.roots as RepoRootsConfig).roots.map((r) => r.path)
-        : [];
-    const res = await this.sendCommand({
-      kind: 'set-repo-roots',
-      paths: [...currentPaths, ...picked],
-    }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+    let res: { ok: boolean; error?: string } = { ok: true };
+    for (const path of picked) {
+      res = await this.sendCommand({ kind: 'add-repo-root', path }).catch((e: unknown) => ({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      if (!res.ok) break;
+    }
     ack(res);
     if (res.ok) void this.refreshViews();
   }

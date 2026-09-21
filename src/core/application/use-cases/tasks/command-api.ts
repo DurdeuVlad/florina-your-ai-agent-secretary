@@ -480,14 +480,34 @@ export interface QueryPreferencesCommand {
 }
 
 /**
- * Replace the user's configured repo roots (issue #253): the desktop
- * onboarding/Settings UI always sends the full ordered list back after an
- * add/remove/reorder, so this is the only mutation the roots config needs.
+ * Append a repo root (issue #253). Atomic, idempotent -- a no-op if the
+ * path is already configured. Deliberately not a "replace the whole
+ * list" command: that shape required a client-side read-then-write that
+ * had a real lost-update race between concurrent add/remove/reorder
+ * actions (see {@link RepoRootsPort}'s doc comment).
  */
-export interface SetRepoRootsCommand {
-  readonly kind: 'set-repo-roots';
-  /** Ordered folder paths — index 0 is highest scan/search priority. */
-  readonly paths: readonly string[];
+export interface AddRepoRootCommand {
+  readonly kind: 'add-repo-root';
+  readonly path: string;
+}
+
+/** Remove a repo root by path (issue #253). Atomic; a no-op if not found. */
+export interface RemoveRepoRootCommand {
+  readonly kind: 'remove-repo-root';
+  readonly path: string;
+}
+
+/**
+ * Swap a repo root with its neighbor (issue #253). Atomic, resolved by
+ * path identity against whatever the current order is at execution time
+ * -- safe even when the caller's view of the order (e.g. a precomputed
+ * row button) is stale, since it isn't a "here is the whole new array"
+ * command that could clobber a concurrent edit.
+ */
+export interface MoveRepoRootCommand {
+  readonly kind: 'move-repo-root';
+  readonly path: string;
+  readonly direction: 'up' | 'down';
 }
 
 /**
@@ -655,7 +675,9 @@ export type Command =
   | ChatReadCommand
   | ChatClearCommand
   | ChatAppendCommand
-  | SetRepoRootsCommand
+  | AddRepoRootCommand
+  | RemoveRepoRootCommand
+  | MoveRepoRootCommand
   | QueryReposCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
@@ -697,7 +719,9 @@ export const COMMAND_KINDS: readonly string[] = [
   'chat-read',
   'chat-clear',
   'chat-append',
-  'set-repo-roots',
+  'add-repo-root',
+  'remove-repo-root',
+  'move-repo-root',
   'query-repos',
 ] as const;
 
@@ -1488,8 +1512,12 @@ export class CommandApi {
         return this.handleChatClear();
       case 'chat-append':
         return this.handleChatAppend(command);
-      case 'set-repo-roots':
-        return this.handleSetRepoRoots(command);
+      case 'add-repo-root':
+        return this.handleAddRepoRoot(command);
+      case 'remove-repo-root':
+        return this.handleRemoveRepoRoot(command);
+      case 'move-repo-root':
+        return this.handleMoveRepoRoot(command);
       case 'query-repos':
         return this.handleQueryRepos(command);
       default:
@@ -2402,21 +2430,60 @@ export class CommandApi {
   }
 
   /**
-   * set-repo-roots: replace the ordered repo-roots list (issue #253).
-   * Persists immediately, same "a written preference is a durable fact"
-   * discipline as `update-preference`.
+   * add-repo-root: append a repo root (issue #253). Atomic, idempotent.
+   * Validated at this runtime boundary (not just the TS type) since the
+   * payload can arrive as arbitrary JSON from the renderer's `reposcmd:`
+   * wire verb.
    */
-  private async handleSetRepoRoots(cmd: SetRepoRootsCommand): Promise<ReposResponse> {
+  private async handleAddRepoRoot(cmd: AddRepoRootCommand): Promise<ReposResponse> {
     if (this.repoRoots === undefined) {
       return { ok: false, error: 'repo roots are not wired into this daemon' };
     }
+    if (typeof cmd.path !== 'string' || cmd.path.trim().length === 0) {
+      return { ok: false, error: 'path is required' };
+    }
     try {
-      this.repoRoots.setRoots(cmd.paths);
+      this.repoRoots.addRoot(cmd.path);
       await this.repoRoots.save();
       return { ok: true, roots: this.repoRoots.toConfig() };
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
     }
+  }
+
+  /** remove-repo-root: remove a repo root by path (issue #253). Atomic; a no-op if not found. */
+  private async handleRemoveRepoRoot(cmd: RemoveRepoRootCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    if (typeof cmd.path !== 'string' || cmd.path.trim().length === 0) {
+      return { ok: false, error: 'path is required' };
+    }
+    const removed = this.repoRoots.removeRoot(cmd.path);
+    if (removed) await this.repoRoots.save();
+    return { ok: true, roots: this.repoRoots.toConfig() };
+  }
+
+  /**
+   * move-repo-root: swap a repo root with its neighbor (issue #253).
+   * Atomic and resolved by path identity, so a stale caller-side view of
+   * the order (e.g. a precomputed row button) can't clobber a
+   * concurrent edit -- it either applies against current state or is a
+   * safe no-op.
+   */
+  private async handleMoveRepoRoot(cmd: MoveRepoRootCommand): Promise<ReposResponse> {
+    if (this.repoRoots === undefined) {
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }
+    if (typeof cmd.path !== 'string' || cmd.path.trim().length === 0) {
+      return { ok: false, error: 'path is required' };
+    }
+    if (cmd.direction !== 'up' && cmd.direction !== 'down') {
+      return { ok: false, error: 'direction must be "up" or "down"' };
+    }
+    const moved = this.repoRoots.moveRoot(cmd.path, cmd.direction);
+    if (moved) await this.repoRoots.save();
+    return { ok: true, roots: this.repoRoots.toConfig() };
   }
 
   /**
@@ -2862,7 +2929,10 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                               : C extends CreatePrCommand
                                                 ? CreatePrResponse
                                                 : C extends
-                                                      SetRepoRootsCommand | QueryReposCommand
+                                                      | AddRepoRootCommand
+                                                      | RemoveRepoRootCommand
+                                                      | MoveRepoRootCommand
+                                                      | QueryReposCommand
                                                   ? ReposResponse
                                                   : Response;
 

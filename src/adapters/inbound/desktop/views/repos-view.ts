@@ -3,26 +3,32 @@
  * repos in, in scan/search priority order, plus the repos discovered
  * under them.
  *
- * Move-up/move-down/remove buttons carry a fully precomputed
- * `set-repo-roots` command (the *resulting* ordered path list) via the
- * `reposcmd:` wire verb — the same "server composes the exact command,
- * renderer just mounts it" pattern as #224's memory-actions rows. The
- * "+ Add folder"/"Use default folder" actions can't be precomputed this
- * way (their result depends on a native OS dialog the main process runs
- * at click time), so they carry the bare local verbs `pickfolders`/
- * `defaultfolder`, handled directly by `DesktopApp` before reaching the
- * daemon (mirrors the `deskset:` local-verb pattern).
+ * Move-up/move-down/remove buttons carry an atomic, identity-by-path
+ * command (`move-repo-root`/`remove-repo-root`) via the `reposcmd:` wire
+ * verb — never a precomputed "replace the whole list" command. A row's
+ * button is built against whatever root list was last rendered, and by
+ * the time the user clicks it that list may be stale (another window,
+ * or a concurrent add); resolving by path against current daemon state
+ * at execution time means a stale click is either correct or a safe
+ * no-op, never a clobber of an unrelated concurrent edit (see
+ * `RepoRootsPort`'s doc comment for the incident this replaced).
+ *
+ * The "+ Add folder"/"Use default folder" actions can't be precomputed
+ * this way either (their result depends on a native OS dialog the main
+ * process runs at click time), so they carry the bare local verbs
+ * `pickfolders`/`defaultfolder`, handled directly by `DesktopApp` before
+ * reaching the daemon (mirrors the `deskset:` local-verb pattern).
  *
  * Empty roots is the onboarding state: the `EmptyState` here *is* the
  * onboarding surface (no separate modal), consistent with how the
  * Preferences/Memory sections already message "nothing configured yet".
  */
 import type { DiscoveredRepo } from '../../../../core/application/use-cases/repos/discover-repos.js';
+import type { RepoRoot, RepoRootsConfig } from '../../../../core/application/ports/outbound/repo-roots.js';
 import type {
-  RepoRoot,
-  RepoRootsConfig,
-} from '../../../../core/application/ports/outbound/repo-roots.js';
-import type { SetRepoRootsCommand } from '../../../../core/application/use-cases/tasks/command-api.js';
+  MoveRepoRootCommand,
+  RemoveRepoRootCommand,
+} from '../../../../core/application/use-cases/tasks/command-api.js';
 import type { RenderTree } from './view-types.js';
 
 function el(
@@ -34,42 +40,27 @@ function el(
 }
 
 /** URI-encode a command payload for the `reposcmd:` wire verb. */
-export function encodeReposCommand(cmd: SetRepoRootsCommand): string {
+export function encodeReposCommand(cmd: MoveRepoRootCommand | RemoveRepoRootCommand): string {
   return `reposcmd:${encodeURIComponent(JSON.stringify(cmd))}`;
 }
 
-function setRootsTo(paths: readonly string[]): SetRepoRootsCommand {
-  return { kind: 'set-repo-roots', paths };
-}
-
-function rootRow(roots: readonly RepoRoot[], index: number): RenderTree {
-  const paths = roots.map((r) => r.path);
-  const withoutThis = [...paths.slice(0, index), ...paths.slice(index + 1)];
+function rootRow(root: RepoRoot, index: number, total: number): RenderTree {
   const actions: RenderTree[] = [];
   if (index > 0) {
-    const swapped = [...paths];
-    [swapped[index - 1], swapped[index]] = [swapped[index]!, swapped[index - 1]!];
-    actions.push(
-      el('Button', { variant: 'ghost', command: encodeReposCommand(setRootsTo(swapped)) }, ['↑']),
-    );
+    const cmd: MoveRepoRootCommand = { kind: 'move-repo-root', path: root.path, direction: 'up' };
+    actions.push(el('Button', { variant: 'ghost', command: encodeReposCommand(cmd) }, ['↑']));
   }
-  if (index < roots.length - 1) {
-    const swapped = [...paths];
-    [swapped[index], swapped[index + 1]] = [swapped[index + 1]!, swapped[index]!];
-    actions.push(
-      el('Button', { variant: 'ghost', command: encodeReposCommand(setRootsTo(swapped)) }, ['↓']),
-    );
+  if (index < total - 1) {
+    const cmd: MoveRepoRootCommand = { kind: 'move-repo-root', path: root.path, direction: 'down' };
+    actions.push(el('Button', { variant: 'ghost', command: encodeReposCommand(cmd) }, ['↓']));
   }
+  const removeCmd: RemoveRepoRootCommand = { kind: 'remove-repo-root', path: root.path };
   actions.push(
-    el(
-      'Button',
-      { variant: 'ghost', command: encodeReposCommand(setRootsTo(withoutThis)) },
-      ['Remove'],
-    ),
+    el('Button', { variant: 'ghost', command: encodeReposCommand(removeCmd) }, ['Remove']),
   );
-  return el('ReposRootRow', { path: roots[index]!.path, priority: index }, [
+  return el('ReposRootRow', { path: root.path, priority: index }, [
     el('ReposRootPriority', {}, [String(index + 1)]),
-    el('ReposRootPath', {}, [roots[index]!.path]),
+    el('ReposRootPath', {}, [root.path]),
     el('ReposRootActions', {}, actions),
   ]);
 }
@@ -104,10 +95,11 @@ export function renderReposView(input: ReposViewInput): RenderTree {
     ]);
   }
 
+  const total = input.roots.roots.length;
   const rootsSection = el(
     'ReposRootsSection',
     {},
-    input.roots.roots.map((_, i) => rootRow(input.roots.roots, i)),
+    input.roots.roots.map((root, i) => rootRow(root, i, total)),
   );
 
   const repoListSection =

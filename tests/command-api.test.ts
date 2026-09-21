@@ -1871,11 +1871,28 @@ describe('repo roots (issue #253)', () => {
     toConfig(): RepoRootsConfig {
       return { roots: [...this.config.roots] };
     }
-    setRoots(paths: readonly string[]): void {
-      if (paths.some((p) => p.length === 0)) {
-        throw new Error('root path must be non-empty');
-      }
-      this.config = { roots: paths.map((path) => ({ path })) };
+    addRoot(path: string): void {
+      if (path.length === 0) throw new Error('root path must be non-empty');
+      if (this.config.roots.some((r) => r.path === path)) return;
+      this.config = { roots: [...this.config.roots, { path }] };
+    }
+    removeRoot(path: string): boolean {
+      const index = this.config.roots.findIndex((r) => r.path === path);
+      if (index === -1) return false;
+      const roots = [...this.config.roots];
+      roots.splice(index, 1);
+      this.config = { roots };
+      return true;
+    }
+    moveRoot(path: string, direction: 'up' | 'down'): boolean {
+      const index = this.config.roots.findIndex((r) => r.path === path);
+      if (index === -1) return false;
+      const swapWith = direction === 'up' ? index - 1 : index + 1;
+      if (swapWith < 0 || swapWith >= this.config.roots.length) return false;
+      const roots = [...this.config.roots];
+      [roots[index], roots[swapWith]] = [roots[swapWith]!, roots[index]!];
+      this.config = { roots };
+      return true;
     }
     async save(): Promise<void> {
       this.saved++;
@@ -1894,23 +1911,115 @@ describe('repo roots (issue #253)', () => {
     return new CommandApi({ ...deps, repoRoots, repoScanner });
   }
 
-  it('set-repo-roots persists the ordered list and returns it', async () => {
+  it('add-repo-root appends and persists', async () => {
     const repoRoots = new FakeRepoRoots();
     const api = apiWith(repoRoots, new FakeRepoScanner({}));
 
-    const res = (await api.execute({
-      kind: 'set-repo-roots',
-      paths: ['/repos/a', '/repos/b'],
-    })) as ReposResponse;
-
+    const res = (await api.execute({ kind: 'add-repo-root', path: '/repos/a' })) as ReposResponse;
     expect(res.ok).toBe(true);
-    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/a', '/repos/b']);
+    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/a']);
     expect(repoRoots.saved).toBe(1);
+
+    const res2 = (await api.execute({ kind: 'add-repo-root', path: '/repos/b' })) as ReposResponse;
+    expect(res2.ok).toBe(true);
+    expect(res2.roots?.roots.map((r) => r.path)).toEqual(['/repos/a', '/repos/b']);
+  });
+
+  it('add-repo-root is idempotent -- adding an already-configured path is a no-op that still acks ok', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    const res = (await api.execute({ kind: 'add-repo-root', path: '/repos/a' })) as ReposResponse;
+    expect(res.ok).toBe(true);
+    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/a']);
+  });
+
+  it('two "concurrent" add-repo-root commands (fired without awaiting the first) both land -- neither is lost (regression: the old set-repo-roots read-then-write race)', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+
+    // Fire both without awaiting the first -- the old design (read
+    // current roots via query-repos, compute the merged array, then
+    // set-repo-roots the whole list) would let the second call compute
+    // its "new whole list" from the same stale empty read and silently
+    // discard the first add. add-repo-root's atomicity means both must
+    // land regardless of interleaving.
+    const [res1, res2] = await Promise.all([
+      api.execute({ kind: 'add-repo-root', path: '/repos/a' }),
+      api.execute({ kind: 'add-repo-root', path: '/repos/b' }),
+    ]);
+    expect((res1 as ReposResponse).ok).toBe(true);
+    expect((res2 as ReposResponse).ok).toBe(true);
+
+    const finalRes = (await api.execute({ kind: 'query-repos' })) as ReposResponse;
+    const paths = finalRes.roots?.roots.map((r) => r.path) ?? [];
+    expect(paths).toContain('/repos/a');
+    expect(paths).toContain('/repos/b');
+    expect(paths).toHaveLength(2);
+  });
+
+  it('remove-repo-root removes by path; removing an unknown path is a safe no-op, not an error', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    await api.execute({ kind: 'add-repo-root', path: '/repos/b' });
+
+    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    expect(res.ok).toBe(true);
+    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/b']);
+
+    // Stale row action referencing an already-removed path -- must not error.
+    const staleRes = (await api.execute({
+      kind: 'remove-repo-root',
+      path: '/repos/a',
+    })) as ReposResponse;
+    expect(staleRes.ok).toBe(true);
+    expect(staleRes.roots?.roots.map((r) => r.path)).toEqual(['/repos/b']);
+  });
+
+  it('a stale remove-repo-root cannot clobber a root added after the row was rendered', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    // Simulates a "Remove A" button rendered when roots=[A], clicked
+    // after a concurrent action already added B -- must remove only A.
+    await api.execute({ kind: 'add-repo-root', path: '/repos/b' });
+    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    expect(res.ok).toBe(true);
+    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/b']);
+  });
+
+  it('move-repo-root swaps with the neighbor in the given direction', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    await api.execute({ kind: 'add-repo-root', path: '/repos/b' });
+
+    const res = (await api.execute({
+      kind: 'move-repo-root',
+      path: '/repos/a',
+      direction: 'down',
+    })) as ReposResponse;
+    expect(res.ok).toBe(true);
+    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/b', '/repos/a']);
+  });
+
+  it('move-repo-root on an unknown path is a safe no-op that still acks ok', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    const res = (await api.execute({
+      kind: 'move-repo-root',
+      path: '/repos/removed-already',
+      direction: 'up',
+    })) as ReposResponse;
+    expect(res.ok).toBe(true);
+    expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/a']);
   });
 
   it('query-repos returns the configured roots and the repos discovered under them', async () => {
     const repoRoots = new FakeRepoRoots();
-    repoRoots.setRoots(['/repos']);
+    repoRoots.addRoot('/repos');
     const api = apiWith(
       repoRoots,
       new FakeRepoScanner({ '/repos': ['/repos/agent-secretary', '/repos/website'] }),
@@ -1923,7 +2032,7 @@ describe('repo roots (issue #253)', () => {
 
   it('query-repos narrows results by the search query', async () => {
     const repoRoots = new FakeRepoRoots();
-    repoRoots.setRoots(['/repos']);
+    repoRoots.addRoot('/repos');
     const api = apiWith(
       repoRoots,
       new FakeRepoScanner({ '/repos': ['/repos/agent-secretary', '/repos/website'] }),
@@ -1934,9 +2043,27 @@ describe('repo roots (issue #253)', () => {
     expect(res.repos?.map((r) => r.name)).toEqual(['agent-secretary']);
   });
 
-  it('set-repo-roots fails cleanly when repo roots are not wired', async () => {
+  it('add-repo-root fails cleanly when repo roots are not wired', async () => {
     const api = apiWith(undefined, new FakeRepoScanner({}));
-    const res = (await api.execute({ kind: 'set-repo-roots', paths: ['/repos/a'] })) as ReposResponse;
+    const res = (await api.execute({ kind: 'add-repo-root', path: '/repos/a' })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('not wired');
+  });
+
+  it('remove-repo-root fails cleanly when repo roots are not wired', async () => {
+    const api = apiWith(undefined, new FakeRepoScanner({}));
+    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('not wired');
+  });
+
+  it('move-repo-root fails cleanly when repo roots are not wired', async () => {
+    const api = apiWith(undefined, new FakeRepoScanner({}));
+    const res = (await api.execute({
+      kind: 'move-repo-root',
+      path: '/repos/a',
+      direction: 'up',
+    })) as ReposResponse;
     expect(res.ok).toBe(false);
     expect(res.error).toContain('not wired');
   });
@@ -1955,12 +2082,32 @@ describe('repo roots (issue #253)', () => {
     expect(res.error).toContain('not wired');
   });
 
-  it('a malformed set-repo-roots (blank path) returns an error, not a throw', async () => {
+  it('a malformed add-repo-root (blank path) returns an error, not a throw', async () => {
+    const api = apiWith(new FakeRepoRoots(), new FakeRepoScanner({}));
+    const res = (await api.execute({ kind: 'add-repo-root', path: '' })) as ReposResponse;
+    expect(res.ok).toBe(false);
+  });
+
+  it('a non-string path (malformed renderer JSON) is rejected at the runtime boundary, not passed through to the store', async () => {
     const api = apiWith(new FakeRepoRoots(), new FakeRepoScanner({}));
     const res = (await api.execute({
-      kind: 'set-repo-roots',
-      paths: ['/repos/a', ''],
+      kind: 'add-repo-root',
+      path: 123 as unknown as string,
     })) as ReposResponse;
     expect(res.ok).toBe(false);
+    expect(res.error).toContain('path');
+  });
+
+  it('a malformed move-repo-root direction (neither "up" nor "down") is rejected at the runtime boundary', async () => {
+    const repoRoots = new FakeRepoRoots();
+    const api = apiWith(repoRoots, new FakeRepoScanner({}));
+    await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
+    const res = (await api.execute({
+      kind: 'move-repo-root',
+      path: '/repos/a',
+      direction: 'sideways' as unknown as 'up',
+    })) as ReposResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('direction');
   });
 });

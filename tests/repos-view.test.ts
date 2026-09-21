@@ -70,7 +70,7 @@ describe('renderReposView', () => {
     expect(buttonLabels(rows[2]!)).toEqual(['↑', 'Remove']);
   });
 
-  it('move-down on the first root swaps it with the second in the resulting command', () => {
+  it('move-down on the first root is an atomic move-repo-root command identified by its own path', () => {
     const roots: RepoRootsConfig = { roots: [{ path: '/a' }, { path: '/b' }] };
     const tree = renderReposView({ roots, repos: [] });
     const [firstRow] = findAllByTag(tree, 'ReposRootRow');
@@ -80,17 +80,27 @@ describe('renderReposView', () => {
     const raw = downButton?.props?.['command'] as string;
     expect(raw.startsWith('reposcmd:')).toBe(true);
     const decoded = JSON.parse(decodeURIComponent(raw.slice('reposcmd:'.length)));
-    expect(decoded).toEqual({ kind: 'set-repo-roots', paths: ['/b', '/a'] });
+    expect(decoded).toEqual({ kind: 'move-repo-root', path: '/a', direction: 'down' });
   });
 
-  it('remove on the middle root drops only that path, keeping the other two in order', () => {
+  it('move-up on the last root is an atomic move-repo-root command', () => {
+    const roots: RepoRootsConfig = { roots: [{ path: '/a' }, { path: '/b' }] };
+    const tree = renderReposView({ roots, repos: [] });
+    const rows = findAllByTag(tree, 'ReposRootRow');
+    const upButton = findAllByTag(rows[1]!, 'Button').find((b) => b.children?.[0] === '↑');
+    const raw = upButton?.props?.['command'] as string;
+    const decoded = JSON.parse(decodeURIComponent(raw.slice('reposcmd:'.length)));
+    expect(decoded).toEqual({ kind: 'move-repo-root', path: '/b', direction: 'up' });
+  });
+
+  it('remove on the middle root is an atomic remove-repo-root command identified by its own path, not a recomputed array', () => {
     const roots: RepoRootsConfig = { roots: [{ path: '/a' }, { path: '/b' }, { path: '/c' }] };
     const tree = renderReposView({ roots, repos: [] });
     const rows = findAllByTag(tree, 'ReposRootRow');
     const removeButton = findAllByTag(rows[1]!, 'Button').find((b) => b.children?.[0] === 'Remove');
     const raw = removeButton?.props?.['command'] as string;
     const decoded = JSON.parse(decodeURIComponent(raw.slice('reposcmd:'.length)));
-    expect(decoded).toEqual({ kind: 'set-repo-roots', paths: ['/a', '/c'] });
+    expect(decoded).toEqual({ kind: 'remove-repo-root', path: '/b' });
   });
 
   it('renders discovered repos when present', () => {
@@ -119,10 +129,17 @@ describe('renderReposView', () => {
     expect(noMatchesHint?.children?.[0]).toBe('no matching repos');
   });
 
-  it('encodeReposCommand round-trips a set-repo-roots command', () => {
-    const encoded = encodeReposCommand({ kind: 'set-repo-roots', paths: ['/x', '/y'] });
+  it('encodeReposCommand round-trips a remove-repo-root command', () => {
+    const encoded = encodeReposCommand({ kind: 'remove-repo-root', path: '/x' });
     expect(encoded.startsWith('reposcmd:')).toBe(true);
     const decoded = JSON.parse(decodeURIComponent(encoded.slice('reposcmd:'.length)));
-    expect(decoded).toEqual({ kind: 'set-repo-roots', paths: ['/x', '/y'] });
+    expect(decoded).toEqual({ kind: 'remove-repo-root', path: '/x' });
+  });
+
+  it('encodeReposCommand round-trips a move-repo-root command', () => {
+    const encoded = encodeReposCommand({ kind: 'move-repo-root', path: '/x', direction: 'up' });
+    expect(encoded.startsWith('reposcmd:')).toBe(true);
+    const decoded = JSON.parse(decodeURIComponent(encoded.slice('reposcmd:'.length)));
+    expect(decoded).toEqual({ kind: 'move-repo-root', path: '/x', direction: 'up' });
   });
 });

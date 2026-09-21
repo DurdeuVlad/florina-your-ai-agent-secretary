@@ -36,17 +36,34 @@ export class RepoRootsError extends Error {
 }
 
 /**
- * Durable repo-roots store. `load`-style construction seeds or reads the
- * config; `setRoots` replaces the whole ordered list (the desktop UI
- * always sends the full list back after the user reorders/adds/removes,
- * so there is no incremental add/remove/reorder mutation surface to keep
- * in sync -- one command, one source of truth).
+ * Durable repo-roots store. Every mutation is a single atomic,
+ * identity-by-path operation applied against whatever the CURRENT
+ * in-memory state is at call time — mirroring
+ * {@link PreferenceProfilePort}'s `addRule`/`removeRule` shape.
+ *
+ * This is deliberate, not incidental: an earlier design had one
+ * `setRoots(paths)` command that replaced the whole ordered list, built
+ * from a client-side read-then-merge. That introduced a real lost-update
+ * race (two concurrent add/remove actions could each compute a "new
+ * whole list" from the same stale read and the second write would
+ * silently discard the first) and let a stale precomputed row command
+ * clobber unrelated concurrent edits. Atomic-by-path operations have no
+ * read-then-write gap for a client to race across, and a no-op (path not
+ * found, already at an edge) is safe by construction rather than
+ * something a caller has to avoid triggering.
  */
 export interface RepoRootsPort {
   /** Current config (immutable snapshot). */
   toConfig(): RepoRootsConfig;
-  /** Replace the ordered root list. Rejects empty-string or duplicate paths. */
-  setRoots(paths: readonly string[]): void;
+  /** Append a root if not already present. Idempotent no-op if it already exists. */
+  addRoot(path: string): void;
+  /** Remove the root matching `path`. Returns `false` (no-op) if not found. */
+  removeRoot(path: string): boolean;
+  /**
+   * Swap the root at `path` with its neighbor in `direction`. Returns
+   * `false` (no-op) if `path` isn't found or is already at that edge.
+   */
+  moveRoot(path: string, direction: 'up' | 'down'): boolean;
   /** Persist the config. */
   save(): Promise<void>;
 }

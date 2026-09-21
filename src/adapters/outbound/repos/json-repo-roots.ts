@@ -3,8 +3,9 @@
  *
  * The user's own words for "where my repos live": an ordered list of
  * folder paths, written by the desktop onboarding/Settings UI through the
- * `set-repo-roots` daemon command. The file is plain JSON, mirroring
- * {@link PreferenceProfileStore}'s load/validate/save shape.
+ * `add-repo-root`/`remove-repo-root`/`move-repo-root` daemon commands.
+ * The file is plain JSON, mirroring {@link PreferenceProfileStore}'s
+ * load/validate/save shape.
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -81,23 +82,38 @@ export class RepoRootsStore implements RepoRootsPort {
     return { roots: [...this.config.roots] };
   }
 
-  /**
-   * Replace the ordered root list. Blank paths are rejected; duplicate
-   * paths are deduped, keeping the first (highest-priority) occurrence so
-   * the caller's intended order survives.
-   */
-  setRoots(paths: readonly string[]): void {
-    const seen = new Set<string>();
-    const roots: RepoRoot[] = [];
-    for (const path of paths) {
-      if (path.length === 0) {
-        throw new RepoRootsError('root path must be non-empty');
-      }
-      if (seen.has(path)) continue;
-      seen.add(path);
-      roots.push({ path });
+  /** Append a root if not already present (atomic, idempotent). */
+  addRoot(path: string): void {
+    if (path.length === 0) {
+      throw new RepoRootsError('root path must be non-empty');
     }
+    if (this.config.roots.some((r) => r.path === path)) return;
+    this.config = { roots: [...this.config.roots, { path }] };
+  }
+
+  /** Remove the root matching `path`. Returns `false` (no-op) if not found. */
+  removeRoot(path: string): boolean {
+    const index = this.config.roots.findIndex((r) => r.path === path);
+    if (index === -1) return false;
+    const roots = [...this.config.roots];
+    roots.splice(index, 1);
     this.config = { roots };
+    return true;
+  }
+
+  /**
+   * Swap the root at `path` with its neighbor in `direction`. Returns
+   * `false` (no-op) if `path` isn't found or is already at that edge.
+   */
+  moveRoot(path: string, direction: 'up' | 'down'): boolean {
+    const index = this.config.roots.findIndex((r) => r.path === path);
+    if (index === -1) return false;
+    const swapWith = direction === 'up' ? index - 1 : index + 1;
+    if (swapWith < 0 || swapWith >= this.config.roots.length) return false;
+    const roots = [...this.config.roots];
+    [roots[index], roots[swapWith]] = [roots[swapWith]!, roots[index]!];
+    this.config = { roots };
+    return true;
   }
 
   /** Persist the config to disk (pretty-printed JSON). */
