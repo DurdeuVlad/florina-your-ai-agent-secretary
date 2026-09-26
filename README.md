@@ -36,8 +36,12 @@ tasks, deliverables, decisions, and attention requests.
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 20
+- [Node.js](https://nodejs.org/) >= 22 (required by `better-sqlite3`)
 - npm (bundled with Node.js)
+- A C/C++ toolchain (`python3`, `make`, `g++`) — `better-sqlite3` compiles
+  from source on install if no prebuilt binary matches your platform. GitHub
+  Actions runners and most dev machines already have one; minimal/slim
+  container images typically don't.
 
 ### Install & Build
 
