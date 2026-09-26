@@ -21,7 +21,7 @@
  * `FLORINA_DISABLED_PROVIDERS=a,b` skips individual providers.
  */
 import { type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { connect as netConnect, createServer } from 'node:net';
@@ -112,6 +112,22 @@ function resolveCommand(
     if (existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+function findCodexWindowsCandidates(localAppData: string, home: string): string[] {
+  const candidates: string[] = [join(home, '.codex', '.sandbox-bin', 'codex.exe')];
+  const base = join(localAppData, 'OpenAI', 'Codex', 'bin');
+  if (existsSync(base)) {
+    try {
+      for (const entry of readdirSync(base)) {
+        const candidate = join(base, entry, 'codex.exe');
+        if (existsSync(candidate)) candidates.push(candidate);
+      }
+    } catch {
+      // ignore read errors
+    }
+  }
+  return candidates;
 }
 
 /** A free localhost TCP port for the codex app-server. */
@@ -211,7 +227,7 @@ export async function attachLocalAgentProviders(
             'FLORINA_CODEX_CMD',
             'codex',
             platform === 'win32'
-              ? [join(home, '.codex', '.sandbox-bin', 'codex.exe')]
+              ? findCodexWindowsCandidates(localAppData, home)
               : [join(home, '.codex', '.sandbox-bin', 'codex')],
             env,
             platform,
@@ -220,7 +236,7 @@ export async function attachLocalAgentProviders(
     if (d !== null) {
       skip(id, d);
     } else if (command === null) {
-      skip(id, '`codex` CLI not found (PATH or ~/.codex/.sandbox-bin)');
+      skip(id, '`codex` CLI not found (PATH, ~/.codex/.sandbox-bin, or LocalAppData/OpenAI/Codex)');
     } else {
       try {
         const port = await freePort();

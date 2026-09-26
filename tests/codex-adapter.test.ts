@@ -17,6 +17,15 @@ import {
   mapCodexEvent,
   mapPermissionRequest,
   isCodexEvent,
+  mapModernTurnStarted,
+  mapModernTurnCompleted,
+  mapModernItemStarted,
+  mapModernItemCompleted,
+  mapModernMessageDelta,
+  mapCommandExecutionApproval,
+  mapFileChangeApproval,
+  mapPermissionsApproval,
+  mapCodexNotification,
   type CodexEvent,
   type CodexPermissionRequestEvent,
   type MapperContext,
@@ -142,7 +151,40 @@ class MockCodexServer {
     const id = msg['id'];
     const method = msg['method'];
 
-    if (method === 'codex.startTurn') {
+    if (method === 'initialize') {
+      this.sendResponse(ws, id, {
+        userAgent: 'codex/0.1.0',
+        platformOs: 'windows',
+        platformFamily: 'windows',
+        codexHome: '/codex',
+      });
+    } else if (method === 'thread/start') {
+      this.sendResponse(ws, id, {
+        thread: {
+          id: (msg['params'] as Record<string, unknown>)?.['threadId'] ?? 'sess-codex-1',
+        },
+      });
+    } else if (method === 'turn/start') {
+      this.sendResponse(ws, id, {
+        turn: { id: 'turn-1' },
+      });
+      // Stream the scripted events.
+      for (const event of this.events) {
+        this.sendCodexEvent(event);
+      }
+    } else if (method === 'turn/interrupt') {
+      this.sendResponse(ws, id, { cancelled: true });
+      if (this.emitStopOnCancel) {
+        const threadId = (msg['params'] as Record<string, unknown>)?.['threadId'] as string;
+        this.sendCodexEvent({
+          type: 'thread.stopped',
+          threadId: threadId ?? 'sess-codex-1',
+          turnId: 'turn-1',
+          reason: 'user',
+          details: 'Cancelled by client',
+        });
+      }
+    } else if (method === 'codex.startTurn') {
       // Respond with success.
       this.sendResponse(ws, id, {
         threadId: (msg['params'] as Record<string, unknown>)?.['threadId'],
@@ -165,11 +207,18 @@ class MockCodexServer {
           details: 'Cancelled by client',
         });
       }
+    } else {
+      this.sendError(ws, id, -32601, `unknown variant ${method}`);
     }
   }
 
   private sendResponse(ws: WebSocket, id: unknown, result: unknown): void {
     const response = { jsonrpc: '2.0', id, result };
+    ws.send(JSON.stringify(response));
+  }
+
+  private sendError(ws: WebSocket, id: unknown, code: number, message: string): void {
+    const response = { jsonrpc: '2.0', id, error: { code, message } };
     ws.send(JSON.stringify(response));
   }
 }
@@ -625,6 +674,167 @@ describe('Codex mapper', () => {
       expect(() => validateEvent(mapped)).not.toThrow();
     }
   });
+
+  it('maps modern turn/started -> AgentStarted', () => {
+    const mapped = mapModernTurnStarted({ threadId: 'thread-1', turn: { id: 'turn-1' } }, ctx);
+    expect(mapped.type).toBe('AgentStarted');
+    expect(mapped.taskId).toBe('task-codex-1');
+    expect(mapped.sessionId).toBe('sess-codex-1');
+  });
+
+  it('maps modern turn/completed with status completed -> AgentCompleted', () => {
+    const mapped = mapModernTurnCompleted(
+      { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', durationMs: 2500 } },
+      ctx,
+    );
+    expect(mapped.type).toBe('AgentCompleted');
+    if (mapped.type === 'AgentCompleted') {
+      expect(mapped.durationMs).toBe(2500);
+    }
+  });
+
+  it('maps modern turn/completed with status failed -> AgentFailed', () => {
+    const mapped = mapModernTurnCompleted(
+      { threadId: 'thread-1', turn: { id: 'turn-1', status: 'failed', error: { message: 'Out of tokens' } } },
+      ctx,
+    );
+    expect(mapped.type).toBe('AgentFailed');
+    if (mapped.type === 'AgentFailed') {
+      expect(mapped.error).toBe('Out of tokens');
+      expect(mapped.recoverable).toBe(true);
+    }
+  });
+
+  it('maps modern turn/completed with status interrupted -> AgentStopped', () => {
+    const mapped = mapModernTurnCompleted(
+      { threadId: 'thread-1', turn: { id: 'turn-1', status: 'interrupted' } },
+      ctx,
+    );
+    expect(mapped.type).toBe('AgentStopped');
+    if (mapped.type === 'AgentStopped') {
+      expect(mapped.reason).toBe('user');
+    }
+  });
+
+  it('maps modern item/started and item/completed for commandExecution -> ToolStarted / ToolFinished', () => {
+    const started = mapModernItemStarted(
+      {
+        threadId: 't1',
+        turnId: 'turn-1',
+        item: { id: 'i1', type: 'commandExecution', command: 'pytest', cwd: '/repo/tests' },
+      },
+      ctx,
+    )!;
+    expect(started.type).toBe('ToolStarted');
+    if (started.type === 'ToolStarted') {
+      expect(started.toolName).toBe('shell');
+      expect(started.args).toEqual({ command: 'pytest', cwd: '/repo/tests' });
+    }
+
+    const finished = mapModernItemCompleted(
+      {
+        threadId: 't1',
+        turnId: 'turn-1',
+        item: {
+          id: 'i1',
+          type: 'commandExecution',
+          command: 'pytest',
+          exitCode: 0,
+          aggregatedOutput: '2 passed',
+          durationMs: 120,
+        },
+      },
+      ctx,
+    )!;
+    expect(finished.type).toBe('ToolFinished');
+    if (finished.type === 'ToolFinished') {
+      expect(finished.success).toBe(true);
+      expect(finished.durationMs).toBe(120);
+    }
+  });
+
+  it('maps modern item/started for plan and reasoning -> AgentProgress', () => {
+    const plan = mapModernItemStarted(
+      { threadId: 't1', turnId: 'turn-1', item: { id: 'i1', type: 'plan', text: 'Step 1: Check logs' } },
+      ctx,
+    )!;
+    expect(plan.type).toBe('AgentProgress');
+    if (plan.type === 'AgentProgress') {
+      expect(plan.message).toBe('Step 1: Check logs');
+    }
+
+    const reasoning = mapModernItemStarted(
+      { threadId: 't1', turnId: 'turn-1', item: { id: 'i2', type: 'reasoning', summary: ['Thinking about fix'] } },
+      ctx,
+    )!;
+    expect(reasoning.type).toBe('AgentProgress');
+    if (reasoning.type === 'AgentProgress') {
+      expect(reasoning.message).toBe('Thinking about fix');
+    }
+  });
+
+  it('maps modern item/agentMessage/delta -> AgentProgress', () => {
+    const delta = mapModernMessageDelta({ threadId: 't1', turnId: 'turn-1', delta: 'Partial chunk' }, ctx);
+    expect(delta.type).toBe('AgentProgress');
+    if (delta.type === 'AgentProgress') {
+      expect(delta.message).toBe('Partial chunk');
+    }
+  });
+
+  it('maps modern approval requests with structured DEC-010 fields', () => {
+    const cmdApproval = mapCommandExecutionApproval(
+      { threadId: 't1', turnId: 'turn-1', itemId: 'i1', command: 'git checkout main', cwd: '/repo' },
+      ctx,
+    );
+    expect(cmdApproval.type).toBe('ApprovalRequested');
+    if (cmdApproval.type === 'ApprovalRequested') {
+      expect(cmdApproval.capability).toBe(CapabilityType.Shell);
+      expect(cmdApproval.command).toBe('git checkout main');
+      expect(cmdApproval.riskLevel).toBe('high');
+    }
+
+    const patchApproval = mapFileChangeApproval(
+      {
+        threadId: 't1',
+        turnId: 'turn-1',
+        itemId: 'i2',
+        changes: [{ path: 'package.json', kind: 'modify', diff: '...' }],
+      },
+      ctx,
+    );
+    expect(patchApproval.type).toBe('ApprovalRequested');
+    if (patchApproval.type === 'ApprovalRequested') {
+      expect(patchApproval.capability).toBe(CapabilityType.Filesystem);
+      expect(patchApproval.destination).toBe('package.json');
+    }
+
+    const permApproval = mapPermissionsApproval(
+      { threadId: 't1', turnId: 'turn-1', itemId: 'i3', reason: 'Access to camera' },
+      ctx,
+    );
+    expect(permApproval.type).toBe('ApprovalRequested');
+    if (permApproval.type === 'ApprovalRequested') {
+      expect(permApproval.destination).toBe('Access to camera');
+    }
+  });
+
+  it('mapCodexNotification routes all modern and legacy variants', () => {
+    expect(mapCodexNotification('turn/started', { threadId: 't1', turn: { id: 'turn-1' } }, ctx)?.type).toBe(
+      'AgentStarted',
+    );
+    expect(
+      mapCodexNotification('turn/completed', { threadId: 't1', turn: { id: 'turn-1', status: 'completed' } }, ctx)
+        ?.type,
+    ).toBe('AgentCompleted');
+    expect(
+      mapCodexNotification(
+        'codex.event',
+        { type: 'thread.progress', threadId: 't1', turnId: 'turn-1', message: 'Hi' },
+        ctx,
+      )?.type,
+    ).toBe('AgentProgress');
+    expect(mapCodexNotification('unrecognized/method', {}, ctx)).toBeNull();
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -645,7 +855,7 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('starts a run and streams mapped events', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0' });
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -691,7 +901,7 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('surfaces permission requests as ApprovalRequested with structured fields', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0' });
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -788,7 +998,7 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('cancel stops the run and emits AgentStopped', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0' });
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -837,7 +1047,7 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('cancel emits AgentStopped even if server does not respond', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0' });
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -867,7 +1077,7 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('emits AgentFailed when transport closes unexpectedly', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0' });
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -895,12 +1105,12 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('throws when startRun is called before connect', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0' });
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
     await expect(adapter.startRun('task-1', sampleSessionConfig())).rejects.toThrow();
   });
 
   it('throws when startRun is called with an active session', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0' });
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -913,6 +1123,288 @@ describe('CodexAdapter (mock transport)', () => {
     await startPromise;
 
     await expect(adapter.startRun('task-codex-1', sessionConfig)).rejects.toThrow();
+    await adapter.disconnect();
+  });
+
+  it('starts a run with modern thread/start and turn/start', async () => {
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const transport = new MockTransport();
+    adapter.setTransport(transport);
+
+    const sessionConfig = sampleSessionConfig();
+    const startPromise = adapter.startRun('task-codex-1', sessionConfig);
+
+    // 1. Server receives thread/start
+    expect(transport.sent).toHaveLength(1);
+    const threadStartMsg = JSON.parse(transport.sent[0]);
+    expect(threadStartMsg.method).toBe('thread/start');
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: threadStartMsg.id, result: { thread: { id: 'thread-777' } } }),
+    );
+
+    // Wait a tick so startRun proceeds to turn/start
+    await new Promise((r) => setTimeout(r, 10));
+
+    // 2. Server receives turn/start
+    expect(transport.sent).toHaveLength(2);
+    const turnStartMsg = JSON.parse(transport.sent[1]);
+    expect(turnStartMsg.method).toBe('turn/start');
+    expect(turnStartMsg.params.threadId).toBe('thread-777');
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: turnStartMsg.id, result: { turn: { id: 'turn-888' } } }),
+    );
+
+    const startResult = await startPromise;
+    expect(startResult.started).toBe(true);
+
+    // 3. Stream modern notifications
+    const streaming = collectEvents(adapter.streamEvents());
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/started',
+        params: { threadId: 'thread-777', turn: { id: 'turn-888' } },
+      }),
+    );
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'item/started',
+        params: {
+          threadId: 'thread-777',
+          turnId: 'turn-888',
+          item: { id: 'item-1', type: 'commandExecution', command: 'git status', cwd: '/repo' },
+        },
+      }),
+    );
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/completed',
+        params: { threadId: 'thread-777', turn: { id: 'turn-888', status: 'completed' } },
+      }),
+    );
+
+    const events = await streaming;
+    expect(events).toHaveLength(3);
+    expect(events[0].type).toBe('AgentStarted');
+    expect(events[1].type).toBe('ToolStarted');
+    expect(events[2].type).toBe('AgentCompleted');
+
+    await adapter.disconnect();
+  });
+
+  it('cancel sends turn/interrupt for modern session', async () => {
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const transport = new MockTransport();
+    adapter.setTransport(transport);
+
+    const startPromise = adapter.startRun('task-codex-1', sampleSessionConfig());
+    const threadMsg = JSON.parse(transport.sent[0]);
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: threadMsg.id, result: { thread: { id: 'thread-999' } } }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const turnMsg = JSON.parse(transport.sent[1]);
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: turnMsg.id, result: { turn: { id: 'turn-999' } } }),
+    );
+    await startPromise;
+
+    const streaming = collectEvents(adapter.streamEvents());
+    await adapter.cancel('sess-codex-1');
+
+    expect(transport.sent).toHaveLength(3);
+    const cancelMsg = JSON.parse(transport.sent[2]);
+    expect(cancelMsg.method).toBe('turn/interrupt');
+    expect(cancelMsg.params.threadId).toBe('thread-999');
+    expect(cancelMsg.params.turnId).toBe('turn-999');
+
+    const events = await streaming;
+    expect(events.some((e) => e.type === 'AgentStopped')).toBe(true);
+    await adapter.disconnect();
+  });
+
+  it('handles server approval requests with decline and enqueues ApprovalRequested (DEC-011)', async () => {
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const transport = new MockTransport();
+    adapter.setTransport(transport);
+
+    const startPromise = adapter.startRun('task-codex-1', sampleSessionConfig());
+    const threadMsg = JSON.parse(transport.sent[0]);
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: threadMsg.id, result: { thread: { id: 't1' } } }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const turnMsg = JSON.parse(transport.sent[1]);
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: turnMsg.id, result: { turn: { id: 'turn-1' } } }),
+    );
+    await startPromise;
+
+    const streaming = collectEvents(adapter.streamEvents());
+
+    // Server sends an approval request (Server -> Client JSON-RPC request)
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 42,
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: 't1',
+          turnId: 'turn-1',
+          itemId: 'item-1',
+          command: 'rm -rf /',
+          cwd: '/repo',
+        },
+      }),
+    );
+
+    // Turn completes
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/completed',
+        params: { threadId: 't1', turn: { id: 'turn-1', status: 'completed' } },
+      }),
+    );
+
+    const events = await streaming;
+    const approval = events.find((e) => e.type === 'ApprovalRequested');
+    expect(approval).toBeDefined();
+
+    // Check that adapter responded with decline per DEC-011
+    const serverResponses = transport.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.id === 42);
+    expect(serverResponses).toHaveLength(1);
+    expect(serverResponses[0].result).toEqual({ decision: 'decline' });
+
+    await adapter.disconnect();
+  });
+
+  it('handles server approval requests with custom permissionResponder', async () => {
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'modern',
+      permissionResponder: async (method) => {
+        if (method === 'item/commandExecution/requestApproval') return 'accept';
+        return 'decline';
+      },
+    });
+    const transport = new MockTransport();
+    adapter.setTransport(transport);
+
+    const startPromise = adapter.startRun('task-codex-1', sampleSessionConfig());
+    const threadMsg = JSON.parse(transport.sent[0]);
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: threadMsg.id, result: { thread: { id: 't1' } } }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const turnMsg = JSON.parse(transport.sent[1]);
+    transport.receive(
+      JSON.stringify({ jsonrpc: '2.0', id: turnMsg.id, result: { turn: { id: 'turn-1' } } }),
+    );
+    await startPromise;
+
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 99,
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: 't1',
+          turnId: 'turn-1',
+          itemId: 'item-1',
+          command: 'npm test',
+          cwd: '/repo',
+        },
+      }),
+    );
+
+    // Wait tick for responder promise
+    await new Promise((r) => setTimeout(r, 10));
+
+    const serverResponses = transport.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.id === 99);
+    expect(serverResponses).toHaveLength(1);
+    expect(serverResponses[0].result).toEqual({ decision: 'accept' });
+
+    await adapter.disconnect();
+  });
+
+  it('protocolMode: auto falls back to codex.startTurn when thread/start receives -32601', async () => {
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'auto' });
+    const transport = new MockTransport();
+    adapter.setTransport(transport);
+
+    const startPromise = adapter.startRun('task-codex-1', sampleSessionConfig());
+
+    // Modern thread/start is sent first
+    expect(transport.sent).toHaveLength(1);
+    const req1 = JSON.parse(transport.sent[0]);
+    expect(req1.method).toBe('thread/start');
+
+    // Server responds with method not found (-32601)
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req1.id,
+        error: { code: -32601, message: 'Method not found' },
+      }),
+    );
+
+    // Wait tick for fallback to trigger
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Adapter falls back to codex.startTurn
+    expect(transport.sent).toHaveLength(2);
+    const req2 = JSON.parse(transport.sent[1]);
+    expect(req2.method).toBe('codex.startTurn');
+
+    // Server responds to codex.startTurn
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req2.id,
+        result: { threadId: 'sess-codex-1' },
+      }),
+    );
+
+    const result = await startPromise;
+    expect(result.started).toBe(true);
+    await adapter.disconnect();
+  });
+
+  it('throws descriptive error when both thread/start and codex.startTurn fail', async () => {
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'auto' });
+    const transport = new MockTransport();
+    adapter.setTransport(transport);
+
+    const startPromise = adapter.startRun('task-codex-1', sampleSessionConfig());
+
+    const req1 = JSON.parse(transport.sent[0]);
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req1.id,
+        error: { code: -32601, message: 'Method not found' },
+      }),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const req2 = JSON.parse(transport.sent[1]);
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req2.id,
+        error: { code: -32601, message: 'codex.startTurn not found' },
+      }),
+    );
+
+    await expect(startPromise).rejects.toThrow(/rejected both thread\/start and codex\.startTurn/);
     await adapter.disconnect();
   });
 });

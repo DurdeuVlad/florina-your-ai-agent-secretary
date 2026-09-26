@@ -32,9 +32,7 @@ import type { SupervisorEvent } from '../../../core/domain/events.js';
 import type { EventPublisherPort } from '../../../core/application/ports/outbound/event-stream.js';
 import { BaseAdapter, type SessionConfig, type StartRunResult } from './base.js';
 import {
-  mapCodexEvent,
-  isCodexEvent,
-  type CodexEvent,
+  mapCodexNotification,
   type MapperContext,
 } from './codex-mapper.js';
 
@@ -54,6 +52,18 @@ export interface CodexAdapterOptions {
    * Connection timeout in milliseconds. Defaults to 5000.
    */
   readonly connectTimeoutMs?: number;
+  /**
+   * Protocol generation mode: 'modern' (thread/turn), 'legacy' (codex.startTurn), or 'auto' (probe).
+   * Defaults to 'auto'.
+   */
+  readonly protocolMode?: 'modern' | 'legacy' | 'auto';
+  /**
+   * Optional hook for responding to server approval requests (default: decline per DEC-011).
+   */
+  readonly permissionResponder?: (
+    method: string,
+    params: unknown,
+  ) => Promise<'accept' | 'decline' | 'cancel' | null> | 'accept' | 'decline' | 'cancel' | null;
 }
 
 /** JSON-RPC 2.0 request envelope (client → server). */
@@ -115,6 +125,15 @@ export class CodexAdapter extends BaseAdapter {
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >();
 
+  /** Active thread id tracked for modern protocol turns. */
+  private activeThreadId: string | null = null;
+  /** Active turn id tracked for modern protocol turns. */
+  private activeTurnId: string | null = null;
+  /** Server metadata returned by the initialize handshake. */
+  private serverInfo: { userAgent?: string; platformOs?: string } | null = null;
+  /** Whether the connected app-server supports the modern thread/turn protocol. */
+  private isModernProtocol: boolean | null = null;
+
   /** Internal queue of mapped SupervisorEvents awaiting consumption by streamEvents. */
   private eventQueue: SupervisorEvent[] = [];
   /** Resolve functions waiting for events in streamEvents. */
@@ -125,6 +144,21 @@ export class CodexAdapter extends BaseAdapter {
   constructor(bus?: EventPublisherPort | null, options?: CodexAdapterOptions) {
     super(CODEX_ADAPTER_ID, AdapterFidelityTier.A, bus);
     this.options = options ?? { endpoint: 'ws://127.0.0.1:0' };
+    if (this.options.protocolMode === 'legacy') {
+      this.isModernProtocol = false;
+    } else if (this.options.protocolMode === 'modern') {
+      this.isModernProtocol = true;
+    }
+  }
+
+  /** Expose detected server metadata (userAgent, platform). */
+  get serverMetadata(): { userAgent?: string; platformOs?: string } | null {
+    return this.serverInfo;
+  }
+
+  /** Whether the connected app-server speaks the modern thread/turn protocol. */
+  get isModern(): boolean | null {
+    return this.isModernProtocol;
   }
 
   async connect(): Promise<void> {
@@ -152,6 +186,24 @@ export class CodexAdapter extends BaseAdapter {
     });
 
     this.setConnectionState('connected');
+
+    // Attempt the modern initialize handshake if protocolMode allows it.
+    if (this.options.protocolMode !== 'legacy') {
+      try {
+        const initResult = (await this.sendRequest(
+          'initialize',
+          {
+            clientInfo: { name: 'florina', version: '0.1.0' },
+            capabilities: null,
+          },
+          1500,
+        )) as { userAgent?: string; platformOs?: string } | null;
+        this.serverInfo = initResult;
+        this.isModernProtocol = true;
+      } catch {
+        this.isModernProtocol = false;
+      }
+    }
   }
 
   async startRun(taskId: string, sessionConfig: SessionConfig): Promise<StartRunResult> {
@@ -173,17 +225,67 @@ export class CodexAdapter extends BaseAdapter {
       workingDir: sessionConfig.workingDir,
     };
 
-    // Send the startTurn JSON-RPC request to the Codex app-server.
-    const result = await this.sendRequest('codex.startTurn', {
-      threadId: sessionConfig.sessionId,
-      objective: sessionConfig.objective,
-      workingDir: sessionConfig.workingDir,
-      model: sessionConfig.model,
-    });
-
     void taskId; // taskId is carried in sessionConfig; kept for interface parity.
-    const started = result !== null;
-    return { sessionId: sessionConfig.sessionId, started };
+
+    // 1. Try modern thread/start + turn/start unless confirmed legacy.
+    if (this.isModernProtocol !== false) {
+      try {
+        const threadResult = (await this.sendRequest('thread/start', {
+          cwd: sessionConfig.workingDir,
+          model: sessionConfig.model,
+          approvalPolicy: 'on-request',
+        })) as { thread?: { id?: string } } | null;
+        const threadId = threadResult?.thread?.id ?? sessionConfig.sessionId;
+        this.activeThreadId = threadId;
+
+        const turnResult = (await this.sendRequest('turn/start', {
+          threadId,
+          input: [
+            {
+              type: 'text',
+              text: sessionConfig.objective ?? '',
+              text_elements: [],
+            },
+          ],
+          cwd: sessionConfig.workingDir,
+          model: sessionConfig.model,
+        })) as { turn?: { id?: string } } | null;
+        this.activeTurnId = turnResult?.turn?.id ?? null;
+        this.isModernProtocol = true;
+        return { sessionId: sessionConfig.sessionId, started: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isMethodNotFound =
+          msg.includes('-32601') ||
+          msg.includes('unknown variant') ||
+          msg.includes('Method not found') ||
+          msg.includes('not recognized');
+        if (!isMethodNotFound) {
+          throw err;
+        }
+        // Fall back to legacy codex.startTurn
+        this.isModernProtocol = false;
+      }
+    }
+
+    // 2. Legacy fallback: send codex.startTurn
+    try {
+      const result = await this.sendRequest('codex.startTurn', {
+        threadId: sessionConfig.sessionId,
+        objective: sessionConfig.objective,
+        workingDir: sessionConfig.workingDir,
+        model: sessionConfig.model,
+      });
+      this.activeThreadId = sessionConfig.sessionId;
+      const started = result !== null;
+      return { sessionId: sessionConfig.sessionId, started };
+    } catch (legacyErr) {
+      throw new Error(
+        `Codex app-server rejected both thread/start and codex.startTurn protocol generations: ${
+          legacyErr instanceof Error ? legacyErr.message : String(legacyErr)
+        }`,
+      );
+    }
   }
 
   async *streamEvents(): AsyncIterable<SupervisorEvent> {
@@ -210,26 +312,39 @@ export class CodexAdapter extends BaseAdapter {
     if (this.activeSession?.sessionId !== sessionId) {
       return;
     }
-    // Send the cancelTurn request as fire-and-forget. We don't block on the
-    // response because the server may be unresponsive; we emit AgentStopped
-    // locally regardless. If the server does respond with thread.stopped,
-    // handleNotification will map it (but completeStream below prevents
-    // duplicate emission).
+    // Send cancel request as fire-and-forget.
     if (this.transport) {
       const id = this.nextRequestId++;
-      const request: JsonRpcRequest = {
-        jsonrpc: '2.0',
-        id,
-        method: 'codex.cancelTurn',
-        params: { threadId: sessionId },
-      };
-      try {
-        this.transport.send(JSON.stringify(request));
-      } catch {
-        // Transport may already be closed; we still emit AgentStopped locally.
+      if (this.isModernProtocol && this.activeThreadId) {
+        const request: JsonRpcRequest = {
+          jsonrpc: '2.0',
+          id,
+          method: 'turn/interrupt',
+          params: {
+            threadId: this.activeThreadId,
+            turnId: this.activeTurnId ?? '',
+          },
+        };
+        try {
+          this.transport.send(JSON.stringify(request));
+        } catch {
+          // Transport may already be closed; we still emit AgentStopped locally.
+        }
+      } else {
+        const request: JsonRpcRequest = {
+          jsonrpc: '2.0',
+          id,
+          method: 'codex.cancelTurn',
+          params: { threadId: this.activeThreadId ?? sessionId },
+        };
+        try {
+          this.transport.send(JSON.stringify(request));
+        } catch {
+          // Transport may already be closed; we still emit AgentStopped locally.
+        }
       }
     }
-    // If the server doesn't send a thread.stopped, emit one ourselves.
+    // If the server doesn't send a stopped event, emit one ourselves.
     if (!this.streamComplete && this.mapperCtx) {
       this.enqueueEvent({
         type: 'AgentStopped',
@@ -244,11 +359,15 @@ export class CodexAdapter extends BaseAdapter {
       this.completeStream();
     }
     this.activeSession = null;
+    this.activeThreadId = null;
+    this.activeTurnId = null;
   }
 
   async disconnect(): Promise<void> {
     this.completeStream();
     this.activeSession = null;
+    this.activeThreadId = null;
+    this.activeTurnId = null;
     this.mapperCtx = null;
     if (this.transport) {
       this.transport.close();
@@ -299,7 +418,11 @@ export class CodexAdapter extends BaseAdapter {
    * Send a JSON-RPC request and await the response. Returns the `result`
    * field, or `null` if the server returns an empty result.
    */
-  private sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown> {
+  private sendRequest(
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs = 10000,
+  ): Promise<unknown> {
     if (!this.transport) {
       return Promise.reject(new Error('Codex adapter has no transport'));
     }
@@ -313,13 +436,12 @@ export class CodexAdapter extends BaseAdapter {
     return new Promise<unknown>((resolve, reject) => {
       this.pendingRequests.set(id, { resolve, reject });
       this.transport!.send(JSON.stringify(request));
-      // Timeout: reject if no response within 10s.
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(new Error(`JSON-RPC request "${method}" (id=${id}) timed out`));
         }
-      }, 10000);
+      }, timeoutMs);
     });
   }
 
@@ -338,7 +460,10 @@ export class CodexAdapter extends BaseAdapter {
       return;
     }
     const msg = parsed as Record<string, unknown>;
-    if (msg['method'] !== undefined && msg['id'] === undefined) {
+    if (msg['method'] !== undefined && msg['id'] !== undefined) {
+      // JSON-RPC request from server (e.g. approval prompt).
+      void this.handleServerRequest(msg as unknown as JsonRpcRequest);
+    } else if (msg['method'] !== undefined && msg['id'] === undefined) {
       // JSON-RPC notification (streamed event).
       this.handleNotification(msg as unknown as JsonRpcNotification);
     } else if (msg['id'] !== undefined) {
@@ -348,21 +473,55 @@ export class CodexAdapter extends BaseAdapter {
   }
 
   /**
-   * Handle a JSON-RPC notification: map the Codex event to a
+   * Handle an incoming JSON-RPC request from the server (e.g. approval prompt).
+   * Enqueues an ApprovalRequested event and responds per DEC-011 (decline by default).
+   */
+  private async handleServerRequest(request: JsonRpcRequest): Promise<void> {
+    if (this.mapperCtx) {
+      const mapped = mapCodexNotification(request.method, request.params, this.mapperCtx);
+      if (mapped) {
+        this.enqueueEvent(mapped);
+      }
+    }
+
+    const responder = this.options.permissionResponder;
+    let decision: 'accept' | 'decline' | 'cancel' = 'decline';
+    if (responder) {
+      try {
+        const choice = await responder(request.method, request.params);
+        if (choice) {
+          decision = choice;
+        }
+      } catch {
+        decision = 'decline';
+      }
+    }
+
+    const response: JsonRpcResponse = {
+      jsonrpc: '2.0',
+      id: request.id,
+      result: { decision },
+    };
+    try {
+      this.transport?.send(JSON.stringify(response));
+    } catch {
+      // Transport may already be closed.
+    }
+  }
+
+  /**
+   * Handle a JSON-RPC notification: map the Codex event/notification to a
    * SupervisorEvent and enqueue it for streamEvents.
    */
   private handleNotification(notification: JsonRpcNotification): void {
-    if (notification.method !== 'codex.event') {
-      return;
-    }
-    const event = notification.params;
-    if (!isCodexEvent(event)) {
-      return;
-    }
     if (!this.mapperCtx) {
       return;
     }
-    const mapped = mapCodexEvent(event as CodexEvent, this.mapperCtx);
+    const mapped = mapCodexNotification(
+      notification.method,
+      notification.params,
+      this.mapperCtx,
+    );
     if (mapped) {
       this.enqueueEvent(mapped);
       // Terminal events complete the stream.

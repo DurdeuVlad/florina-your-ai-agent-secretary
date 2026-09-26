@@ -547,3 +547,433 @@ export function isCodexEvent(value: unknown): value is CodexEvent {
   const type = (value as Record<string, unknown>).type;
   return typeof type === 'string' && CODEX_EVENT_TYPES.includes(type);
 }
+
+/* ------------------------------------------------------------------ *
+ * Modern Codex app-server wire shapes (turn/start, thread/start, items)
+ * ------------------------------------------------------------------ */
+
+export interface ModernTurnStartedNotification {
+  readonly threadId: string;
+  readonly turn: {
+    readonly id: string;
+    readonly status?: string;
+    readonly startedAt?: number | null;
+  };
+}
+
+export interface ModernTurnCompletedNotification {
+  readonly threadId: string;
+  readonly turn: {
+    readonly id: string;
+    readonly status: 'completed' | 'interrupted' | 'failed' | 'inProgress';
+    readonly error?: { readonly message?: string } | null;
+    readonly durationMs?: number | null;
+  };
+}
+
+export interface ModernItemStartedNotification {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly item: {
+    readonly id: string;
+    readonly type: string;
+    readonly [key: string]: unknown;
+  };
+}
+
+export interface ModernItemCompletedNotification {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly item: {
+    readonly id: string;
+    readonly type: string;
+    readonly [key: string]: unknown;
+  };
+}
+
+export interface ModernAgentMessageDeltaNotification {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly delta: string;
+}
+
+export interface ModernPatchUpdatedNotification {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly path?: string;
+}
+
+export interface ModernCommandExecutionApprovalParams {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly command?: string | null;
+  readonly cwd?: string | null;
+  readonly reason?: string | null;
+  readonly kind?: string;
+}
+
+export interface ModernFileChangeApprovalParams {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly changes?: ReadonlyArray<{
+    readonly path?: string;
+    readonly kind?: string;
+    readonly diff?: string;
+  }> | null;
+}
+
+export interface ModernPermissionsApprovalParams {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly reason?: string | null;
+  readonly permissions?: Record<string, unknown>;
+}
+
+/* ------------------------------------------------------------------ *
+ * Modern Codex app-server event mappers
+ * ------------------------------------------------------------------ */
+
+/** Map modern `turn/started` -> `AgentStarted`. */
+export function mapModernTurnStarted(
+  _params: ModernTurnStartedNotification,
+  ctx: MapperContext,
+): SupervisorEvent {
+  return {
+    type: 'AgentStarted',
+    timestamp: now(),
+    taskId: ctx.taskId,
+    sessionId: ctx.sessionId,
+    agentId: ctx.agentId,
+    adapterFidelityTier: ctx.adapterFidelityTier,
+    objective: ctx.objective,
+    workingDir: ctx.workingDir,
+  };
+}
+
+/** Map modern `turn/completed` -> `AgentCompleted` | `AgentFailed` | `AgentStopped`. */
+export function mapModernTurnCompleted(
+  params: ModernTurnCompletedNotification,
+  ctx: MapperContext,
+): SupervisorEvent {
+  const turn = params.turn;
+  if (turn.status === 'failed') {
+    return {
+      type: 'AgentFailed',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      error: turn.error?.message ?? 'Codex turn failed',
+      recoverable: true,
+    };
+  }
+  if (turn.status === 'interrupted') {
+    return {
+      type: 'AgentStopped',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      reason: 'user',
+      details: 'Codex turn interrupted',
+    };
+  }
+  return {
+    type: 'AgentCompleted',
+    timestamp: now(),
+    taskId: ctx.taskId,
+    sessionId: ctx.sessionId,
+    agentId: ctx.agentId,
+    adapterFidelityTier: ctx.adapterFidelityTier,
+    summary: 'Codex turn completed',
+    deliverables: [],
+    durationMs: turn.durationMs ?? undefined,
+  };
+}
+
+/** Map modern `item/started` -> `ToolStarted` | `AgentProgress` | null. */
+export function mapModernItemStarted(
+  params: ModernItemStartedNotification,
+  ctx: MapperContext,
+): SupervisorEvent | null {
+  const item = params.item;
+  if (item.type === 'commandExecution') {
+    const command = typeof item['command'] === 'string' ? item['command'] : '';
+    return {
+      type: 'ToolStarted',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      toolName: 'shell',
+      args: { command, cwd: item['cwd'] },
+    };
+  }
+  if (item.type === 'mcpToolCall' || item.type === 'dynamicToolCall') {
+    const toolName = typeof item['tool'] === 'string' ? item['tool'] : 'tool';
+    return {
+      type: 'ToolStarted',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      toolName,
+      args: (item['arguments'] as Record<string, unknown>) ?? {},
+    };
+  }
+  if (item.type === 'plan') {
+    const text = typeof item['text'] === 'string' ? item['text'] : '';
+    return {
+      type: 'AgentProgress',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      message: text,
+    };
+  }
+  if (item.type === 'reasoning') {
+    const summary = Array.isArray(item['summary'])
+      ? item['summary'].join(' ')
+      : 'Reasoning...';
+    return {
+      type: 'AgentProgress',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      message: summary,
+    };
+  }
+  return null;
+}
+
+/** Map modern `item/completed` -> `ToolFinished` | `FileChanged` | `AgentProgress` | null. */
+export function mapModernItemCompleted(
+  params: ModernItemCompletedNotification,
+  ctx: MapperContext,
+): SupervisorEvent | null {
+  const item = params.item;
+  if (item.type === 'commandExecution') {
+    const command = typeof item['command'] === 'string' ? item['command'] : '';
+    const exitCode = typeof item['exitCode'] === 'number' ? item['exitCode'] : 0;
+    return {
+      type: 'ToolFinished',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      toolName: 'shell',
+      args: { command },
+      result: {
+        exitCode,
+        output: typeof item['aggregatedOutput'] === 'string' ? item['aggregatedOutput'] : '',
+      },
+      success: exitCode === 0,
+      durationMs: typeof item['durationMs'] === 'number' ? item['durationMs'] : undefined,
+    };
+  }
+  if (item.type === 'mcpToolCall' || item.type === 'dynamicToolCall') {
+    const toolName = typeof item['tool'] === 'string' ? item['tool'] : 'tool';
+    const status = typeof item['status'] === 'string' ? item['status'] : 'completed';
+    const success = item['success'] !== undefined ? Boolean(item['success']) : status === 'completed';
+    return {
+      type: 'ToolFinished',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      toolName,
+      args: (item['arguments'] as Record<string, unknown>) ?? {},
+      result: (item['result'] as Record<string, unknown>) ?? {},
+      success,
+      durationMs: typeof item['durationMs'] === 'number' ? item['durationMs'] : undefined,
+    };
+  }
+  if (item.type === 'fileChange') {
+    const changes = Array.isArray(item['changes']) ? item['changes'] : [];
+    const first = changes[0] as { path?: string; kind?: string } | undefined;
+    const path = first?.path ?? 'unknown';
+    const changeType =
+      first?.kind === 'add'
+        ? 'created'
+        : first?.kind === 'delete'
+          ? 'deleted'
+          : 'modified';
+    return {
+      type: 'FileChanged',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      path,
+      changeType,
+    };
+  }
+  if (item.type === 'agentMessage') {
+    const text = typeof item['text'] === 'string' ? item['text'] : '';
+    if (text.length > 0) {
+      return {
+        type: 'AgentProgress',
+        timestamp: now(),
+        taskId: ctx.taskId,
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
+        adapterFidelityTier: ctx.adapterFidelityTier,
+        message: text,
+      };
+    }
+  }
+  return null;
+}
+
+/** Map modern `item/agentMessage/delta` -> `AgentProgress`. */
+export function mapModernMessageDelta(
+  params: ModernAgentMessageDeltaNotification,
+  ctx: MapperContext,
+): SupervisorEvent {
+  return {
+    type: 'AgentProgress',
+    timestamp: now(),
+    taskId: ctx.taskId,
+    sessionId: ctx.sessionId,
+    agentId: ctx.agentId,
+    adapterFidelityTier: ctx.adapterFidelityTier,
+    message: params.delta,
+  };
+}
+
+/** Map modern command execution approval request -> `ApprovalRequested` (DEC-010/011). */
+export function mapCommandExecutionApproval(
+  params: ModernCommandExecutionApprovalParams,
+  ctx: MapperContext,
+): SupervisorEvent {
+  const cmd = params.command ?? 'shell';
+  return {
+    type: 'ApprovalRequested',
+    timestamp: now(),
+    taskId: ctx.taskId,
+    sessionId: ctx.sessionId,
+    agentId: ctx.agentId,
+    adapterFidelityTier: ctx.adapterFidelityTier,
+    task: ctx.objective,
+    agent: ctx.agentId,
+    capability: CapType.Shell,
+    destination: cmd,
+    command: cmd,
+    workingDir: params.cwd || ctx.workingDir,
+    scope: [{ type: CapType.Shell, targets: [cmd] }],
+    riskLevel: RiskLevel.High,
+  };
+}
+
+/** Map modern file change approval request -> `ApprovalRequested` (DEC-010/011). */
+export function mapFileChangeApproval(
+  params: ModernFileChangeApprovalParams,
+  ctx: MapperContext,
+): SupervisorEvent {
+  const firstChange = params.changes?.[0];
+  const path = firstChange?.path ?? 'files';
+  return {
+    type: 'ApprovalRequested',
+    timestamp: now(),
+    taskId: ctx.taskId,
+    sessionId: ctx.sessionId,
+    agentId: ctx.agentId,
+    adapterFidelityTier: ctx.adapterFidelityTier,
+    task: ctx.objective,
+    agent: ctx.agentId,
+    capability: CapType.Filesystem,
+    destination: path,
+    command: firstChange?.kind ?? 'patch',
+    workingDir: ctx.workingDir,
+    scope: [{ type: CapType.Filesystem, targets: [path] }],
+    riskLevel: RiskLevel.High,
+  };
+}
+
+/** Map modern permissions approval request -> `ApprovalRequested` (DEC-010/011). */
+export function mapPermissionsApproval(
+  params: ModernPermissionsApprovalParams,
+  ctx: MapperContext,
+): SupervisorEvent {
+  const target = params.reason ?? 'permissions';
+  return {
+    type: 'ApprovalRequested',
+    timestamp: now(),
+    taskId: ctx.taskId,
+    sessionId: ctx.sessionId,
+    agentId: ctx.agentId,
+    adapterFidelityTier: ctx.adapterFidelityTier,
+    task: ctx.objective,
+    agent: ctx.agentId,
+    capability: CapType.Other,
+    destination: target,
+    command: 'request_permissions',
+    workingDir: ctx.workingDir,
+    scope: [{ type: CapType.Other, targets: [target] }],
+    riskLevel: RiskLevel.High,
+  };
+}
+
+/**
+ * Unified notification/request dispatcher: maps either modern top-level
+ * methods or legacy wrapped `codex.event` payloads.
+ */
+export function mapCodexNotification(
+  method: string,
+  params: unknown,
+  ctx: MapperContext,
+): SupervisorEvent | null {
+  if (method === 'codex.event' && isCodexEvent(params)) {
+    return mapCodexEvent(params, ctx);
+  }
+  switch (method) {
+    case 'turn/started':
+      return mapModernTurnStarted(params as ModernTurnStartedNotification, ctx);
+    case 'turn/completed':
+      return mapModernTurnCompleted(params as ModernTurnCompletedNotification, ctx);
+    case 'item/started':
+      return mapModernItemStarted(params as ModernItemStartedNotification, ctx);
+    case 'item/completed':
+      return mapModernItemCompleted(params as ModernItemCompletedNotification, ctx);
+    case 'item/agentMessage/delta':
+      return mapModernMessageDelta(params as ModernAgentMessageDeltaNotification, ctx);
+    case 'item/fileChange/patchUpdated': {
+      const p = params as ModernPatchUpdatedNotification;
+      return {
+        type: 'FileChanged',
+        timestamp: now(),
+        taskId: ctx.taskId,
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
+        adapterFidelityTier: ctx.adapterFidelityTier,
+        path: p.path ?? 'unknown',
+        changeType: 'modified',
+      };
+    }
+    case 'item/commandExecution/requestApproval':
+    case 'execCommandApproval':
+      return mapCommandExecutionApproval(params as ModernCommandExecutionApprovalParams, ctx);
+    case 'item/fileChange/requestApproval':
+    case 'applyPatchApproval':
+      return mapFileChangeApproval(params as ModernFileChangeApprovalParams, ctx);
+    case 'item/permissions/requestApproval':
+      return mapPermissionsApproval(params as ModernPermissionsApprovalParams, ctx);
+    default:
+      return null;
+  }
+}
+
