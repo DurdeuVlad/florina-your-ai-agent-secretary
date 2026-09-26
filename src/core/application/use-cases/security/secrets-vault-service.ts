@@ -10,7 +10,9 @@
  * 5. Redaction: text stream redaction masks secret values.
  * 6. Revocation: revoke grants or delete secrets.
  */
-import type { EntityId } from '../../../domain/types.js';
+import type { AgentProgressEvent } from '../../../domain/events.js';
+import type { EntityId, Event } from '../../../domain/types.js';
+import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
 import type { EventJournalPort } from '../../ports/outbound/repositories.js';
 import type {
   SecretCapturePrompt,
@@ -22,6 +24,7 @@ import type {
 export interface SecretsVaultServiceOptions {
   readonly vault: SecretsVaultPort;
   readonly eventJournal?: EventJournalPort;
+  readonly eventBus?: EventPublisherPort;
   readonly now?: () => string;
 }
 
@@ -30,6 +33,8 @@ export interface CaptureSecretInput {
   readonly value: string;
   readonly scope: SecretScope;
   readonly description?: string;
+  /** Optional ISO-8601 expiration; expired secrets are never injected. */
+  readonly expiresAt?: string;
   readonly context?: {
     readonly taskId?: EntityId;
     readonly sessionId?: EntityId;
@@ -46,11 +51,13 @@ export interface ResolveInjectionsContext {
 export class SecretsVaultService {
   private readonly vault: SecretsVaultPort;
   private readonly eventJournal?: EventJournalPort;
+  private readonly eventBus?: EventPublisherPort;
   private readonly now: () => string;
 
   constructor(options: SecretsVaultServiceOptions) {
     this.vault = options.vault;
     this.eventJournal = options.eventJournal;
+    this.eventBus = options.eventBus;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -64,7 +71,7 @@ export class SecretsVaultService {
     readonly reason: string;
   }): SecretCapturePrompt {
     const timestamp = this.now();
-    const promptId = `prompt-sec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const promptId = `prompt-sec-${randomId()}`;
     return {
       promptId,
       secretName: request.secretName,
@@ -87,12 +94,10 @@ export class SecretsVaultService {
       throw new Error('Secret value must not be empty.');
     }
 
-    await this.vault.storeSecret(
-      input.name,
-      input.value,
-      input.scope,
-      input.description,
-    );
+    await this.vault.storeSecret(input.name, input.value, input.scope, {
+      description: input.description,
+      expiresAt: input.expiresAt,
+    });
 
     const metadata = await this.vault.getSecretMetadata(input.name);
     if (!metadata) {
@@ -100,21 +105,25 @@ export class SecretsVaultService {
     }
 
     // DEC-012 Audit log: journal capture event if valid task/session context is present
-    if (this.eventJournal && input.context?.taskId && input.context?.sessionId) {
+    if (input.context?.taskId && input.context?.sessionId) {
       const timestamp = this.now();
-      this.eventJournal.insert({
-        id: `evt-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-        taskId: input.context.taskId,
-        sessionId: input.context.sessionId,
-        timestamp,
-        kind: 'AgentProgress',
-        payload: {
-          message: `Secret "${input.name}" captured with scope ${JSON.stringify(input.scope)}`,
-          action: 'secret_captured',
-          secretName: input.name,
-          scope: input.scope,
+      const message = `Secret "${input.name}" captured with scope ${JSON.stringify(input.scope)}`;
+      this.recordAuditEvent(
+        {
+          id: `event_${randomId()}`,
+          taskId: input.context.taskId,
+          sessionId: input.context.sessionId,
+          timestamp,
+          kind: 'AgentProgress',
+          payload: {
+            message,
+            action: 'secret_captured',
+            secretName: input.name,
+            scope: input.scope,
+          },
         },
-      });
+        message,
+      );
     }
 
     return metadata;
@@ -127,18 +136,24 @@ export class SecretsVaultService {
    * Scoping rule:
    * - If secret.scope.projectId is set, it MUST match context.projectId.
    * - If secret.scope.provider is set, it MUST match context.provider.
+   * - More specific scopes override broader scopes for the same environment variable name.
    *
    * Returns a map of ENV_VAR_NAME -> secret_value.
    * Raw values are only returned to the process environment spawner, NEVER to event streams.
    */
-  async resolveInjections(
-    context: ResolveInjectionsContext,
-  ): Promise<Record<string, string>> {
+  async resolveInjections(context: ResolveInjectionsContext): Promise<Record<string, string>> {
     const allMetadata = await this.vault.listSecretMetadata();
     const injections: Record<string, string> = {};
     const injectedNames: string[] = [];
 
-    for (const secret of allMetadata) {
+    // Sort secrets ascending by scope specificity so that more specific scopes
+    // (e.g. project+provider or project-specific) override broader ones (e.g. global)
+    // for the same environment variable name.
+    const sortedSecrets = [...allMetadata].sort(
+      (a, b) => scopeSpecificity(a.scope) - scopeSpecificity(b.scope),
+    );
+
+    for (const secret of sortedSecrets) {
       const scope = secret.scope;
 
       // Project scope check: if scoped to a project, context must match
@@ -153,29 +168,33 @@ export class SecretsVaultService {
 
       const val = await this.vault.getSecretValue(secret.name);
       if (val !== null) {
-        const envKey = scope.envVarName || secret.name;
+        const envKey = scope.envVarName ?? toEnvVarName(secret.name);
         injections[envKey] = val;
         injectedNames.push(secret.name);
       }
     }
 
     // DEC-012 Audit log: record injection event without exposing values
-    if (injectedNames.length > 0 && this.eventJournal && context.taskId && context.sessionId) {
+    if (injectedNames.length > 0 && context.taskId && context.sessionId) {
       const timestamp = this.now();
-      this.eventJournal.insert({
-        id: `evt-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-        taskId: context.taskId,
-        sessionId: context.sessionId,
-        timestamp,
-        kind: 'AgentProgress',
-        payload: {
-          message: `Injected ${injectedNames.length} scoped secret(s): ${injectedNames.join(', ')}`,
-          action: 'secret_injected',
-          secretNames: injectedNames,
-          projectId: context.projectId,
-          provider: context.provider,
+      const message = `Injected ${injectedNames.length} scoped secret(s): ${injectedNames.join(', ')}`;
+      this.recordAuditEvent(
+        {
+          id: `event_${randomId()}`,
+          taskId: context.taskId,
+          sessionId: context.sessionId,
+          timestamp,
+          kind: 'AgentProgress',
+          payload: {
+            message,
+            action: 'secret_injected',
+            secretNames: injectedNames,
+            projectId: context.projectId,
+            provider: context.provider,
+          },
         },
-      });
+        message,
+      );
     }
 
     return injections;
@@ -190,20 +209,24 @@ export class SecretsVaultService {
     context?: { taskId?: EntityId; sessionId?: EntityId },
   ): Promise<boolean> {
     const deleted = await this.vault.deleteSecret(name);
-    if (deleted && this.eventJournal && context?.taskId && context?.sessionId) {
+    if (deleted && context?.taskId && context?.sessionId) {
       const timestamp = this.now();
-      this.eventJournal.insert({
-        id: `evt-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-        taskId: context.taskId,
-        sessionId: context.sessionId,
-        timestamp,
-        kind: 'AgentProgress',
-        payload: {
-          message: `Secret "${name}" deleted/revoked from vault`,
-          action: 'secret_revoked',
-          secretName: name,
+      const message = `Secret "${name}" deleted/revoked from vault`;
+      this.recordAuditEvent(
+        {
+          id: `event_${randomId()}`,
+          taskId: context.taskId,
+          sessionId: context.sessionId,
+          timestamp,
+          kind: 'AgentProgress',
+          payload: {
+            message,
+            action: 'secret_revoked',
+            secretName: name,
+          },
         },
-      });
+        message,
+      );
     }
     return deleted;
   }
@@ -211,6 +234,8 @@ export class SecretsVaultService {
   /**
    * Redact known secret values from output streams and logs.
    * Replaces occurrences of raw secret strings with `[REDACTED_SECRET]`.
+   * Sorts secret values descending by length to prevent shorter prefix substrings
+   * from corrupting or leaking trailing suffixes of longer secrets.
    */
   async redact(text: string): Promise<string> {
     if (!text || text.length === 0) {
@@ -220,9 +245,12 @@ export class SecretsVaultService {
     const secretValues = await this.vault.listSecretValues();
     let redacted = text;
 
-    for (const val of secretValues) {
-      // Only redact values of meaningful length (>= 3 chars) to prevent masking common symbols
-      if (val && val.length >= 3 && redacted.includes(val)) {
+    const sortedValues = [...secretValues]
+      .filter((val): val is string => typeof val === 'string' && val.length >= 3)
+      .sort((a, b) => b.length - a.length);
+
+    for (const val of sortedValues) {
+      if (redacted.includes(val)) {
         redacted = redacted.replaceAll(val, '[REDACTED_SECRET]');
       }
     }
@@ -236,4 +264,67 @@ export class SecretsVaultService {
   async listSecrets(): Promise<readonly SecretMetadata[]> {
     return this.vault.listSecretMetadata();
   }
+
+  /**
+   * Defensive audit event recording. Safely inserts into eventJournal
+   * and broadcasts onto eventBus without bubbling unhandled exceptions
+   * if foreign key constraints or uncommitted context IDs fail.
+   */
+  private recordAuditEvent(event: Event, message: string): void {
+    if (this.eventJournal) {
+      try {
+        this.eventJournal.insert(event);
+      } catch {
+        // Defensive: guard against SQLite foreign key or uncommitted context errors
+      }
+    }
+    if (this.eventBus) {
+      try {
+        const supervisorEvent: AgentProgressEvent = {
+          type: 'AgentProgress',
+          timestamp: event.timestamp,
+          taskId: event.taskId,
+          sessionId: event.sessionId,
+          agentId: 'secretary',
+          adapterFidelityTier: 'B',
+          message,
+        };
+        this.eventBus.publish(supervisorEvent);
+      } catch {
+        // Defensive: bus publish errors should never crash vault operations
+      }
+    }
+  }
+}
+
+/** Generate a short random id (no crypto dependency needed for event ids). */
+function randomId(): string {
+  return `${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+}
+
+/**
+ * Derive a conventional env var name from a secret's logical name when no
+ * explicit `envVarName` scope is set (`gh-token` -> `GH_TOKEN`).
+ */
+function toEnvVarName(name: string): string {
+  const sanitized = name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  return /^[0-9]/.test(sanitized) ? `_${sanitized}` : sanitized;
+}
+
+/**
+ * Calculate scope specificity score:
+ * - Global (no provider, no projectId): 0
+ * - Provider-only: 1
+ * - Project-only: 2
+ * - Project + Provider: 3
+ */
+function scopeSpecificity(scope: SecretScope): number {
+  let score = 0;
+  if (scope.provider) {
+    score += 1;
+  }
+  if (scope.projectId) {
+    score += 2;
+  }
+  return score;
 }

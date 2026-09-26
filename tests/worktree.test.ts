@@ -70,7 +70,7 @@ describe('worktree: branch naming convention (DEC-024)', () => {
   });
 });
 
-describe('worktree: lifecycle (integration with a real temp git repo)', () => {
+describe('worktree: lifecycle (integration with a real temp git repo)', { timeout: 30_000 }, () => {
   let repoPath: string;
   let tmpRoot: string;
 

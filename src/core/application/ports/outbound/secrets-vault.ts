@@ -1,5 +1,5 @@
 /**
- * Secrets vault port — outbound contract for secure secret storage,
+ * Secrets vault port â€” outbound contract for secure secret storage,
  * scoped injection, and audit (issue #172, DEC-011, DEC-022).
  */
 import type { EntityId } from '../../../domain/types.js';
@@ -17,7 +17,7 @@ export interface SecretScope {
   readonly provider?: string;
   /**
    * Target environment variable name for injection (e.g. 'GITHUB_TOKEN', 'OPENAI_API_KEY').
-   * If omitted, defaults to the secret's logical name.
+   * If omitted, a sanitized `UPPER_SNAKE` form of the secret's logical name is used.
    */
   readonly envVarName?: string;
 }
@@ -33,13 +33,19 @@ export interface SecretMetadata {
   readonly createdAt: string;
   /** ISO-8601 last update timestamp. */
   readonly updatedAt: string;
-  /** Optional expiration timestamp. */
+  /**
+   * Optional ISO-8601 expiration timestamp. Expired secrets read as `null`
+   * and are never injected into agent environments.
+   */
   readonly expiresAt?: string;
 }
 
-export interface SecretRecord extends SecretMetadata {
-  /** Raw secret value (only present inside the vault or when explicitly requested). */
-  readonly value: string;
+/** Optional write-time attributes for {@link SecretsVaultPort.storeSecret}. */
+export interface SecretWriteOptions {
+  /** Human-readable description. */
+  readonly description?: string;
+  /** ISO-8601 expiration timestamp. */
+  readonly expiresAt?: string;
 }
 
 export interface SecretCapturePrompt {
@@ -58,10 +64,13 @@ export interface SecretsVaultPort {
     name: string,
     value: string,
     scope: SecretScope,
-    description?: string,
+    options?: SecretWriteOptions,
   ): Promise<void> | void;
 
-  /** Retrieve the decrypted secret value by name. */
+  /**
+   * Retrieve the decrypted secret value by name. Returns `null` when the
+   * secret is absent, undecryptable, or past its `expiresAt`.
+   */
   getSecretValue(name: string): Promise<string | null> | string | null;
 
   /** List metadata for all stored secrets (NEVER reveals values). */
@@ -73,6 +82,9 @@ export interface SecretsVaultPort {
   /** Delete a secret from the vault. */
   deleteSecret(name: string): Promise<boolean> | boolean;
 
-  /** List all secret values for redaction purposes. */
+  /**
+   * List all secret values for redaction purposes. Includes expired and
+   * revoked-in-place values so output scrubbing still masks them.
+   */
   listSecretValues(): Promise<readonly string[]> | readonly string[];
 }

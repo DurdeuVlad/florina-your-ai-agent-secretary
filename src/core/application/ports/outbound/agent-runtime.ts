@@ -43,6 +43,11 @@ export interface SessionConfig {
    * wire format; adapters that cannot register MCP servers ignore it.
    */
   readonly mcpServers?: readonly McpServerSpec[];
+  /**
+   * Environment variables injected into the agent session (e.g. from secrets vault,
+   * issue #172). Keys and values injected at spawn time without leaking to journals.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**

@@ -3,10 +3,13 @@
  *
  * Verifies:
  * - Secretary-prompted credential capture with masked input flag.
- * - Encrypted at rest in ~/.florina/secrets.enc (AES-256-GCM + PBKDF2).
+ * - Encrypted at rest in ~/.florina/secrets.enc (AES-256-GCM; master key held
+ *   by the OS credential vault via CredentialBroker).
  * - Scoped allowlist injection (provider x project scope).
  * - Injection, not exposure (env-var injection; values never logged to journal).
  * - Redaction of secret strings from output streams.
+ * - Expiration: expired secrets are never read or injected.
+ * - Corrupt vault files are preserved, never silently overwritten.
  * - Audit logging with DEC-012 immutable event journal.
  * - Revocation and rotation of secrets.
  * - Real SQLite StorageDatabase integration with foreign_keys = ON.
@@ -17,13 +20,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import type { EntityId, Event } from '../src/core/domain/types.js';
+import type { AgentProgressEvent, SupervisorEvent } from '../src/core/domain/events.js';
 import type { EventJournalPort } from '../src/core/application/ports/outbound/repositories.js';
-import {
-  EncryptedFileSecretsVault,
-} from '../src/adapters/outbound/credentials/encrypted-file-secrets-vault.js';
-import {
-  SecretsVaultService,
-} from '../src/core/application/use-cases/security/secrets-vault-service.js';
+import type { EventPublisherPort } from '../src/core/application/ports/outbound/event-stream.js';
+import { EncryptedFileSecretsVault } from '../src/adapters/outbound/credentials/encrypted-file-secrets-vault.js';
+import { CredentialBroker } from '../src/adapters/outbound/credentials/os-credential-vault.js';
+import { SecretsVaultService } from '../src/core/application/use-cases/security/secrets-vault-service.js';
 
 class InMemoryEventJournal implements EventJournalPort {
   readonly events: Event[] = [];
@@ -70,7 +72,7 @@ describe('Secrets Vault (issue #172)', () => {
     it('stores secrets encrypted at rest — raw value never appears in file', () => {
       const vault = new EncryptedFileSecretsVault({
         filePath: secretsFilePath,
-        machineKeyMaterial: 'test-machine-key-12345',
+        masterKey: 'test-machine-key-12345',
       });
 
       const rawSecret = 'ghp_very_sensitive_personal_token_abcdef123456';
@@ -96,7 +98,6 @@ describe('Secrets Vault (issue #172)', () => {
       expect(fileContents).toContain('ciphertext');
       expect(fileContents).toContain('iv');
       expect(fileContents).toContain('authTag');
-      expect(fileContents).toContain('salt');
 
       // Decryption retrieves original secret
       const decrypted = vault.getSecretValue('github-token');
@@ -106,7 +107,7 @@ describe('Secrets Vault (issue #172)', () => {
     it('returns null when decipher fails due to invalid key or tampered ciphertext', () => {
       const vault1 = new EncryptedFileSecretsVault({
         filePath: secretsFilePath,
-        machineKeyMaterial: 'correct-machine-key',
+        masterKey: 'correct-machine-key',
       });
 
       vault1.storeSecret('api-key', 'sk-super-secret-key-999', {});
@@ -114,7 +115,7 @@ describe('Secrets Vault (issue #172)', () => {
       // Instantiate vault with a different machine key
       const vaultWrongKey = new EncryptedFileSecretsVault({
         filePath: secretsFilePath,
-        machineKeyMaterial: 'different-machine-key',
+        masterKey: 'different-machine-key',
       });
 
       // Decryption with wrong key fails gracefully returning null (no throw)
@@ -124,7 +125,7 @@ describe('Secrets Vault (issue #172)', () => {
     it('lists secret metadata without exposing secret values', () => {
       const vault = new EncryptedFileSecretsVault({
         filePath: secretsFilePath,
-        machineKeyMaterial: 'test-key',
+        masterKey: 'test-key',
       });
 
       vault.storeSecret('sec-1', 'val-1', { provider: 'claude-code' });
@@ -144,7 +145,7 @@ describe('Secrets Vault (issue #172)', () => {
     it('deletes secret cleanly from store', () => {
       const vault = new EncryptedFileSecretsVault({
         filePath: secretsFilePath,
-        machineKeyMaterial: 'test-key',
+        masterKey: 'test-key',
       });
 
       vault.storeSecret('temp-secret', 'temporary-val', {});
@@ -156,6 +157,83 @@ describe('Secrets Vault (issue #172)', () => {
       expect(vault.listSecretMetadata()).toHaveLength(0);
 
       expect(vault.deleteSecret('temp-secret')).toBe(false);
+    });
+
+    it('persists the master key in the credential vault across instances', () => {
+      const broker = new CredentialBroker({
+        backend: 'file',
+        fileStoreDir: path.join(tmpDir, 'credentials'),
+      });
+
+      const vault1 = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        credentialBroker: broker,
+      });
+      vault1.storeSecret('shared-secret', 'shared-value-abc', {});
+
+      // A new vault instance on the same machine decrypts via the broker-held key.
+      const vault2 = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        credentialBroker: broker,
+      });
+      expect(vault2.getSecretValue('shared-secret')).toBe('shared-value-abc');
+
+      // A vault on a "different machine" (different credential store) cannot.
+      const foreignBroker = new CredentialBroker({
+        backend: 'file',
+        fileStoreDir: path.join(tmpDir, 'other-machine-credentials'),
+      });
+      const foreignVault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        credentialBroker: foreignBroker,
+      });
+      expect(foreignVault.getSecretValue('shared-secret')).toBeNull();
+    });
+
+    it('preserves an unreadable vault file instead of overwriting it', () => {
+      fs.writeFileSync(secretsFilePath, 'not-json{{{', 'utf8');
+
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
+      expect(vault.listSecretMetadata()).toHaveLength(0);
+
+      // The corrupt file was moved aside for manual recovery.
+      const corrupt = fs.readdirSync(tmpDir).filter((f) => f.startsWith('secrets.enc.corrupt-'));
+      expect(corrupt).toHaveLength(1);
+      expect(fs.readFileSync(path.join(tmpDir, corrupt[0]), 'utf8')).toBe('not-json{{{');
+
+      // The vault still accepts new secrets afterwards.
+      vault.storeSecret('fresh', 'fresh-value', {});
+      expect(vault.getSecretValue('fresh')).toBe('fresh-value');
+    });
+
+    it('never reads or injects expired secrets', async () => {
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
+      vault.storeSecret(
+        'expired-secret',
+        'expired-value-xyz',
+        { envVarName: 'EXPIRED_KEY' },
+        { expiresAt: '2000-01-01T00:00:00.000Z' },
+      );
+
+      // Read path returns null for expired secrets.
+      expect(vault.getSecretValue('expired-secret')).toBeNull();
+      // Metadata still reflects the stored expiry.
+      expect(vault.getSecretMetadata('expired-secret')?.expiresAt).toBe('2000-01-01T00:00:00.000Z');
+
+      // Expired secrets are not injected into agent environments.
+      const service = new SecretsVaultService({ vault });
+      const inj = await service.resolveInjections({});
+      expect(inj['EXPIRED_KEY']).toBeUndefined();
+
+      // But redaction still masks the expired value in output streams.
+      const redacted = await service.redact('leak: expired-value-xyz here');
+      expect(redacted).toBe('leak: [REDACTED_SECRET] here');
     });
   });
 
@@ -329,31 +407,102 @@ describe('Secrets Vault (issue #172)', () => {
       expect(eventJournal.events[0].payload['action']).toBe('secret_revoked');
       expect(eventJournal.events[0].payload['secretName']).toBe('revokable-key');
     });
+
+    it('redacts substrings without leaking suffixes when one secret is a prefix of another', async () => {
+      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const service = new SecretsVaultService({ vault });
+
+      // Register short secret first, then long secret with short secret as prefix
+      await service.captureSecret({
+        name: 'prefix-token',
+        value: 'token123',
+        scope: {},
+      });
+      await service.captureSecret({
+        name: 'full-token',
+        value: 'token123_prod_api_key',
+        scope: {},
+      });
+
+      const log = 'Auth headers: token123_prod_api_key and also token123 alone';
+      const redacted = await service.redact(log);
+
+      // Must NOT be "[REDACTED_SECRET]_prod_api_key"
+      expect(redacted).not.toContain('_prod_api_key');
+      expect(redacted).toBe('Auth headers: [REDACTED_SECRET] and also [REDACTED_SECRET] alone');
+    });
+
+    it('prioritizes specific scope over broad scope for identical environment variable', async () => {
+      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const service = new SecretsVaultService({ vault });
+
+      // Global default
+      await service.captureSecret({
+        name: 'global-gh',
+        value: 'ghp_global_default',
+        scope: { envVarName: 'GITHUB_TOKEN' },
+      });
+
+      // Project-specific override
+      await service.captureSecret({
+        name: 'proj-gh',
+        value: 'ghp_project_specific',
+        scope: { projectId: 'project-special', envVarName: 'GITHUB_TOKEN' },
+      });
+
+      // General context receives global default
+      const generalInj = await service.resolveInjections({ projectId: 'project-other' });
+      expect(generalInj['GITHUB_TOKEN']).toBe('ghp_global_default');
+
+      // Specific project receives the project override
+      const specialInj = await service.resolveInjections({ projectId: 'project-special' });
+      expect(specialInj['GITHUB_TOKEN']).toBe('ghp_project_specific');
+    });
+
+    it('broadcasts audit events to eventBus when provided', async () => {
+      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const published: SupervisorEvent[] = [];
+      const eventBus: EventPublisherPort = {
+        publish: (evt: SupervisorEvent) => {
+          published.push(evt);
+          return published.length;
+        },
+      };
+
+      const service = new SecretsVaultService({ vault, eventBus });
+
+      await service.captureSecret({
+        name: 'bus-token',
+        value: 'bus-val-12345',
+        scope: { envVarName: 'BUS_TOKEN' },
+        context: { taskId: 'task-b', sessionId: 'sess-b' },
+      });
+
+      expect(published).toHaveLength(1);
+      const pub = published[0] as AgentProgressEvent;
+      expect(pub.type).toBe('AgentProgress');
+      expect(pub.message).toContain('bus-token');
+      expect(pub.taskId).toBe('task-b');
+      expect(pub.sessionId).toBe('sess-b');
+    });
   });
 
   describe('INTEGRATION: SecretsVaultService with real SQLite StorageDatabase', () => {
     it('journals audit events into real SQLite database with foreign_keys ON', async () => {
-      const { StorageDatabase } = await import(
-        '../src/adapters/outbound/persistence/sqlite/database.js'
-      );
-      const { AgentRepository } = await import(
-        '../src/adapters/outbound/persistence/sqlite/repositories/agent.js'
-      );
-      const { EventRepository } = await import(
-        '../src/adapters/outbound/persistence/sqlite/repositories/event.js'
-      );
-      const { ProjectRepository } = await import(
-        '../src/adapters/outbound/persistence/sqlite/repositories/project.js'
-      );
-      const { TaskRepository } = await import(
-        '../src/adapters/outbound/persistence/sqlite/repositories/task.js'
-      );
-      const { SessionRepository } = await import(
-        '../src/adapters/outbound/persistence/sqlite/repositories/session.js'
-      );
-      const { buildAgent, buildProject, buildTask, buildSession } = await import(
-        '../src/core/domain/factories.js'
-      );
+      const { StorageDatabase } =
+        await import('../src/adapters/outbound/persistence/sqlite/database.js');
+      const { AgentRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/agent.js');
+      const { EventRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/event.js');
+      const { ProjectRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/project.js');
+      const { TaskRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/task.js');
+      const { SessionRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/session.js');
+      const { buildAgent, buildProject, buildTask, buildSession } =
+        await import('../src/core/domain/factories.js');
 
       const db = new StorageDatabase({ path: ':memory:' });
       await db.open();
@@ -415,6 +564,37 @@ describe('Secrets Vault (issue #172)', () => {
         for (const evt of taskEvents) {
           expect(JSON.stringify(evt.payload)).not.toContain('super-db-password-12345');
         }
+      } finally {
+        db.close();
+      }
+    });
+
+    it('gracefully handles missing or invalid foreign key context without throwing', async () => {
+      const { StorageDatabase } =
+        await import('../src/adapters/outbound/persistence/sqlite/database.js');
+      const { EventRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/event.js');
+
+      const db = new StorageDatabase({ path: ':memory:' });
+      await db.open();
+
+      try {
+        const eventRepo = new EventRepository(db.connection);
+        const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+        const service = new SecretsVaultService({
+          vault,
+          eventJournal: eventRepo,
+        });
+
+        // Non-existent task and session IDs would violate foreign keys if not guarded
+        await expect(
+          service.captureSecret({
+            name: 'uncommitted-secret',
+            value: 'uncommitted-val',
+            scope: {},
+            context: { taskId: 'non-existent-task', sessionId: 'non-existent-session' },
+          }),
+        ).resolves.toBeDefined();
       } finally {
         db.close();
       }
