@@ -12,6 +12,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // require('electron') in the main process resolves to the real API object;
@@ -51,20 +52,32 @@ loadEnvFile();
 
 const DAEMON_URL = process.env['FLORINA_DAEMON_URL'] ?? 'ws://127.0.0.1:17419';
 
-/** Absolute path to the bundled renderer (served from the source tree). */
-const RENDERER_HTML = fileURLToPath(
-  new URL('../../src/adapters/inbound/desktop/renderer/index.html', import.meta.url),
-);
+/**
+ * Resolve a renderer asset path for both development and packaged modes
+ * (issue #171, DEC-028).
+ *
+ * Dev: `dist/bootstrap/desktop.js` → source tree is two dirs up.
+ * Packaged: electron-builder copies renderer assets to
+ * `<resources>/renderer/` via `extraResources` in electron-builder.yml;
+ * `process.resourcesPath` is the path to that resources directory.
+ */
+function resolveRendererAsset(relativePath: string): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'renderer', relativePath);
+  }
+  return fileURLToPath(
+    new URL(`../../src/adapters/inbound/desktop/renderer/${relativePath}`, import.meta.url),
+  );
+}
+
+/** Absolute path to the bundled renderer HTML. */
+const RENDERER_HTML = resolveRendererAsset('index.html');
 
 /** CJS preload exposing the whitelisted `window.florina` bridge API. */
-const PRELOAD = fileURLToPath(
-  new URL('../../src/adapters/inbound/desktop/renderer/preload.cjs', import.meta.url),
-);
+const PRELOAD = resolveRendererAsset('preload.cjs');
 
-/** Voice-mode full-window overlay (#182) — served from the source tree. */
-const VOICE_OVERLAY_HTML = fileURLToPath(
-  new URL('../../src/adapters/inbound/desktop/renderer/voice-overlay.html', import.meta.url),
-);
+/** Voice-mode full-window overlay (#182). */
+const VOICE_OVERLAY_HTML = resolveRendererAsset('voice-overlay.html');
 
 /** Repo root — used to resolve the CLI entry for tray daemon actions. */
 const CLI_ENTRY = fileURLToPath(new URL('../cli/index.js', import.meta.url));

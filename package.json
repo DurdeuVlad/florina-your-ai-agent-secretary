@@ -19,6 +19,8 @@
     "typecheck": "tsc --noEmit",
     "desktop": "node scripts/desktop.mjs",
     "visual-qa": "node scripts/visual-qa.mjs",
+    "dist": "npm run build && electron-builder",
+    "dist:dir": "npm run build && electron-builder --dir",
     "postinstall": "node scripts/ensure-electron.mjs"
   },
   "keywords": [
@@ -37,6 +39,7 @@
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "electron": "44.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.16.0",
     "eslint-config-prettier": "^9.1.0",
     "globals": "^15.15.0",

@@ -1,0 +1,56 @@
+appId: com.florina.app
+productName: Florina
+copyright: Copyright © 2024 Florina contributors
+
+# Build output goes to release/ (not dist/ which is tsc output).
+directories:
+  output: release
+  buildResources: assets
+
+# Include the compiled TypeScript output plus the renderer source tree.
+# The renderer HTML/JS/CSS is loaded from extraResources in packaged mode.
+files:
+  - dist/**
+  - node_modules/**
+  - "!node_modules/electron/**"
+  - "!node_modules/electron-builder/**"
+  - "!node_modules/.cache/**"
+
+# Bundle the renderer assets into the app's resources directory so the
+# main process can locate them with app.getPath('exe') + extraResourcesPath.
+extraResources:
+  - from: src/adapters/inbound/desktop/renderer
+    to: renderer
+    filter:
+      - "**/*.html"
+      - "**/*.js"
+      - "**/*.css"
+      - "**/*.cjs"
+
+win:
+  # NSIS installer is the standard for Windows desktop distribution.
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Florina
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: assets/icon.png
+  category: public.app-category.developer-tools
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  icon: assets/icon.png
+  category: Development

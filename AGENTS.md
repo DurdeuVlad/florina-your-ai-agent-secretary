@@ -38,17 +38,19 @@ Guidance for coding agents (and humans) working in this repository.
 
 ## Commands
 
-| Task             | Command                |
-| ---------------- | ---------------------- |
-| Install deps     | `npm install`          |
-| Build            | `npm run build`        |
-| Typecheck only   | `npm run typecheck`    |
-| Run tests        | `npm test`             |
-| Watch tests      | `npm run test:watch`   |
-| Lint             | `npm run lint`         |
-| Lint (autofix)   | `npm run lint:fix`     |
-| Format           | `npm run format`       |
-| Check formatting | `npm run format:check` |
+| Task                    | Command                    |
+| ----------------------- | -------------------------- |
+| Install deps            | `npm install`              |
+| Build                   | `npm run build`            |
+| Typecheck only          | `npm run typecheck`        |
+| Run tests               | `npm test`                 |
+| Watch tests             | `npm run test:watch`       |
+| Lint                    | `npm run lint`             |
+| Lint (autofix)          | `npm run lint:fix`         |
+| Format                  | `npm run format`           |
+| Check formatting        | `npm run format:check`     |
+| Package desktop (all)   | `npm run dist`             |
+| Package desktop (unpack)| `npm run dist:dir`         |
 
 ## Project Layout
 
@@ -170,5 +172,10 @@ journaled into the same chat thread (#162). Desktop-local preferences — mic
 device, voice-mode default, dictation language — persist to
 `~/.florina/desktop-settings.json` via the `deskset:` verb (#163).
 
-**Remaining gap** (issue #43 stays open for this): OS-native packaging /
-distribution (DEC-028 milestone).
+**OS-native packaging implemented** (issue #171, DEC-028): `electron-builder`
+produces platform-native installers via `npm run dist` (NSIS on Windows, DMG
+on macOS, AppImage on Linux). Renderer assets are bundled via `extraResources`
+and located at runtime through `resolveRendererAsset()` in
+`src/bootstrap/desktop.ts` which branches on `app.isPackaged`. A
+`.github/workflows/release.yml` CI job builds all three platforms and attaches
+the installers to GitHub Releases when a `v*` tag is pushed.
