@@ -154,6 +154,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
   private ownEventSink: HookEventSink | null = null;
   private activeSession: SessionConfig | null = null;
   private mapperCtx: ClaudeHooksMapperContext | null = null;
+  private sessionHooksDir: string | null = null;
 
   /** Internal queue of mapped SupervisorEvents awaiting streamEvents. */
   private eventQueue: SupervisorEvent[] = [];
@@ -211,30 +212,33 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       autonomyLevel: sessionConfig.autonomyLevel,
     });
 
-    // Configure scoped hooks in the task worktree (.claude/settings.json).
-    let settingsPathWritten: string | null = null;
-    try {
+    // Configure scoped hooks in an isolated temp directory passed via --settings (DEC-024, DEC-011).
+    let settingsPath: string | null = null;
+    const sink = this.options.eventSink ?? this.ownEventSink;
+    const sinkPath = sink?.filePath;
+    let hookCmd = this.options.hookCommand;
+
+    if (sinkPath || hookCmd) {
       const { promises: fs } = await import('node:fs');
       const { join } = await import('node:path');
-      const claudeDir = join(sessionConfig.workingDir, '.claude');
-      await fs.mkdir(claudeDir, { recursive: true });
+      const { tmpdir } = await import('node:os');
 
-      const sink = this.options.eventSink ?? this.ownEventSink;
-      const sinkPath = sink?.filePath;
+      const hooksDir = join(tmpdir(), `florina-claude-hooks-${sessionConfig.sessionId}`);
+      await fs.mkdir(hooksDir, { recursive: true });
+      this.sessionHooksDir = hooksDir;
 
-      let hookCmd = this.options.hookCommand;
       if (!hookCmd && sinkPath) {
-        const forwarderPath = join(claudeDir, 'forwarder.cjs');
+        const forwarderPath = join(hooksDir, 'forwarder.cjs');
         const forwarderCode = [
           "const fs = require('node:fs');",
           'try {',
           "  const input = fs.readFileSync(0, 'utf8').trim();",
           '  if (input.length > 0) {',
-          '    const sink = process.argv[2];',
-          '    if (sink) {',
-          "      fs.appendFileSync(sink, input + '\\n', 'utf8');",
-          '    }',
           '    const parsed = JSON.parse(input);',
+          '    const sink = process.argv[2];',
+          '    if (sink && parsed) {',
+          "      fs.appendFileSync(sink, JSON.stringify(parsed) + '\\n', 'utf8');",
+          '    }',
           "    if (parsed && parsed.hook_event_name === 'PermissionRequest') {",
           '      process.stdout.write(JSON.stringify({',
           '        hookSpecificOutput: {',
@@ -248,36 +252,23 @@ export class ClaudeHooksAdapter extends BaseAdapter {
           'process.exit(0);',
         ].join('\n');
         await fs.writeFile(forwarderPath, forwarderCode, 'utf8');
-        hookCmd = `node "${forwarderPath.replace(/\\/g, '/')}" "${sinkPath.replace(/\\/g, '/')}"`;
+        const nodeExe = process.env.FLORINA_NODE_PATH || 'node';
+        hookCmd = `${nodeExe} "${forwarderPath.replace(/\\/g, '/')}" "${sinkPath.replace(/\\/g, '/')}"`;
       }
 
       if (hookCmd) {
         const hooksConfig = buildHooksConfig(hookCmd);
-        const settingsPath = join(claudeDir, 'settings.json');
-        let existingSettings: Record<string, unknown> = {};
-        try {
-          const content = await fs.readFile(settingsPath, 'utf8');
-          existingSettings = JSON.parse(content) as Record<string, unknown>;
-        } catch {
-          // No existing settings or invalid JSON; start clean.
-        }
-        existingSettings.hooks = {
-          ...((existingSettings.hooks as Record<string, unknown>) || {}),
-          ...hooksConfig,
-        };
-        await fs.writeFile(settingsPath, JSON.stringify(existingSettings, null, 2), 'utf8');
-        settingsPathWritten = settingsPath;
+        settingsPath = join(hooksDir, 'settings.json');
+        await fs.writeFile(settingsPath, JSON.stringify({ hooks: hooksConfig }, null, 2), 'utf8');
       }
-    } catch {
-      // Gracefully continue if workingDir is virtual or unwritable in tests.
     }
 
     // Spawn the CLI in headless (print) mode with the objective as a prompt.
     const spawner = this.options.spawner ?? (await createNodeCliSpawner());
     const baseArgs = this.options.args ?? [];
     const cliArgs = ['-p'];
-    if (settingsPathWritten && !baseArgs.includes('--settings')) {
-      cliArgs.push('--settings', settingsPathWritten);
+    if (settingsPath && !baseArgs.includes('--settings')) {
+      cliArgs.push('--settings', settingsPath);
     }
     cliArgs.push(sessionConfig.objective, ...baseArgs);
     this.cliProcess = spawner.spawn({
@@ -341,6 +332,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       this.completeStream();
     }
     this.activeSession = null;
+    void this.cleanupHooksDir();
   }
 
   async disconnect(): Promise<void> {
@@ -359,8 +351,22 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       this.ownEventSink.close();
       this.ownEventSink = null;
     }
+    await this.cleanupHooksDir();
     if (this.connectionState !== 'disconnected') {
       this.setConnectionState('disconnected');
+    }
+  }
+
+  private async cleanupHooksDir(): Promise<void> {
+    if (this.sessionHooksDir) {
+      const dir = this.sessionHooksDir;
+      this.sessionHooksDir = null;
+      try {
+        const { promises: fs } = await import('node:fs');
+        await fs.rm(dir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup
+      }
     }
   }
 
@@ -451,6 +457,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
     }
     this.completeStream();
     this.activeSession = null;
+    void this.cleanupHooksDir();
   }
 
   /* ---------------------------------------------------------------- *

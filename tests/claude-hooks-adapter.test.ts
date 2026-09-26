@@ -958,55 +958,56 @@ describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
   });
 
   describe('scoped hooks configuration and forwarder (issue #177)', () => {
-    it('writes .claude/settings.json and forwarder.cjs in a real worktree directory', async () => {
-      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-hooks-test-'));
+    it('writes settings.json and forwarder.cjs in an isolated temp directory, keeping workingDir clean (DEC-024)', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-workdir-'));
       try {
         const spawner = new MockCliSpawner();
         const adapter = new ClaudeHooksAdapter(null, { spawner });
         await adapter.connect();
 
         const config: SessionConfig = {
-          taskId: 'task-real-dir-1',
-          sessionId: 'sess-real-dir-1',
+          taskId: 'task-clean-dir-1',
+          sessionId: 'sess-clean-dir-1',
           agentId: 'claude-code',
-          workingDir: tempDir,
-          objective: 'Test hooks writing',
+          workingDir: workDir,
+          objective: 'Test clean working directory',
         };
 
-        await adapter.startRun('task-real-dir-1', config);
+        await adapter.startRun('task-clean-dir-1', config);
 
-        // Verify .claude/settings.json exists
-        const settingsPath = path.join(tempDir, '.claude', 'settings.json');
+        // Verify the worktree was NOT polluted with any .claude directory (DEC-024)
+        const claudeDirInWorktree = path.join(workDir, '.claude');
+        const worktreeHasClaude = await fs
+          .access(claudeDirInWorktree)
+          .then(() => true)
+          .catch(() => false);
+        expect(worktreeHasClaude).toBe(false);
+
+        // Verify --settings argument was passed to CLI pointing to isolated temp dir
+        expect(spawner.spawnCalls).toHaveLength(1);
+        const spawnArgs = spawner.spawnCalls[0].args;
+        expect(spawnArgs).toContain('--settings');
+        const settingsIdx = spawnArgs.indexOf('--settings');
+        const settingsPath = spawnArgs[settingsIdx + 1];
+        expect(settingsPath).toBeDefined();
+
+        // Verify settings.json exists in temp dir and has all hook events
         const settingsContent = await fs.readFile(settingsPath, 'utf8');
         const parsedSettings = JSON.parse(settingsContent) as Record<string, unknown>;
-
         expect(parsedSettings.hooks).toBeDefined();
         const hooksMap = parsedSettings.hooks as Record<string, unknown>;
         for (const hookName of CLAUDE_HOOK_EVENT_NAMES) {
           expect(hooksMap[hookName]).toBeDefined();
         }
 
-        // Verify .claude/forwarder.cjs exists
-        const forwarderPath = path.join(tempDir, '.claude', 'forwarder.cjs');
-        const forwarderContent = await fs.readFile(forwarderPath, 'utf8');
-        expect(forwarderContent).toContain('fs.appendFileSync');
-        expect(forwarderContent).toContain('PermissionRequest');
-        expect(forwarderContent).toContain('permissionDecision');
-
-        // Verify --settings argument was passed to CLI
-        expect(spawner.spawnCalls).toHaveLength(1);
-        expect(spawner.spawnCalls[0].args).toContain('--settings');
-        expect(spawner.spawnCalls[0].args).toContain(settingsPath);
-        expect(spawner.spawnCalls[0].args).toContain('Test hooks writing');
-
         await adapter.disconnect();
       } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fs.rm(workDir, { recursive: true, force: true });
       }
     });
 
-    it('forwarder.cjs appends stdin events to the sink file and denies PermissionRequest', async () => {
-      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-forwarder-test-'));
+    it('forwarder.cjs normalizes multi-line JSON to a single line and denies PermissionRequest', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-fwd-test-'));
       try {
         const spawner = new MockCliSpawner();
         const adapter = new ClaudeHooksAdapter(null, { spawner });
@@ -1016,12 +1017,13 @@ describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
           taskId: 'task-fwd-1',
           sessionId: 'sess-fwd-1',
           agentId: 'claude-code',
-          workingDir: tempDir,
+          workingDir: workDir,
           objective: 'Test forwarder execution',
         };
         await adapter.startRun('task-fwd-1', config);
 
-        const settingsPath = path.join(tempDir, '.claude', 'settings.json');
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
         const parsedSettings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<
           string,
           Record<string, Array<{ hooks: Array<{ command: string }> }>>
@@ -1033,35 +1035,44 @@ describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
         expect(matches.length).toBeGreaterThanOrEqual(2);
         const [forwarderPath, sinkPath] = matches;
 
-        // 1. Test regular event forwarding (e.g. PreToolUse)
-        const toolEvent = {
-          hook_event_name: 'PreToolUse',
-          session_id: 'sess-fwd-1',
-          cwd: tempDir,
-          tool_name: 'Bash',
-          tool_input: { command: 'echo 42' },
-        };
+        // 1. Test multi-line / pretty-printed JSON forwarding: must become a single line in sink
+        const multiLineToolEvent = JSON.stringify(
+          {
+            hook_event_name: 'PreToolUse',
+            session_id: 'sess-fwd-1',
+            cwd: workDir,
+            tool_name: 'Bash',
+            tool_input: {
+              command: 'echo "hello\nworld"',
+              nested: { foo: 'bar' },
+            },
+          },
+          null,
+          2,
+        );
         const run1 = spawnSync(process.execPath, [forwarderPath, sinkPath], {
-          input: JSON.stringify(toolEvent) + '\n',
+          input: multiLineToolEvent,
           encoding: 'utf8',
         });
         expect(run1.status).toBe(0);
 
-        // Check sink file contains the event
+        // Check sink file contains exactly one non-empty line for this event
         const sinkContent1 = await fs.readFile(sinkPath, 'utf8');
-        expect(sinkContent1).toContain('"hook_event_name":"PreToolUse"');
-        expect(sinkContent1).toContain('echo 42');
+        const lines = sinkContent1.trim().split('\n');
+        expect(lines).toHaveLength(1);
+        const parsedSinkLine = JSON.parse(lines[0]) as Record<string, unknown>;
+        expect(parsedSinkLine.hook_event_name).toBe('PreToolUse');
 
-        // 2. Test PermissionRequest: must append to sink AND output deny to stdout
+        // 2. Test PermissionRequest: must append to sink AND output deny to stdout (DEC-011)
         const permEvent = {
           hook_event_name: 'PermissionRequest',
           session_id: 'sess-fwd-1',
-          cwd: tempDir,
+          cwd: workDir,
           tool_name: 'Bash',
           tool_input: { command: 'rm -rf /' },
         };
         const run2 = spawnSync(process.execPath, [forwarderPath, sinkPath], {
-          input: JSON.stringify(permEvent) + '\n',
+          input: JSON.stringify(permEvent),
           encoding: 'utf8',
         });
         expect(run2.status).toBe(0);
@@ -1072,55 +1083,124 @@ describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
         expect(stdoutParsed.hookSpecificOutput.permissionDecision).toBe('deny');
         expect(stdoutParsed.hookSpecificOutput.permissionDecisionReason).toContain('DEC-011');
 
-        // Check sink file also recorded the PermissionRequest
+        // Check sink file recorded the PermissionRequest as a second line
         const sinkContent2 = await fs.readFile(sinkPath, 'utf8');
-        expect(sinkContent2).toContain('"hook_event_name":"PermissionRequest"');
+        const lines2 = sinkContent2.trim().split('\n');
+        expect(lines2).toHaveLength(2);
 
         await adapter.disconnect();
       } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fs.rm(workDir, { recursive: true, force: true });
       }
     });
 
-    it('merges hooks into existing .claude/settings.json preserving existing keys', async () => {
-      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-merge-test-'));
+    it('end-to-end: forwarder writes events into real file sink and adapter streams them', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-e2e-'));
       try {
-        const claudeDir = path.join(tempDir, '.claude');
-        await fs.mkdir(claudeDir, { recursive: true });
-        const existingSettings = {
-          model: 'claude-opus-4',
-          customKey: 'preserve-me',
-        };
-        await fs.writeFile(
-          path.join(claudeDir, 'settings.json'),
-          JSON.stringify(existingSettings, null, 2),
-          'utf8',
-        );
-
         const spawner = new MockCliSpawner();
         const adapter = new ClaudeHooksAdapter(null, { spawner });
         await adapter.connect();
 
         const config: SessionConfig = {
-          taskId: 'task-merge-1',
-          sessionId: 'sess-merge-1',
+          taskId: 'task-e2e-1',
+          sessionId: 'sess-e2e-1',
           agentId: 'claude-code',
-          workingDir: tempDir,
-          objective: 'Test merging settings',
+          workingDir: workDir,
+          objective: 'Test e2e streaming',
         };
-        await adapter.startRun('task-merge-1', config);
+        await adapter.startRun('task-e2e-1', config);
 
-        const mergedSettings = JSON.parse(
-          await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf8'),
-        );
-        expect(mergedSettings.model).toBe('claude-opus-4');
-        expect(mergedSettings.customKey).toBe('preserve-me');
-        expect(mergedSettings.hooks).toBeDefined();
-        expect(mergedSettings.hooks.SessionStart).toBeDefined();
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
+        const parsedSettings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<
+          string,
+          Record<string, Array<{ hooks: Array<{ command: string }> }>>
+        >;
+        const commandStr: string = parsedSettings.hooks.PreToolUse[0].hooks[0].command;
+        const matches = [...commandStr.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+        const [forwarderPath, sinkPath] = matches;
+
+        // Start listening to the event stream
+        const eventStream = adapter.streamEvents();
+        const collectedEventsPromise = (async () => {
+          const events: SupervisorEvent[] = [];
+          for await (const ev of eventStream) {
+            events.push(ev);
+            if (ev.type === 'ToolStarted') {
+              break; // Stop after receiving the forwarded tool event
+            }
+          }
+          return events;
+        })();
+
+        // Invoke forwarder with a PreToolUse hook event
+        spawnSync(process.execPath, [forwarderPath, sinkPath], {
+          input: JSON.stringify({
+            hook_event_name: 'PreToolUse',
+            session_id: 'sess-e2e-1',
+            cwd: workDir,
+            tool_name: 'Bash',
+            tool_input: { command: 'git status' },
+          }),
+          encoding: 'utf8',
+        });
+
+        const received = await collectedEventsPromise;
+        const types = received.map((e) => e.type);
+        expect(types).toContain('AgentStarted');
+        expect(types).toContain('ToolStarted');
+
+        const toolEvent = received.find((e) => e.type === 'ToolStarted');
+        expect(toolEvent).toBeDefined();
+        if (toolEvent && toolEvent.type === 'ToolStarted') {
+          expect(toolEvent.toolName).toBe('Bash');
+        }
 
         await adapter.disconnect();
       } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fs.rm(workDir, { recursive: true, force: true });
+      }
+    });
+
+    it('cleans up temporary hooks directory on disconnect', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-cleanup-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-clean-1',
+          sessionId: 'sess-clean-1',
+          agentId: 'claude-code',
+          workingDir: workDir,
+          objective: 'Test cleanup',
+        };
+        await adapter.startRun('task-clean-1', config);
+
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
+        const hooksDir = path.dirname(settingsPath);
+
+        // Before disconnect: hooksDir exists
+        expect(
+          await fs
+            .access(hooksDir)
+            .then(() => true)
+            .catch(() => false),
+        ).toBe(true);
+
+        await adapter.disconnect();
+
+        // After disconnect: hooksDir is cleaned up
+        expect(
+          await fs
+            .access(hooksDir)
+            .then(() => true)
+            .catch(() => false),
+        ).toBe(false);
+      } finally {
+        await fs.rm(workDir, { recursive: true, force: true });
       }
     });
 
@@ -1143,9 +1223,9 @@ describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
         };
         await adapter.startRun('task-custom-1', config);
 
-        const settings = JSON.parse(
-          await fs.readFile(path.join(tempDir, '.claude', 'settings.json'), 'utf8'),
-        );
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
+        const settings = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
         expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe('my-custom-forwarder.sh');
 
         await adapter.disconnect();
