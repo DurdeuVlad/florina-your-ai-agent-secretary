@@ -59,11 +59,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
     duration: 154000,
     summary: 'Implementation complete. 9 files, +284/-71, 23/23 tests passing.',
     filesChangedCount: 9,
-    filesChanged: [
-      'src/pagination.ts',
-      'src/pagination-view.ts',
-      'tests/pagination.test.ts',
-    ],
+    filesChanged: ['src/pagination.ts', 'src/pagination-view.ts', 'tests/pagination.test.ts'],
     testsRun: 23,
     testsPassed: 23,
     testsFailed: 0,
@@ -73,7 +69,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
     decisions: [{ id: 'DEC-007', note: 'Autonomy is user-configurable.' }],
     riskHighlights: [],
     commitHash: 'abc1234',
-    branchName: 'secretary/add-pagination',
+    branchName: 'florina/add-pagination',
     ...overrides,
   };
 }
@@ -81,7 +77,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
 /** Build a DiffDigest with sensible defaults. */
 function makeDiff(overrides: Partial<DiffDigest> = {}): DiffDigest {
   return {
-    branch: 'secretary/add-pagination',
+    branch: 'florina/add-pagination',
     baseCommit: 'base000',
     headCommit: 'head000',
     author: 'Test <test@example.com>',
@@ -159,7 +155,7 @@ describe('DigestViewModel.buildView', () => {
     expect(view.filesChangedCount).toBe(9);
     expect(view.filesChanged).toEqual(digest.filesChanged);
     expect(view.commitHash).toBe('abc1234');
-    expect(view.branchName).toBe('secretary/add-pagination');
+    expect(view.branchName).toBe('florina/add-pagination');
   });
 
   it('formats the duration as a human-readable label', () => {
@@ -332,9 +328,7 @@ describe('DiffViewModel.buildView — file grouping', () => {
   it('omits empty groups', () => {
     const view = diffViewModel.buildView(
       makeDiff({
-        changedFiles: [
-          { path: 'src/a.ts', additions: 10, deletions: 0, status: 'added' },
-        ],
+        changedFiles: [{ path: 'src/a.ts', additions: 10, deletions: 0, status: 'added' }],
       }),
     );
     expect(view.fileGroups).toHaveLength(1);
@@ -373,9 +367,7 @@ describe('diff stats calculation', () => {
   it('calculates net change as negative when deletions exceed additions', () => {
     const view = diffViewModel.buildView(
       makeDiff({
-        changedFiles: [
-          { path: 'a.ts', additions: 5, deletions: 50, status: 'modified' },
-        ],
+        changedFiles: [{ path: 'a.ts', additions: 5, deletions: 50, status: 'modified' }],
       }),
     );
     expect(view.stats.netChange).toBe(-45);
@@ -569,7 +561,7 @@ describe('diff template functions', () => {
 
   it('renderDiffView surfaces branch and head commit', () => {
     const tree = renderDiffView(view);
-    expect(tree.props!.branch).toBe('secretary/add-pagination');
+    expect(tree.props!.branch).toBe('florina/add-pagination');
     expect(tree.props!.headCommit).toBe('head000');
   });
 

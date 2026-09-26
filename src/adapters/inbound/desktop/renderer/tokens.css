@@ -1,0 +1,676 @@
+/* Florina design tokens (DG-01) — Codex/ChatGPT-desktop craft bar (#180).
+ * Production renderer stylesheet; docs/mockups/mockup.css is its twin —
+ * change a token in one, mirror it in the other. */
+:root {
+  --bg: #0b0b0c;
+  --surface: #131315;
+  --panel: #1c1c1f;
+  --panel-raised: #232327;
+  --border: #2d2d31;
+  --text: #ececf1;
+  --muted: #93939d;
+  --accent: #4f8dff;
+  --accent-contrast: #071022;
+  --green: #3fb984;
+  --amber: #e3a94a;
+  --red: #ef5959;
+  --orange: #e2814f;
+  --purple: #a98af0;
+  --slate: #7d7d87;
+  --border-hover: #3a3a40;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+  /* Motion (DG-01 §4/§6): one easing curve, three durations. Polish, not
+   * spectacle — every animation here is a quick settle, never a bounce or
+   * a loop, and prefers-reduced-motion (below) flattens all of it. */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+body {
+  font:
+    14px/1.55 -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+.shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+nav {
+  width: 216px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 18px 12px;
+  display: flex;
+  flex-direction: column;
+}
+.logo {
+  font-size: 16px;
+  font-weight: 650;
+  padding: 0 10px 18px;
+  letter-spacing: -0.1px;
+}
+.logo em {
+  color: var(--accent);
+  font-style: normal;
+}
+.navitem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 2px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.navitem.active {
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.navbadge {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 9px;
+  padding: 0 7px;
+}
+.navbadge.zero {
+  background: var(--panel-raised);
+  color: var(--muted);
+}
+/* Work view sub-tabs (issue #220): Tasks/Fleet/Ideas inside one entry
+   point, styled like a lighter-weight sibling of .navitem rather than a
+   second nav bar. */
+.worksubnav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.worksubtab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  padding: 8px 4px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.worksubtab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.worksubpanel {
+  display: none;
+}
+.worksubpanel.active {
+  display: block;
+}
+.sidefoot {
+  margin-top: auto;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+.statusline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--slate);
+}
+.dot.on {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+.dot.wait {
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+}
+.dot.err {
+  background: var(--red);
+  box-shadow: 0 0 6px var(--red);
+}
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+header {
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+header h1 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+header .sub {
+  color: var(--muted);
+  font-size: 13px;
+}
+header .spacer {
+  flex: 1;
+}
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 28px;
+}
+.column {
+  max-width: 960px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  transition: border-color 0.12s ease;
+}
+.card:hover {
+  border-color: var(--border-hover);
+}
+.card.Critical {
+  border-left-color: var(--red);
+}
+.card.High {
+  border-left-color: var(--amber);
+}
+.card.Medium {
+  border-left-color: var(--accent);
+}
+.card.Low {
+  border-left-color: var(--slate);
+}
+.card .top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.card .kind {
+  font-weight: 600;
+}
+.card .title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.card .summary {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.card .observed {
+  font-size: 12.5px;
+  margin-top: 8px;
+}
+.card .observed b {
+  color: var(--muted);
+  font-weight: 600;
+}
+.card .meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 8px;
+}
+.card .actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip.Critical {
+  color: var(--red);
+  border-color: var(--red);
+}
+.chip.High {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.chip.Medium {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.chip.Low {
+  color: var(--slate);
+}
+.chip.green {
+  color: var(--green);
+  border-color: var(--green);
+}
+.chip.amber {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.chip.purple {
+  color: var(--purple);
+  border-color: var(--purple);
+}
+.chip.red {
+  color: var(--red);
+  border-color: var(--red);
+}
+.chip.orange {
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+button {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 6px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    filter var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+button:hover {
+  filter: brightness(1.08);
+}
+button:active {
+  transform: scale(0.97);
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+button.ghost:hover {
+  border-color: var(--muted);
+  filter: none;
+}
+button.danger {
+  background: transparent;
+  color: var(--red);
+  border: 1px solid var(--red);
+}
+button.danger:hover {
+  background: rgba(239, 89, 89, 0.08);
+  filter: none;
+}
+
+.sect {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin: 22px 0 10px;
+  display: flex;
+  justify-content: space-between;
+}
+.sect .n {
+  color: var(--text);
+}
+
+.taskrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 6px;
+}
+.taskrow .obj {
+  font-weight: 600;
+}
+.taskrow .stat {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin-left: auto;
+}
+.taskrow .stat.parked {
+  color: var(--amber);
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+}
+.muted {
+  color: var(--muted);
+}
+.inferred {
+  color: var(--muted);
+  font-style: italic;
+}
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-raised);
+  overflow: hidden;
+}
+.bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.bar > i.dry {
+  background: var(--red);
+}
+.bar > i.warm {
+  background: var(--amber);
+}
+
+/* three-column inspector */
+.cols {
+  display: grid;
+  grid-template-columns: 220px 1fr 1fr;
+  gap: 14px;
+  height: 100%;
+}
+.col {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-y: auto;
+}
+.col .colhead {
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.col .row {
+  padding: 9px 14px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+.col .row.sel {
+  background: var(--panel-raised);
+  border-left: 3px solid var(--accent);
+}
+.col .row .t {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* HUD */
+.hud {
+  width: 380px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.hud .ring {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--border);
+  font-size: 16px;
+}
+.hud.listening .ring {
+  border-color: var(--accent);
+  animation: pulse 1.2s infinite;
+}
+.hud.processing .ring {
+  border-color: var(--amber);
+}
+.hud.responding .ring {
+  border-color: var(--green);
+}
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 6px rgba(79, 141, 255, 0.16);
+  }
+}
+.hud .hudtext {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.hud .hudtext b {
+  color: var(--text);
+  display: block;
+  font-size: 13px;
+}
+.bars {
+  display: inline-flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 14px;
+}
+.bars i {
+  width: 3px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+.bars i:nth-child(1) {
+  height: 6px;
+}
+.bars i:nth-child(2) {
+  height: 12px;
+}
+.bars i:nth-child(3) {
+  height: 9px;
+}
+.bars i:nth-child(4) {
+  height: 14px;
+}
+
+/* voice-mode full-window overlay (#182) — a distinct, larger takeover
+ * surface for active two-way voice turns; the small PTT HUD above stays
+ * the idle/hold-to-talk affordance. Same states as .hud, bigger canvas. */
+.voice-overlay {
+  width: 100%;
+  height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.voice-overlay .orb {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+}
+.voice-overlay.listening .orb {
+  border-color: var(--accent);
+  animation: pulse-orb 1.4s infinite;
+}
+.voice-overlay.processing .orb {
+  border-color: var(--amber);
+}
+.voice-overlay.responding .orb {
+  border-color: var(--green);
+}
+@keyframes pulse-orb {
+  50% {
+    box-shadow: 0 0 0 14px rgba(79, 141, 255, 0.16);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-overlay.listening .orb {
+    animation: none;
+  }
+}
+.voice-overlay .voice-title {
+  font-size: 17px;
+  font-weight: 650;
+}
+.voice-overlay .voice-sub {
+  max-width: 380px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  min-height: 1.5em;
+}
+.voice-overlay .voice-bars {
+  transform: scale(1.6);
+}
+
+/* entrance polish: new chat messages/tool rows/working row only — the
+ * renderer tags genuinely-new elements with .enter (by message id) so a
+ * full re-render of the same thread never replays the animation on
+ * already-seen content. One quick settle, not a bounce. */
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.msg.enter,
+.toolrow.enter,
+.workrow.enter {
+  animation: enter-up var(--dur-base) var(--ease);
+}
+/* word-reveal (chat.js): the newest assistant reply's text is split into
+ * word spans with a short stagger — a "generation" feel over an already-
+ * complete string, not real token streaming. Capped total duration keeps
+ * long replies from crawling in. */
+@keyframes word-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.msg .w {
+  display: inline-block;
+  opacity: 0;
+  animation: word-in var(--dur-fast) var(--ease) forwards;
+}
+
+/* gallery */
+.gallery {
+  padding: 40px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.gallery h1 {
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+.gallery p {
+  color: var(--muted);
+  margin-bottom: 28px;
+}
+.gallery a {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  margin-bottom: 10px;
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.12s ease;
+}
+.gallery a:hover {
+  border-color: var(--accent);
+}
+.gallery a b {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+.gallery a span {
+  color: var(--muted);
+  font-size: 13px;
+}

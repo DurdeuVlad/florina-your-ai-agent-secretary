@@ -1,6 +1,6 @@
-# Agent Secretary: Deep Research Reference
+# Florina: Deep Research Reference
 
-This document organizes research findings around the core capabilities required to build Agent Secretary. Every referenced project is evaluated based on the specific capability it addresses, its reuse potential, and remaining gaps, with a focus on solving the human-attention bottleneck in parallelized agent development while maximizing the reuse of existing open-source components and their hard-learned architectural lessons.
+This document organizes research findings around the core capabilities required to build Florina. Every referenced project is evaluated based on the specific capability it addresses, its reuse potential, and remaining gaps, with a focus on solving the human-attention bottleneck in parallelized agent development while maximizing the reuse of existing open-source components and their hard-learned architectural lessons.
 
 ## Closest Products
 
@@ -11,16 +11,16 @@ Products that approximate aspects of the supervisory experience:
 - **License:** MIT
 - **What it does:** Voice/chat entry point, hierarchical multi-agent orchestration, persistent context, multiple coding CLI runners (Claude Code, Codex, Aider, Goose, Cline, Continue), WebRTC voice, local web UI and messaging channels.
 - **Why it matters:** Closest match to the broad voice-first vision.
-- **Reuse recommendation:** Competitor/reference, not foundation. Agent Secretary's differentiation must be sharper than 'voice + multiple agents'.
-- **Lesson / Gap:** OpenYabby tries to own both agent orchestration and chat/voice channels, leading to a broad surface. Agent Secretary focuses strictly on the attention-routing / noise-suppression layer.
+- **Reuse recommendation:** Competitor/reference, not foundation. Florina's differentiation must be sharper than 'voice + multiple agents'.
+- **Lesson / Gap:** OpenYabby tries to own both agent orchestration and chat/voice channels, leading to a broad surface. Florina focuses strictly on the attention-routing / noise-suppression layer.
 
 ### Happy
 - **URL:** [https://github.com/slopus/happy](https://github.com/slopus/happy)
 - **License:** MIT
 - **What it does:** Remote Claude Code/Codex control, mobile/web apps, real-time voice, E2E-encrypted session content, push notifications for permissions/errors, session handoff.
-- **Why it matters:** Closest match to the remote secretary surface.
+- **Why it matters:** Closest match to the remote Florina surface.
 - **Reuse recommendation:** Strong reference implementation for remote companion architecture and outbound daemon relay patterns.
-- **Lesson / Gap:** Happy solves remote mobile interaction for individual agents; Agent Secretary solves local multi-agent attention triage and cross-project context isolation.
+- **Lesson / Gap:** Happy solves remote mobile interaction for individual agents; Florina solves local multi-agent attention triage and cross-project context isolation.
 
 ### Agent Deck
 - **URL:** [https://github.com/asheshgoplani/agent-deck](https://github.com/asheshgoplani/agent-deck)
@@ -36,7 +36,7 @@ Products that approximate aspects of the supervisory experience:
 - **What it does:** Persistent multi-agent coordination, worker identities, worktrees, mailboxes/handoffs, Beads-backed work state; supports several coding agents.
 - **Why it matters:** Strongest reference for long-running work-oriented (vs session-oriented) orchestration.
 - **Reuse recommendation:** Reuse architectural ideas on work orientation; optionally integrate Beads task import/export in later phases.
-- **Lesson / Gap:** Gas Town is a heavy, ambitious ecosystem infrastructure play; Agent Secretary stays lean and focused on local attention routing.
+- **Lesson / Gap:** Gas Town is a heavy, ambitious ecosystem infrastructure play; Florina stays lean and focused on local attention routing.
 
 ### Agent Teams AI
 - **URL:** [https://github.com/777genius/agent-teams-ai](https://github.com/777genius/agent-teams-ai)
@@ -55,7 +55,7 @@ Products that approximate aspects of the supervisory experience:
 
 ## Coding Agents
 
-Important agent runtimes/providers the secretary supervises:
+Important agent runtimes/providers Florina supervises:
 
 ### Codex (OpenAI)
 - **Protocol:** Local `app-server` JSON-RPC API
@@ -142,7 +142,7 @@ Important agent runtimes/providers the secretary supervises:
 - **URL:** [https://github.com/The-PR-Agent/pr-agent](https://github.com/The-PR-Agent/pr-agent)
 - **License:** Apache-2.0
 - **What it does:** Multi-platform automated pull request reviewer and description generator.
-- **Lesson:** Dedicated PR review is a solved, standalone category. Agent Secretary's core differentiator is the *executive completion digest before deep review*.
+- **Lesson:** Dedicated PR review is a solved, standalone category. Florina's core differentiator is the *executive completion digest before deep review*.
 
 ## Human Approval & Supervision Architecture
 
@@ -159,7 +159,7 @@ Important agent runtimes/providers the secretary supervises:
 ## Sandboxing and Execution Safety
 
 - **Key Principle:** Git worktrees isolate filesystem state, not process execution authority.
-- **Security Model:** OS boundary → Agent Sandbox → Capability Broker → Secretary Policy → Human Approval.
+- **Security Model:** OS boundary → Agent Sandbox → Capability Broker → Florina Policy → Human Approval.
 - **MVP Boundary:** MVP leverages agent-native sandboxing (Codex built-in OS sandbox, Claude Code permission hooks) without attempting to provision custom container environments, keeping initial complexity low.
 
 ## What Is Already Solved (Do Not Re-invent)
@@ -171,7 +171,7 @@ Important agent runtimes/providers the secretary supervises:
 5. **Real-time Voice Transport:** WebSocket/WebRTC streaming (solved in Pipecat, LiveKit).
 6. **Encrypted Mobile-to-Local Relay:** Outbound tunnel session sync (proven in Happy).
 
-## What Is NOT Solved (The Core Agent Secretary Opportunity)
+## What Is NOT Solved (The Core Florina Opportunity)
 
 1. **Cross-Agent Attention Triage:** A normalized policy engine that turns heterogeneous agent events into high-signal attention items (`ignore`, `batch`, `elevate`, `interrupt`).
 2. **Strict Context-Capsule Routing:** True multi-project, multi-task context isolation that prevents LLM context contamination across unrelated repositories.
@@ -182,4 +182,4 @@ Important agent runtimes/providers the secretary supervises:
 
 The existing open-source ecosystem provides mature, high-quality building blocks for speech recognition, agent communication, git isolation, and code review. 
 
-The missing layer is the **developer-facing attention broker** that ties these components together into a calm, unified supervisory inbox. Agent Secretary succeeds by leveraging these proven open-source primitives (whisper.cpp, Codex app-server, ACP, Open Code Review) and focusing its innovation strictly on the **attention engine, context capsules, and supervisory workflow**.
+The missing layer is the **developer-facing attention broker** that ties these components together into a calm, unified supervisory inbox. Florina succeeds by leveraging these proven open-source primitives (whisper.cpp, Codex app-server, ACP, Open Code Review) and focusing its innovation strictly on the **attention engine, context capsules, and supervisory workflow**.

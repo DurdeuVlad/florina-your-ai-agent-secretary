@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:*"
+    />
+    <title>Florina</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      body {
+        height: 100vh;
+        overflow: hidden;
+        -webkit-user-select: none;
+      }
+      .card.sel {
+        outline: 1px solid var(--accent);
+      }
+      .empty-big {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .empty-hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      /* preferences inline forms (issue #128) */
+      .pref-addbar {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 4px;
+      }
+      .pref-form {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .pref-addform {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .pref-form input,
+      .pref-addform input,
+      .pref-addform textarea {
+        flex: 1;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .pref-addform textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+      .pref-form input:focus,
+      .pref-addform input:focus,
+      .pref-addform textarea:focus,
+      .pref-addform select:focus {
+        border-color: var(--accent);
+      }
+      .historysearch {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .historysearch input {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .historysearch input:focus {
+        border-color: var(--accent);
+      }
+      .historysearch input[type='text'] {
+        flex: 1;
+      }
+      .historysearch input[type='date'] {
+        color-scheme: dark;
+      }
+      .pref-addform select {
+        flex: 1;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .desk-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .desk-row select,
+      .desk-row input[type='text'] {
+        flex: 1;
+      }
+      .desk-check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      /* .pref-addform input above gives every input flex:1 + border —
+         checkboxes keep their native size and no box styling. */
+      .desk-check input[type='checkbox'] {
+        flex: 0 0 auto;
+        width: auto;
+        padding: 0;
+        border: none;
+        background: transparent;
+      }
+      .icon {
+        font-size: 13px;
+      }
+      .group-items {
+        display: grid;
+        gap: 8px;
+      }
+      .filter-bar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .chip-clear {
+        margin-left: 6px;
+        opacity: 0.7;
+      }
+      .toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: var(--panel-raised);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 11px 18px;
+        font-size: 13px;
+        display: none;
+        max-width: 440px;
+        z-index: 50;
+      }
+      .toast.show {
+        display: block;
+      }
+      .dot.wait {
+        background: var(--amber);
+      }
+      .dot.err {
+        background: var(--red);
+      }
+      .w-semibold {
+        font-weight: 600;
+      }
+      .w-bold {
+        font-weight: 700;
+      }
+      .empty {
+        padding: 48px 0;
+        text-align: center;
+        color: var(--muted);
+      }
+      .sect-label {
+        letter-spacing: 1.2px;
+      }
+      .obj {
+        font-weight: 600;
+      }
+      .stat.done {
+        color: var(--muted);
+      }
+      .sect .n {
+        margin-left: auto;
+      }
+      /* view switching (#126) */
+      .view {
+        display: none;
+      }
+      .view.active {
+        display: block;
+        animation: view-in var(--dur-base) var(--ease);
+      }
+      @keyframes view-in {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      /* session inspector (#126): full-width, full-height 3 columns */
+      .column {
+        height: 100%;
+      }
+      .column:has(> #v-tasks.active) {
+        max-width: none;
+      }
+      #v-tasks.active {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      #inspector {
+        flex: 1;
+        min-height: 0;
+      }
+      .col .row.cond {
+        opacity: 0.62;
+      }
+      .col.colfocus {
+        border-color: var(--accent);
+      }
+      .col .row.kbsel {
+        outline: 1px solid var(--accent);
+        outline-offset: -1px;
+      }
+      .col .row .t {
+        display: block;
+      }
+      .col .row b {
+        display: block;
+        font-weight: 600;
+      }
+      .fidelity {
+        margin: 10px 14px 0;
+        padding: 7px 10px;
+        font-size: 11.5px;
+        color: var(--amber);
+        border: 1px dashed var(--amber);
+        border-radius: var(--radius-sm);
+      }
+      .col .mono {
+        padding: 12px 14px;
+        line-height: 1.55;
+      }
+      /* PTT pill merged into the header (was the floating overlay) */
+      .hud.pill {
+        width: auto;
+        padding: 6px 14px 6px 8px;
+        box-shadow: none;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .hud.pill .ring {
+        width: 30px;
+        height: 30px;
+        font-size: 13px;
+      }
+      .hud.pill .hudtext {
+        max-width: 240px;
+      }
+      .hud.pill .hudtext span {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* chat — the central Secretary thread (issue #160, DG-01 §3.9) */
+      #v-chat.active {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .column:has(> #v-chat.active) {
+        max-width: none;
+      }
+      .chat-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      #chatwrap {
+        flex: 1;
+        min-width: 0;
+        overflow-y: auto;
+      }
+      #chatDrawer {
+        width: 340px;
+        flex-shrink: 0;
+        border-left: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+      }
+      #chatDrawer .drawerhead {
+        padding: 12px 16px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+      }
+      #chatDrawerList {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 12px;
+      }
+      #chatDrawerToggle.open {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .chatlist {
+        min-height: 100%;
+        padding: 20px 24px 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 14px;
+        max-width: 960px;
+      }
+      .chatlist .msg {
+        max-width: 72%;
+        padding: 10px 14px;
+        border-radius: var(--radius-lg);
+        font-size: 13.5px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+      .chatlist .msg .who {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .chatlist .msg.assistant {
+        align-self: flex-start;
+        background: var(--panel);
+        border: 1px solid var(--border);
+      }
+      .chatlist .msg.user {
+        align-self: flex-end;
+        background: var(--panel-raised);
+        border: 1px solid var(--border);
+      }
+      .chatlist .toolrow {
+        align-self: flex-start;
+        font-size: 12px;
+        color: var(--muted);
+        font-family: ui-monospace, monospace;
+        padding: 4px 14px;
+        border-left: 2px solid var(--border);
+      }
+      .chatlist .toolrow .ok {
+        color: var(--green);
+      }
+      .chatlist .toolrow .err {
+        color: var(--red);
+      }
+      .chatlist .clearrow {
+        align-self: center;
+        font-size: 11px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 4px;
+        margin-bottom: 2px;
+        width: 100%;
+        text-align: center;
+      }
+      .chatlist .workrow {
+        align-self: flex-start;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        color: var(--muted);
+        padding: 4px 14px;
+      }
+      .chatlist .workrow .dot {
+        animation: pulse 1.2s infinite;
+      }
+      .composer {
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        padding: 14px 20px 16px;
+      }
+      .composer .dictation {
+        font-size: 12.5px;
+        color: var(--muted);
+        border-left: 2px solid var(--accent);
+        padding: 4px 10px;
+        margin-bottom: 8px;
+      }
+      .composer .dictation b {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .composer .row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+      .composer textarea {
+        flex: 1;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--text);
+        font: inherit;
+        font-size: 13.5px;
+        padding: 10px 12px;
+        resize: none;
+        min-height: 44px;
+        max-height: 140px;
+      }
+      .composer textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .composer .mic,
+      .composer .voicemode {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--text);
+      }
+      .composer .mic:disabled,
+      .composer .voicemode:disabled {
+        opacity: 0.45;
+      }
+      .composer .mic.listening {
+        border-color: var(--accent);
+        color: var(--accent);
+        animation: pulse 1.2s infinite;
+      }
+      .composer .voicemode {
+        width: auto;
+        padding: 0 12px;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .composer .voicemode.on {
+        border-color: var(--green);
+        color: var(--green);
+      }
+      .composer .voicemode.connecting {
+        border-color: var(--amber);
+        color: var(--amber);
+        animation: pulse 1.2s infinite;
+      }
+      .composer .send {
+        height: 40px;
+        padding: 0 18px;
+        border-radius: 10px;
+        background: var(--accent);
+        color: #0f1115;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+      }
+      .composer .send:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .composer .hint {
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.35;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="logo">Flor<em>ina</em></div>
+        <!--
+          5-item IA (docs/UX_INFORMATION_ARCHITECTURE.md §2, issue #219):
+          Florina / Attention / Work / History / Settings. The internal
+          view ids (chat/inbox/tasks/prefs) are unchanged from before this
+          relabel -- only the visible labels and the set of top-level
+          entries changed, to avoid touching the (untested) routing logic
+          in app.js that keys off those ids. Fleet/Ideas/Secretary are no
+          longer top-level per the IA doc ("Infrastructure never dominates
+          top-level nav" / Fleet+Ideas absorbed into Work, Secretary
+          absorbed into Florina) -- their view sections remain in this
+          file, unreachable from the nav until issue #220 wires them in
+          as Work/Florina sub-views. This is a deliberate, documented
+          transitional gap between #219 (relabel) and #220 (merge), not
+          an oversight.
+        -->
+        <div class="navitem active" data-view="chat">✳ Florina</div>
+        <div class="navitem" data-view="inbox">
+          ◈ Attention<span class="navbadge zero" id="navInbox">0</span>
+        </div>
+        <div class="navitem" data-view="tasks">◧ Work<span class="navbadge zero">0</span></div>
+        <div class="navitem" data-view="history">▤ History</div>
+        <div class="navitem" data-view="prefs">◍ Settings</div>
+        <div class="sidefoot">
+          <div class="statusline">
+            <span class="dot" id="dot"></span><span id="statusText">connecting…</span>
+          </div>
+        </div>
+      </nav>
+      <main>
+        <header>
+          <h1 id="viewTitle">Florina</h1>
+          <span class="sub" id="viewSub">one conversation with your Secretary</span>
+          <span class="spacer"></span>
+          <button
+            class="ghost"
+            id="chatDrawerToggle"
+            style="display: none"
+            title="Toggle live activity/diff panel"
+          >
+            Activity
+          </button>
+          <button class="ghost" id="chatClear" style="display: none">Clear</button>
+          <div class="hud pill" id="hud" data-command="ptt:toggle" title="Push to talk">
+            <div class="ring" id="ring">🎙</div>
+            <div class="hudtext"><b id="hudTitle">Push to talk</b><span id="hudSub"></span></div>
+          </div>
+        </header>
+        <div class="content">
+          <div class="column">
+            <section class="view active" id="v-chat">
+              <div class="chat-body">
+                <div id="chatwrap"><div id="chatmsgs"></div></div>
+                <div id="chatDrawer" hidden>
+                  <div class="drawerhead">Live activity</div>
+                  <div id="chatDrawerList"></div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="dictation" id="dictation" hidden>
+                  <b>listening…</b> <span id="dictationText"></span>
+                </div>
+                <div class="row">
+                  <button
+                    id="chatMic"
+                    class="mic"
+                    title="Dictate — speech becomes editable text here"
+                  >
+                    🎙
+                  </button>
+                  <textarea
+                    id="chatInput"
+                    rows="2"
+                    placeholder="Message the Secretary — Enter to send, Shift+Enter for a newline"
+                  ></textarea>
+                  <button
+                    id="chatVoice"
+                    class="voicemode"
+                    title="Voice mode — two-way spoken turns with the Secretary"
+                  >
+                    🔊 voice
+                  </button>
+                  <button id="chatSend" class="send">Send</button>
+                </div>
+                <div class="hint">Enter sends · history persists across restarts</div>
+              </div>
+            </section>
+            <section class="view" id="v-inbox"><div id="inbox"></div></section>
+            <!--
+              Work (issue #220, docs/UX_INFORMATION_ARCHITECTURE.md §2):
+              a single entry point over Tasks/Fleet/Ideas via sub-tabs,
+              rather than three separate top-level nav destinations. The
+              Session Inspector (#inspector) is reused completely
+              unmodified internally -- only its container's siblings
+              changed, per #220's explicit "reused unmodified internally"
+              acceptance criterion.
+            -->
+            <section class="view" id="v-tasks">
+              <div class="worksubnav">
+                <button class="worksubtab active" data-worksub="inspector">Tasks</button>
+                <button class="worksubtab" data-worksub="fleet">Fleet</button>
+                <button class="worksubtab" data-worksub="ideas">Ideas</button>
+              </div>
+              <div id="inspector" class="worksubpanel active"></div>
+              <div id="fleet" class="worksubpanel"></div>
+              <div id="ideas" class="worksubpanel"></div>
+            </section>
+            <!--
+              History (issue #199/#221, docs/UX_INFORMATION_ARCHITECTURE.md
+              §2): completed tasks + resolved decisions, pushed via
+              history:update (desktop-app.ts). Journal search (#222) adds
+              to this same container later.
+            -->
+            <section class="view" id="v-history">
+              <div id="history"></div>
+              <!--
+                Journal search (issue #222): static composer-style inputs
+                (dynamic content, so no data-command delegation) wired
+                directly in app.js. Results are pushed pre-rendered via
+                history:search-results, reusing renderTimelineRow.
+              -->
+              <div class="sect">Search journal</div>
+              <div class="historysearch">
+                <input type="text" id="historySearchText" placeholder="text (e.g. task id, kind, error)" />
+                <input type="date" id="historySearchSince" title="since" />
+                <input type="date" id="historySearchUntil" title="until" />
+                <button id="historySearchGo">Search</button>
+              </div>
+              <div id="historySearchResults"></div>
+            </section>
+            <!-- v-fleet/v-ideas removed (#220): #fleet/#ideas now live as
+                 sub-panels inside v-tasks (Work), see above. -->
+            <section class="view" id="v-prefs">
+              <div id="prefs"></div>
+              <!--
+                Memory/rules browse (issue #200/#223): the same routing
+                rules above, re-expressed in taxonomy terms (provenance,
+                confidence, scope). Filter chips are handled client-side
+                in app.js -- no new daemon round trip.
+              -->
+              <div class="sect" style="margin-top: 18px">Memory &amp; rules</div>
+              <div id="memorySettings"></div>
+              <!--
+                Repos (issue #253): the folders Florina searches for repos,
+                in scan/search priority order, plus what it found. "+ Add
+                folder"/"Use default folder" run a native dialog in the
+                main process (pickfolders/defaultfolder local verbs); the
+                root list and discovered repos are server-rendered into
+                #reposView on every repos:update push.
+              -->
+              <div class="sect" style="margin-top: 18px">Repos</div>
+              <div class="historysearch">
+                <input type="text" id="reposSearchText" placeholder="search repos by name" />
+                <button id="reposSearchGo">Search</button>
+              </div>
+              <div id="reposView"></div>
+              <!-- Desktop-local settings (issue #163): not part of the
+                   daemon profile — persisted to ~/.florina/desktop-
+                   settings.json via the deskset: verb. Static DOM like
+                   the composer so tree re-mounts never drop an edit. -->
+              <div class="sect" style="margin-top: 18px">Desktop &amp; voice</div>
+              <div class="card" id="deskCard">
+                <div class="pref-addform">
+                  <label class="desk-row">
+                    Microphone
+                    <select id="deskMic">
+                      <option value="">System default</option>
+                    </select>
+                  </label>
+                  <label class="desk-row">
+                    Dictation language
+                    <input id="deskLang" type="text" placeholder="auto-detect (e.g. en, fr, ro)" />
+                  </label>
+                  <label class="desk-check"
+                    ><input type="checkbox" id="deskVoiceMode" /> Open chat in voice mode</label
+                  >
+                  <label class="desk-check"
+                    ><input type="checkbox" id="deskStopDaemon" /> Stop the daemon when the app
+                    quits</label
+                  >
+                  <div>
+                    <button id="deskSave">Save desktop settings</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section class="view" id="v-secretary"><div id="secretary"></div></section>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div class="toast" id="toast"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

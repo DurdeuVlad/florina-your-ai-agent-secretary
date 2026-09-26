@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
-import { mapToolCallToCommand, buildDefaultVoiceTools } from '../src/daemon/voice-session-manager.js';
+import {
+  mapToolCallToCommand,
+  buildDefaultVoiceTools,
+} from '../src/daemon/voice-session-manager.js';
 import { StdinAudioTransport } from '../src/voice/stdin-audio-transport.js';
 
 describe('VoiceSessionManager: tool call mapping', () => {
@@ -100,7 +103,7 @@ describe('VoiceSessionManager: tool call mapping', () => {
 describe('VoiceSessionManager: default voice tools', () => {
   const tools = buildDefaultVoiceTools();
 
-  it('includes the core Secretary tools', () => {
+  it('includes the core Florina tools', () => {
     const names = tools.map((t) => t.name);
     expect(names).toContain('get_inbox');
     expect(names).toContain('list_tasks');
@@ -144,9 +147,7 @@ describe('StdinAudioTransport', () => {
 
   it('play writes to stdout without throwing', () => {
     const transport = new StdinAudioTransport();
-    expect(() =>
-      transport.play({ pcm: 'dGVzdA==', sampleRate: 24000, channels: 1 }),
-    ).not.toThrow();
+    expect(() => transport.play({ pcm: 'dGVzdA==', sampleRate: 24000, channels: 1 })).not.toThrow();
     transport.close();
   });
 });

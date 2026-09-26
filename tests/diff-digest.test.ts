@@ -12,11 +12,14 @@ import {
   AgentRepository,
   SessionRepository,
 } from '../src/storage/index.js';
-import { buildEvent, buildProject, buildTask, buildAgent, buildSession } from '../src/domain/index.js';
 import {
-  DiffAnalyzer,
-  collectTestResults,
-} from '../src/attention/diff-analyzer.js';
+  buildEvent,
+  buildProject,
+  buildTask,
+  buildAgent,
+  buildSession,
+} from '../src/domain/index.js';
+import { DiffAnalyzer, collectTestResults } from '../src/attention/diff-analyzer.js';
 import type { DiffDigest, PathCategory } from '../src/attention/diff-digest.js';
 
 /* ------------------------------------------------------------------ *
@@ -29,7 +32,7 @@ import type { DiffDigest, PathCategory } from '../src/attention/diff-digest.js';
  * directory in `afterEach`.
  */
 function createTempGitRepo(): string {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'secretary-diff-'));
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'florina-diff-'));
   const repoPath = path.join(tmpRoot, 'repo');
   fs.mkdirSync(repoPath, { recursive: true });
   git(['init', '--initial-branch=main'], repoPath);
@@ -123,7 +126,7 @@ describe('diff-analyzer: classifyPath covers every category', () => {
   });
 });
 
-describe('diff-analyzer: analyze (integration with a real temp git repo)', () => {
+describe('diff-analyzer: analyze (integration with a real temp git repo)', { timeout: 30_000 }, () => {
   let repoPath: string;
   let tmpRoot: string;
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>Florina — Voice</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      html,
+      body {
+        background: transparent;
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="voice-overlay" id="overlay">
+      <div class="orb" id="orb">🎙</div>
+      <div class="voice-title" id="voiceTitle">Listening…</div>
+      <div class="voice-sub" id="voiceSub"></div>
+    </div>
+    <script type="module" src="voice-overlay.js"></script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,11 +25,10 @@ import {
   overallConfidence,
   concatAudioChunks,
   type WhisperAdapterOptions,
+  type TranscriptResult,
+  type TranscriptSegment,
 } from '../src/voice/whisper-adapter.js';
-import {
-  VoicePipeline,
-  type PipelineTranscriptEvent,
-} from '../src/voice/voice-pipeline.js';
+import { VoicePipeline, type PipelineTranscriptEvent } from '../src/voice/voice-pipeline.js';
 import type { ServerMessage } from '../src/voice/realtime-message.js';
 
 /* ================================================================== *
@@ -336,9 +335,9 @@ describe('whisper-backend', () => {
     });
 
     it('throws when "text" is missing', () => {
-      expect(() =>
-        parseWhisperJsonOutput(JSON.stringify({ result: { language: 'en' } })),
-      ).toThrow(/missing "text"/);
+      expect(() => parseWhisperJsonOutput(JSON.stringify({ result: { language: 'en' } }))).toThrow(
+        /missing "text"/,
+      );
     });
 
     it('throws when "segments" is not an array', () => {
@@ -434,10 +433,7 @@ describe('WhisperAdapter', () => {
 
     it('transcribe returns a TranscriptResult with confidence and segments', async () => {
       await adapter.initialize('/models/base.bin');
-      const result = await adapter.transcribe([
-        makeChunk('AAAA'),
-        makeChunk('BBBB'),
-      ]);
+      const result = await adapter.transcribe([makeChunk('AAAA'), makeChunk('BBBB')]);
       expect(result.text).toBe('hello world');
       expect(result.language).toBe('en');
       expect(result.segments).toHaveLength(1);
@@ -449,9 +445,7 @@ describe('WhisperAdapter', () => {
     });
 
     it('transcribe throws if not initialized', async () => {
-      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow(
-        /not initialized/,
-      );
+      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow(/not initialized/);
     });
 
     it('close releases the backend and requires re-initialization', async () => {
@@ -459,9 +453,7 @@ describe('WhisperAdapter', () => {
       await adapter.close();
       expect(adapter.isInitialized).toBe(false);
       expect(backend.closed).toBe(true);
-      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow(
-        /not initialized/,
-      );
+      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow(/not initialized/);
     });
   });
 
@@ -486,9 +478,7 @@ describe('WhisperAdapter', () => {
     it('propagates backend transcribe errors', async () => {
       await adapter.initialize('/models/base.bin');
       backend.transcribeError = new Error('binary not found');
-      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow(
-        'binary not found',
-      );
+      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow('binary not found');
     });
 
     it('propagates backend initialize errors', async () => {
@@ -497,9 +487,7 @@ describe('WhisperAdapter', () => {
         throw new Error('model unreadable');
       };
       const failAdapter = new WhisperAdapter(failBackend);
-      await expect(failAdapter.initialize('/bad.bin')).rejects.toThrow(
-        'model unreadable',
-      );
+      await expect(failAdapter.initialize('/bad.bin')).rejects.toThrow('model unreadable');
     });
   });
 
@@ -527,9 +515,7 @@ describe('WhisperAdapter', () => {
     it('a failed transcribe does not block subsequent calls', async () => {
       await adapter.initialize('/models/base.bin');
       backend.transcribeError = new Error('transcribe failed');
-      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow(
-        'transcribe failed',
-      );
+      await expect(adapter.transcribe([makeChunk()])).rejects.toThrow('transcribe failed');
       // The chain should have recovered — a second call must still work.
       backend.transcribeError = null;
       const result = await adapter.transcribe([makeChunk()]);
@@ -651,7 +637,7 @@ describe('WhisperCppBackend (via MockProcessRunner)', () => {
   let modelPath: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'secretary-whisper-test-'));
+    tempDir = await mkdtemp(join(tmpdir(), 'florina-whisper-test-'));
     modelPath = join(tempDir, 'model.bin');
     await writeFile(modelPath, 'fake-model');
   });
@@ -694,9 +680,7 @@ describe('WhisperCppBackend (via MockProcessRunner)', () => {
       ...DEFAULT_WHISPER_CLI_OPTIONS,
       model: modelPath,
     });
-    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(
-      /Binary not found/,
-    );
+    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(/Binary not found/);
   });
 
   it('throws on non-zero exit code', async () => {
@@ -709,9 +693,7 @@ describe('WhisperCppBackend (via MockProcessRunner)', () => {
       ...DEFAULT_WHISPER_CLI_OPTIONS,
       model: modelPath,
     });
-    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(
-      /exited with code 1/,
-    );
+    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(/exited with code 1/);
   });
 
   it('throws on invalid JSON output', async () => {
@@ -722,9 +704,7 @@ describe('WhisperCppBackend (via MockProcessRunner)', () => {
       ...DEFAULT_WHISPER_CLI_OPTIONS,
       model: modelPath,
     });
-    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(
-      /invalid JSON/,
-    );
+    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(/invalid JSON/);
   });
 
   it('throws ProcessTimeoutError via runner timeout', async () => {
@@ -735,9 +715,7 @@ describe('WhisperCppBackend (via MockProcessRunner)', () => {
       ...DEFAULT_WHISPER_CLI_OPTIONS,
       model: modelPath,
     });
-    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(
-      /timed out/,
-    );
+    await expect(backend.transcribe(Buffer.from('audio'))).rejects.toThrow(/timed out/);
   });
 
   it('isAvailable returns true after initialization', async () => {
@@ -881,6 +859,19 @@ describe('VoicePipeline', () => {
     expect(events[0].text).toBe('hello world');
     expect(events[0].partial).toBe(false);
     expect(events[0].confidence).toBeGreaterThan(0);
+  });
+
+  it('preserves the WhisperAdapter result type through the generic pipeline', async () => {
+    await whisperAdapter.initialize('/models/base.bin');
+    const inferred = new VoicePipeline(bridge, whisperAdapter);
+    // Compile-time proof: constructing the pipeline with WhisperAdapter infers
+    // its richer TranscriptResult — required `segments` and `language`.
+    expectTypeOf(inferred.transcribeWithWhisper).returns.resolves.toEqualTypeOf<TranscriptResult>();
+    const result = await inferred.transcribeWithWhisper([makeChunk()]);
+    expect(result.segments[0].text).toBe('hello world');
+    expect(result.language).toBe('en');
+    const segment: TranscriptSegment = result.segments[0];
+    expect(segment.confidence).toBeGreaterThan(0);
   });
 
   it('switchToWhisper forces whisper mode', async () => {

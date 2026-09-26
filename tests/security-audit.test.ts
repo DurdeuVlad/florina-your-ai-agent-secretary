@@ -215,7 +215,7 @@ describe('SecurityAuditor', () => {
   let tmp: string;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'asec-audit-'));
+    tmp = mkdtempSync(join(tmpdir(), 'flor-audit-'));
   });
 
   afterEach(() => {

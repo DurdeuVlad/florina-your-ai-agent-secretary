@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { SecretaryDaemon, EventBus } from '../src/daemon/index.js';
+import { FlorinaDaemon } from '../src/daemon/index.js';
 import {
   StorageDatabase,
   EventRepository,
@@ -42,7 +42,7 @@ import {
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-adapter-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-adapter-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -145,22 +145,22 @@ describe('fidelity tier declaration', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * 3. Stub adapter emits synthetic events across all 13 variants
+ * 3. Stub adapter emits synthetic events across all 23 variants
  * ------------------------------------------------------------------ */
 describe('StubAdapter event emission', () => {
-  it('buildDefaultStubEvents produces all 13 variants', () => {
+  it('buildDefaultStubEvents produces all 23 variants', () => {
     const events = buildDefaultStubEvents({
       taskId: 'task-1',
       sessionId: 'sess-1',
       agentId: 'stub',
     });
-    expect(events).toHaveLength(13);
+    expect(events).toHaveLength(23);
     const types = events.map((e) => e.type);
     // Every canonical variant is present exactly once.
     for (const kind of SUPERVISOR_EVENT_TYPES) {
       expect(types).toContain(kind);
     }
-    expect(new Set(types).size).toBe(13);
+    expect(new Set(types).size).toBe(23);
   });
 
   it('every default stub event validates against the schema', () => {
@@ -174,7 +174,7 @@ describe('StubAdapter event emission', () => {
     }
   });
 
-  it('connects, starts a run, and streams all 13 events', async () => {
+  it('connects, starts a run, and streams all 23 events', async () => {
     const stub = new StubAdapter(null);
     expect(stub.connectionState).toBe('disconnected');
 
@@ -189,7 +189,7 @@ describe('StubAdapter event emission', () => {
     for await (const event of stub.streamEvents()) {
       collected.push(event);
     }
-    expect(collected).toHaveLength(13);
+    expect(collected).toHaveLength(23);
     expect(collected.map((e) => e.type)).toEqual([...SUPERVISOR_EVENT_TYPES]);
 
     await stub.disconnect();
@@ -275,7 +275,9 @@ describe('StubAdapter event emission', () => {
     const stub = new StubAdapter(null);
     await stub.connect();
     await stub.startRun('t', sampleSessionConfig());
-    await expect(stub.startRun('t', sampleSessionConfig())).rejects.toThrow(/already has an active/);
+    await expect(stub.startRun('t', sampleSessionConfig())).rejects.toThrow(
+      /already has an active/,
+    );
     await stub.disconnect();
   });
 });
@@ -289,13 +291,11 @@ describe('AdapterRegistry', () => {
     expect(registry.list()).toEqual([]);
     expect(registry.has('stub')).toBe(false);
 
-    registry.register('stub', (bus) => new StubAdapter(bus));
+    registry.register('stub', () => new StubAdapter());
     expect(registry.has('stub')).toBe(true);
     expect(registry.list()).toEqual(['stub']);
 
-    // Create with a real EventBus.
-    const bus = new EventBus();
-    const adapter = registry.create('stub', bus);
+    const adapter = registry.create('stub');
     expect(adapter).toBeInstanceOf(StubAdapter);
     expect(adapter.id).toBe('stub');
     expect(adapter.fidelityTier).toBe(AdapterFidelityTier.E);
@@ -304,22 +304,33 @@ describe('AdapterRegistry', () => {
   it('get throws UnknownAdapterError for unregistered ids', () => {
     const registry = new AdapterRegistry();
     expect(() => registry.get('nope')).toThrow(UnknownAdapterError);
-    expect(() => registry.create('nope', new EventBus())).toThrow(UnknownAdapterError);
+    expect(() => registry.create('nope')).toThrow(UnknownAdapterError);
   });
 
   it('register throws DuplicateAdapterError on double registration', () => {
     const registry = new AdapterRegistry();
-    registry.register('stub', (bus) => new StubAdapter(bus));
-    expect(() => registry.register('stub', (bus) => new StubAdapter(bus))).toThrow(
-      DuplicateAdapterError,
-    );
+    registry.register('stub', () => new StubAdapter());
+    expect(() => registry.register('stub', () => new StubAdapter())).toThrow(DuplicateAdapterError);
   });
 
   it('can register multiple adapters and list them', () => {
     const registry = new AdapterRegistry();
-    registry.register('stub', (bus) => new StubAdapter(bus));
-    registry.register('stub-2', (bus) => new StubAdapter(bus, { delayMs: 1 }));
+    registry.register('stub', () => new StubAdapter());
+    registry.register('stub-2', () => new StubAdapter(undefined, { delayMs: 1 }));
     expect(registry.list().sort()).toEqual(['stub', 'stub-2']);
+  });
+
+  it('invokes the registered factory with zero arguments (no event bus injection)', () => {
+    const registry = new AdapterRegistry();
+    const factory = vi.fn(() => new StubAdapter());
+    registry.register('stub', factory);
+
+    const adapter = registry.create('stub');
+
+    // Event publication is owned by the session manager, so the registry
+    // must not pass an event bus (or anything else) into the factory.
+    expect(factory).toHaveBeenCalledWith();
+    expect(adapter).toBeInstanceOf(StubAdapter);
   });
 });
 
@@ -331,7 +342,10 @@ describe('AdapterRegistry', () => {
  * session) required by the events table's foreign-key constraints. Returns
  * the ids used so the test can reference them.
  */
-function seedJournal(db: StorageDatabase, cfg: SessionConfig): {
+function seedJournal(
+  db: StorageDatabase,
+  cfg: SessionConfig,
+): {
   projectId: string;
   taskId: string;
   agentId: string;
@@ -379,7 +393,7 @@ function seedJournal(db: StorageDatabase, cfg: SessionConfig): {
 
 describe('integration: daemon + stub adapter + event journal', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let journalDb: StorageDatabase;
   let events: EventRepository;
 
@@ -394,8 +408,9 @@ describe('integration: daemon + stub adapter + event journal', () => {
     journalDb.open();
     events = new EventRepository(journalDb.connection);
 
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -424,6 +439,10 @@ describe('integration: daemon + stub adapter + event journal', () => {
 
     // Wire EventBus events into the journal: each published SupervisorEvent
     // is appended to the EventRepository as an immutable journal row.
+    // (journalDb is intentionally a separate in-memory db from the
+    // daemon's own journal — the daemon's EventJournalWriter handles the
+    // production path; this test exercises the adapter → bus → journal
+    // pipeline against an external repository.)
     const unsubscribe = bus.onEvent((event: SupervisorEvent) => {
       const journalEvent = buildEvent({
         sessionId: event.sessionId,
@@ -443,14 +462,14 @@ describe('integration: daemon + stub adapter + event journal', () => {
 
       // Consume the full event stream.
       for await (const _event of stub.streamEvents()) {
-        // Events are journaled by the EventBus listener above.
+        // Events are journaled by the daemon's EventJournalWriter.
       }
 
       await stub.disconnect();
 
-      // Verify all 13 events landed in the journal for this session.
+      // Verify all 23 events landed in the journal for this session.
       const journaled = events.listBySession(sessionConfig.sessionId);
-      expect(journaled).toHaveLength(13);
+      expect(journaled).toHaveLength(23);
 
       const journaledKinds = journaled.map((e) => e.kind);
       for (const kind of SUPERVISOR_EVENT_TYPES) {
@@ -484,7 +503,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
       }
       await stub.disconnect();
 
-      expect(received).toHaveLength(13);
+      expect(received).toHaveLength(23);
     } finally {
       unsubscribe();
     }
@@ -493,7 +512,7 @@ describe('integration: daemon + stub adapter + event journal', () => {
   it('registry-created stub adapter wired to the daemon bus journals events', async () => {
     const bus = daemon.eventBus!;
     const registry = new AdapterRegistry();
-    registry.register(STUB_ADAPTER_ID, (b) => new StubAdapter(b));
+    registry.register(STUB_ADAPTER_ID, () => new StubAdapter());
 
     const cfg: SessionConfig = {
       taskId: 'task-registry',
@@ -516,16 +535,18 @@ describe('integration: daemon + stub adapter + event journal', () => {
     });
 
     try {
-      const adapter = registry.create(STUB_ADAPTER_ID, bus);
+      const adapter = registry.create(STUB_ADAPTER_ID);
       await adapter.connect();
       await adapter.startRun(cfg.taskId, cfg);
-      for await (const _event of adapter.streamEvents()) {
-        // drain
+      // The registry no longer injects a bus; the consumer (the session
+      // manager in production) publishes each streamed event exactly once.
+      for await (const event of adapter.streamEvents()) {
+        bus.publish(event);
       }
       await adapter.disconnect();
 
       const journaled = events.listBySession('sess-registry');
-      expect(journaled).toHaveLength(13);
+      expect(journaled).toHaveLength(23);
     } finally {
       unsubscribe();
     }

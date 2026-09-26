@@ -18,7 +18,7 @@ import * as path from 'node:path';
 import { WebSocket } from 'ws';
 
 import {
-  SecretaryDaemon,
+  FlorinaDaemon,
   EventBus,
   SessionManager,
   type Command,
@@ -36,7 +36,7 @@ import { buildProject, buildTask, buildAgent } from '../src/domain/index.js';
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -101,11 +101,7 @@ function collectEvents(bus: EventBus, count: number, timeoutMs = 3000): Promise<
 }
 
 /** Wait for a condition to become true, polling at an interval. */
-async function waitFor(
-  fn: () => boolean,
-  timeoutMs = 3000,
-  intervalMs = 10,
-): Promise<void> {
+async function waitFor(fn: () => boolean, timeoutMs = 3000, intervalMs = 10): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fn()) return;
@@ -120,13 +116,14 @@ async function waitFor(
 
 describe('daemon: adapter integration via WebSocket (#35)', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: WebSocket;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -161,8 +158,8 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
 
   it('start-task connects the stub adapter and pipes events to the EventBus', async () => {
     // Seed a project, an agent (id "stub" to match the adapter), and a task.
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);
@@ -177,13 +174,20 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     });
     db.prepare(
       'INSERT INTO agents (id, name, provider, fidelity_tier, runtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(agent.id, agent.name, agent.provider, agent.fidelityTier, JSON.stringify(agent.runtime), agent.createdAt);
+    ).run(
+      agent.id,
+      agent.name,
+      agent.provider,
+      agent.fidelityTier,
+      JSON.stringify(agent.runtime),
+      agent.createdAt,
+    );
     const task = buildTask({ projectId: project.id, objective: 'Write tests' });
     tasks.insert(task);
 
     // Subscribe to the EventBus to collect events piped from the adapter.
     const bus = daemon.eventBus!;
-    const eventsPromise = collectEvents(bus, 14); // 1 from CommandApi + 13 from stub
+    const eventsPromise = collectEvents(bus, 22); // 1 from CommandApi + 21 from stub
 
     // Send start-task with agentId "stub".
     const res = await sendCommand(client, {
@@ -200,7 +204,7 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
 
     // Wait for the stub adapter's events to flow through the EventBus.
     const events = await eventsPromise;
-    expect(events.length).toBeGreaterThanOrEqual(13);
+    expect(events.length).toBeGreaterThanOrEqual(21);
     // The first event is the AgentStarted from the CommandApi; the stub's
     // events follow. Verify we received stub-originated events.
     const types = events.map((e) => e.type);
@@ -208,6 +212,11 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     expect(types).toContain('ToolStarted');
     expect(types).toContain('ApprovalRequested');
     expect(types).toContain('AgentCompleted');
+
+    // Exactly-once publication: EventBus forwards the exact object yielded by
+    // the adapter. If both the adapter and SessionManager published it, the
+    // same object reference would occur twice in the collected array.
+    expect(new Set(events).size).toBe(events.length);
 
     // The session manager tracked the session while the stream was active.
     // With auto-cleanup (Bug 2 fix), the session is removed after the stream
@@ -229,8 +238,8 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
   });
 
   it('stop-task cancels and disconnects the adapter session', async () => {
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);
@@ -243,7 +252,14 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     daemon.adapterRegistry$!.register('stub-slow', () => new StubAdapter(null, { delayMs: 5000 }));
     db.prepare(
       'INSERT INTO agents (id, name, provider, fidelity_tier, runtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('stub-slow', 'Stub Slow', 'stub', 'E', JSON.stringify({ kind: 'cli' }), new Date().toISOString());
+    ).run(
+      'stub-slow',
+      'Stub Slow',
+      'stub',
+      'E',
+      JSON.stringify({ kind: 'cli' }),
+      new Date().toISOString(),
+    );
     const task = buildTask({ projectId: project.id, objective: 'Write tests' });
     tasks.insert(task);
 
@@ -268,8 +284,8 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
   });
 
   it('start-task with an unknown adapter id returns an error', async () => {
-    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } })
-      .db.connection;
+    const db = (daemon as unknown as { db: { connection: import('better-sqlite3').Database } }).db
+      .connection;
     const { ProjectRepository, TaskRepository } = await import('../src/storage/index.js');
     const projects = new ProjectRepository(db);
     const tasks = new TaskRepository(db);
@@ -277,7 +293,14 @@ describe('daemon: adapter integration via WebSocket (#35)', () => {
     projects.insert(project);
     db.prepare(
       'INSERT INTO agents (id, name, provider, fidelity_tier, runtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('unknown-agent', 'Unknown', 'unknown', 'E', JSON.stringify({ kind: 'cli' }), new Date().toISOString());
+    ).run(
+      'unknown-agent',
+      'Unknown',
+      'unknown',
+      'E',
+      JSON.stringify({ kind: 'cli' }),
+      new Date().toISOString(),
+    );
     const task = buildTask({ projectId: project.id, objective: 'Write tests' });
     tasks.insert(task);
 
@@ -454,7 +477,7 @@ describe('SessionManager (direct)', () => {
     expect(manager.hasSession('task-1')).toBe(true);
 
     // Wait for the background event piping to complete and auto-cleanup
-    // to run. The stub emits 13 events with no delay, so the stream ends
+    // to run. The stub emits 21 events with no delay, so the stream ends
     // almost immediately. We poll until the session is removed.
     await waitFor(() => !manager.hasSession('task-1'), 3000);
     expect(manager.activeCount).toBe(0);

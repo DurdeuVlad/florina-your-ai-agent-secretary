@@ -16,10 +16,7 @@ import type { RenderTree as ViewRenderTree } from '../src/desktop/views/view-typ
  * Test helpers
  * ------------------------------------------------------------------ */
 
-const viewerModel = new DigestDiffViewerModel(
-  new DigestViewModel(),
-  new DiffViewModel(),
-);
+const viewerModel = new DigestDiffViewerModel(new DigestViewModel(), new DiffViewModel());
 
 /** Recursively assert a value is JSON-serializable (no functions/symbols). */
 function assertJsonSerializable(value: unknown, path = 'root'): void {
@@ -72,11 +69,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
     duration: 154000,
     summary: 'Implementation complete. 9 files, +284/-71, 23/23 tests passing.',
     filesChangedCount: 3,
-    filesChanged: [
-      'src/pagination.ts',
-      'src/pagination-view.ts',
-      'tests/pagination.test.ts',
-    ],
+    filesChanged: ['src/pagination.ts', 'src/pagination-view.ts', 'tests/pagination.test.ts'],
     testsRun: 23,
     testsPassed: 23,
     testsFailed: 0,
@@ -86,7 +79,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
     decisions: [{ id: 'DEC-007', note: 'Autonomy is user-configurable.' }],
     riskHighlights: [],
     commitHash: 'abc1234',
-    branchName: 'secretary/add-pagination',
+    branchName: 'florina/add-pagination',
     ...overrides,
   };
 }
@@ -94,7 +87,7 @@ function makeDigest(overrides: Partial<CompletionDigest> = {}): CompletionDigest
 /** Build a DiffDigest with sensible defaults. */
 function makeDiff(overrides: Partial<DiffDigest> = {}): DiffDigest {
   return {
-    branch: 'secretary/add-pagination',
+    branch: 'florina/add-pagination',
     baseCommit: 'base000',
     headCommit: 'head000',
     author: 'Test <test@example.com>',
@@ -122,7 +115,7 @@ describe('DigestDiffViewerModel.buildView', () => {
     expect(data.hasDiff).toBe(true);
     expect(data.digest.taskId).toBe('add-pagination');
     expect(data.diff).not.toBeNull();
-    expect(data.diff!.branch).toBe('secretary/add-pagination');
+    expect(data.diff!.branch).toBe('florina/add-pagination');
   });
 
   it('falls back to digest.diffSummary when no standalone diff is given', () => {
@@ -201,9 +194,7 @@ describe('risk hotspot drill-down', () => {
     });
     const data = viewerModel.buildView(digest, makeDiff());
     expect(data.riskHotspots[0].drillTarget).toBe('tests/pagination.test.ts');
-    expect(data.riskHotspots[0].command).toBe(
-      'drill-risk:failed-tests:tests/pagination.test.ts',
-    );
+    expect(data.riskHotspots[0].command).toBe('drill-risk:failed-tests:tests/pagination.test.ts');
   });
 
   it('returns null drillTarget for risks with no specific file', () => {
@@ -228,9 +219,7 @@ describe('risk hotspot drill-down', () => {
       riskHighlights: [{ kind: 'failed-tests', message: '2 tests failed.' }],
     });
     const diff = makeDiff({
-      changedFiles: [
-        { path: 'src/pagination.ts', additions: 10, deletions: 0, status: 'added' },
-      ],
+      changedFiles: [{ path: 'src/pagination.ts', additions: 10, deletions: 0, status: 'added' }],
     });
     const data = viewerModel.buildView(digest, diff);
     expect(data.riskHotspots[0].drillTarget).toBeNull();
@@ -425,9 +414,7 @@ describe('renderDigestDiffViewer', () => {
     expect(hotspots).toHaveLength(2);
     // failed-tests has a drill target → clickable
     expect(hotspots[0].props!.clickable).toBe(true);
-    expect(hotspots[0].props!.command).toBe(
-      'drill-risk:failed-tests:tests/pagination.test.ts',
-    );
+    expect(hotspots[0].props!.command).toBe('drill-risk:failed-tests:tests/pagination.test.ts');
     expect(hotspots[0].props!.drillTarget).toBe('tests/pagination.test.ts');
     // critical-action has no drill target → not clickable
     expect(hotspots[1].props!.clickable).toBe(false);

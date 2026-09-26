@@ -1,31 +1,34 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Scope
 
-If you find a security vulnerability in Agent Secretary, please report it
-privately via [GitHub's private vulnerability reporting](https://github.com/DurdeuVlad/agent-secretary/security/advisories/new)
-rather than opening a public issue.
+Florina is a local control plane that launches coding agents, brokers
+credentials, and accepts remote connections over an authenticated
+WebSocket. Security issues that matter most here:
 
-Please include:
+- Anything that widens permissions beyond what the human granted (DEC-011
+  is a hard architectural invariant — an LLM must never expand its own
+  authority)
+- Credential vault access paths (`src/adapters/outbound/credentials/`)
+- Remote/federated daemon authentication and command scoping
+- Approval bypass — any path where a permission-like action completes
+  without the required human confirmation for that fidelity tier
 
-- A description of the vulnerability and its potential impact
-- Steps to reproduce
-- Affected version/commit
+## Reporting a vulnerability
 
-## Scope notes
+**Do not open a public issue for security reports.**
 
-- The daemon binds to `ws://127.0.0.1:17419` by default (local-only control
-  plane, see DEC-005 in [`DECISION_LEDGER.md`](DECISION_LEDGER.md)); it is
-  not designed to be exposed to a network.
-- The only external credential the project handles is `OPENAI_API_KEY` for
-  the voice pipeline, supplied via environment variable or `--api-key` flag
-  — never hardcoded or logged. The project ships its own log-scrubbing
-  auditor (`src/security/auditors.ts`) that checks for accidental secret
-  leakage in log calls.
-- There is no deploy pipeline or hosted service; CI (`.github/workflows/ci.yml`)
-  only runs lint/typecheck/test/build and references no secrets beyond the
-  default `GITHUB_TOKEN`.
+Email the maintainer via the address on the repository owner's GitHub
+profile, or use GitHub's private vulnerability reporting ("Security" tab
+→ "Report a vulnerability"). Include:
 
-## Supported Versions
+- A description of the issue and its impact
+- Steps to reproduce against the current `master`
+- Affected surfaces (CLI, daemon WS, MCP, voice, federation)
 
-Pre-1.0; the latest commit on `master` is the only supported version.
+Expect an acknowledgement within a few days. We'll coordinate disclosure
+with you once a fix lands.
+
+## Supported versions
+
+Florina is pre-1.0 — only `master` receives security fixes.

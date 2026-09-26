@@ -434,9 +434,7 @@ describe('AttentionInbox', () => {
       const restored = AttentionInbox.restore(snap1);
       const snap2 = restored.snapshot();
       expect(snap2.items.length).toBe(2);
-      expect(
-        snap2.items.sort(compareAttentionItems).map((i) => i.id),
-      ).toEqual(['1', '2']);
+      expect(snap2.items.sort(compareAttentionItems).map((i) => i.id)).toEqual(['1', '2']);
     });
   });
 });
@@ -565,13 +563,13 @@ describe('AttentionAggregator', () => {
 
   describe('report methods (non-event sources)', () => {
     it('reportDirtyWorktree creates a DirtyWorktree item', () => {
-      aggregator.reportDirtyWorktree('task-1', '/repo/.secretary-worktrees/task-1', 'secretary/task-1');
+      aggregator.reportDirtyWorktree('task-1', '/repo/.florina-worktrees/task-1', 'florina/task-1');
       const items = inbox.list();
       expect(items).toHaveLength(1);
       expect(items[0].kind).toBe('DirtyWorktree');
       expect(items[0].priority).toBe('Medium');
-      expect(items[0].payload['worktreePath']).toBe('/repo/.secretary-worktrees/task-1');
-      expect(items[0].payload['branch']).toBe('secretary/task-1');
+      expect(items[0].payload['worktreePath']).toBe('/repo/.florina-worktrees/task-1');
+      expect(items[0].payload['branch']).toBe('florina/task-1');
     });
 
     it('reportLivenessTimeout creates an IdleAgent item', () => {

@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Florina — Voice HUD states (mockup)</title>
+    <link rel="stylesheet" href="mockup.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="logo">Flor<em>ina</em></div>
+        <div class="navitem">✳ Chat</div>
+        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
+        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
+        <div class="navitem">◔ Fleet</div>
+        <div class="navitem">◇ Ideas</div>
+        <div class="navitem">◍ Preferences</div>
+        <div class="navitem">☰ Secretary</div>
+        <div class="sidefoot">
+          <div class="statusline"><span class="dot on"></span>daemon connected</div>
+        </div>
+      </nav>
+      <main>
+        <header>
+          <h1>Push-to-Talk HUD</h1>
+          <span class="sub">floating overlay · always-on-top · global hotkey (hold Space)</span>
+        </header>
+        <div class="content">
+          <div class="column" style="display: grid; gap: 22px">
+            <div>
+              <div class="sect" style="margin-top: 0">Idle</div>
+              <div class="hud">
+                <div class="ring">🎙</div>
+                <div class="hudtext"><b>Hold Space to talk</b>or click — daemon connected</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="sect">Listening</div>
+              <div class="hud listening">
+                <div class="ring">
+                  <span class="bars"><i></i><i></i><i></i><i></i></span>
+                </div>
+                <div class="hudtext">
+                  <b>Listening…</b>"approve network access for checkout-refactor"
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="sect">Processing</div>
+              <div class="hud processing">
+                <div class="ring">…</div>
+                <div class="hudtext"><b>Thinking</b>routing to Florina loop</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="sect">Responding</div>
+              <div class="hud responding">
+                <div class="ring">▶</div>
+                <div class="hudtext">
+                  <b>Done.</b>"Approved network to registry.npmjs.org, this task only."
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="sect">Offline</div>
+              <div class="hud">
+                <div class="ring" style="border-color: var(--slate); color: var(--slate)">⌀</div>
+                <div class="hudtext">
+                  <b>Daemon unreachable</b>start it with <span class="mono">florina daemon</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

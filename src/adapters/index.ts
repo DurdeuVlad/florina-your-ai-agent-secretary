@@ -31,14 +31,14 @@ export {
   mapPermissionRequest,
   CODEX_EVENT_TYPES,
 } from './codex-mapper.js';
-export type {
-  CodexEvent,
-  CodexPermissionRequestEvent,
-  MapperContext,
-} from './codex-mapper.js';
+export type { CodexEvent, CodexPermissionRequestEvent, MapperContext } from './codex-mapper.js';
 export { StubAdapter, STUB_ADAPTER_ID, buildDefaultStubEvents } from './stub-adapter.js';
 export type { StubAdapterOptions } from './stub-adapter.js';
-export { ClaudeHooksAdapter, CLAUDE_HOOKS_ADAPTER_ID, InMemoryHookEventSink } from './claude-hooks-adapter.js';
+export {
+  ClaudeHooksAdapter,
+  CLAUDE_HOOKS_ADAPTER_ID,
+  InMemoryHookEventSink,
+} from './claude-hooks-adapter.js';
 export type {
   ClaudeHooksAdapterOptions,
   ClaudeCliProcess,
@@ -95,8 +95,36 @@ export {
   mapPermissionPrompt,
   parseAndMapPtyLine,
 } from './claude-mapper.js';
+export type { ClaudeMapperContext, ParsedPtyChunk, ParsedPtyKind } from './claude-mapper.js';
+
+/* Provider quota readers (DEC-029, issue #71) */
+export {
+  CodexQuotaReader,
+  ClaudeQuotaReader,
+  QuotaReaderError,
+  isQuotaExhaustion,
+  reportExhaustion,
+  normalizeReset,
+  normalizeUsedPct,
+  statusFromUsage,
+} from './quota-readers.js';
 export type {
-  ClaudeMapperContext,
-  ParsedPtyChunk,
-  ParsedPtyKind,
-} from './claude-mapper.js';
+  QuotaReader,
+  JsonRpcRequest,
+  CodexQuotaReaderOptions,
+  StatuslineSource,
+  ClaudeQuotaReaderOptions,
+} from './quota-readers.js';
+
+/* Generic ACP adapter (DEC-030, issue #61) */
+export { AcpAdapter, nodeAcpSpawner, devinAcpAdapter, geminiAcpAdapter } from './acp-adapter.js';
+export type {
+  AcpAdapterOptions,
+  AcpProcess,
+  AcpSpawner,
+  PermissionResponder,
+} from './acp-adapter.js';
+
+/* Antigravity agy headless adapter (Tier D, issue #62) */
+export { AgyAdapter, AGY_ADAPTER_ID, nodeAgySpawner } from './agy-adapter.js';
+export type { AgyAdapterOptions, AgyProcess, AgySpawner } from './agy-adapter.js';

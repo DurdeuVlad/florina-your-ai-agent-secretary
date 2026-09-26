@@ -1,12 +1,12 @@
 {
-  "name": "agent-secretary",
+  "name": "florina",
   "version": "0.0.1",
   "description": "An open-source attention broker for coding agents.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "secretary": "dist/cli/index.js",
-    "asec": "dist/cli/index.js"
+    "florina": "dist/cli/index.js",
+    "flor": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -16,7 +16,12 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop": "node scripts/desktop.mjs",
+    "visual-qa": "node scripts/visual-qa.mjs",
+    "dist": "npm run build && electron-builder",
+    "dist:dir": "npm run build && electron-builder --dir",
+    "postinstall": "node scripts/ensure-electron.mjs"
   },
   "keywords": [
     "agent",
@@ -26,26 +31,30 @@
     "supervisor"
   ],
   "author": "",
-  "license": "TBD",
+  "license": "MIT",
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
+    "electron": "44.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.16.0",
     "eslint-config-prettier": "^9.1.0",
     "globals": "^15.15.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.3",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "zod": "^4.6.4"
   },
   "optionalDependencies": {
     "node-pty": "^1.0.0"

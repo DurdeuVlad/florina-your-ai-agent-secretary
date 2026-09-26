@@ -64,14 +64,19 @@ function approvalEvent(
     destination: 'example.com',
     command: 'npm install',
     workingDir: '/repo',
-    scope: [{ type: capability as ApprovalRequestedEvent['scope'][0]['type'], targets: ['example.com'] }],
+    scope: [
+      { type: capability as ApprovalRequestedEvent['scope'][0]['type'], targets: ['example.com'] },
+    ],
     riskLevel: riskLevel as ApprovalRequestedEvent['riskLevel'],
     ...overrides,
   };
 }
 
 /** Build a FileChanged event for the given path. */
-function fileChangedEvent(path: string, overrides: Partial<FileChangedEvent> = {}): FileChangedEvent {
+function fileChangedEvent(
+  path: string,
+  overrides: Partial<FileChangedEvent> = {},
+): FileChangedEvent {
   return {
     ...base,
     type: 'FileChanged',
@@ -188,11 +193,23 @@ describe('LivenessMonitor', () => {
   });
 
   it('identifies meaningful event types correctly', () => {
-    const meaningful: string[] = ['FileChanged', 'ToolStarted', 'ToolFinished', 'TestStarted', 'TestFinished'];
+    const meaningful: string[] = [
+      'FileChanged',
+      'ToolStarted',
+      'ToolFinished',
+      'TestStarted',
+      'TestFinished',
+    ];
     for (const type of meaningful) {
       expect(MEANINGFUL_EVENT_TYPES.has(type)).toBe(true);
     }
-    const notMeaningful: string[] = ['AgentStarted', 'AgentProgress', 'ApprovalRequested', 'AgentCompleted', 'AgentFailed'];
+    const notMeaningful: string[] = [
+      'AgentStarted',
+      'AgentProgress',
+      'ApprovalRequested',
+      'AgentCompleted',
+      'AgentFailed',
+    ];
     for (const type of notMeaningful) {
       expect(MEANINGFUL_EVENT_TYPES.has(type)).toBe(false);
     }
@@ -1074,11 +1091,7 @@ describe('AttentionEngine — Edge cases', () => {
       success: false,
       error: 'Sandbox violation detected',
     };
-    const result = engine.classify(
-      event,
-      'A',
-      { ...cleanContext, livenessTimedOut: true },
-    );
+    const result = engine.classify(event, 'A', { ...cleanContext, livenessTimedOut: true });
     expect(result.category).toBe(Cat.RiskDetected);
     expect(result.reason).toContain('Sandbox violation');
   });
@@ -1154,7 +1167,7 @@ describe('AttentionEngine — Edge cases', () => {
     expect(result.action).toBe('batch');
   });
 
-  it('classifies all 13 event types without throwing', () => {
+  it('classifies all 21 event types without throwing', () => {
     const events: SupervisorEvent[] = [
       { ...base, type: 'AgentStarted', objective: 'Test', workingDir: '/repo' },
       { ...base, type: 'AgentProgress', message: 'Working' },
@@ -1188,10 +1201,44 @@ describe('AttentionEngine — Edge cases', () => {
         riskLevel: 'low',
         prompt: 'Continue?',
       },
-      { ...base, type: 'AgentBlocked', reason: 'Waiting', blockerType: 'dependency', retryable: true },
+      {
+        ...base,
+        type: 'AgentBlocked',
+        reason: 'Waiting',
+        blockerType: 'dependency',
+        retryable: true,
+      },
       { ...base, type: 'AgentCompleted', summary: 'Done', deliverables: [] },
       { ...base, type: 'AgentFailed', error: 'Crash', recoverable: true },
       { ...base, type: 'AgentStopped', reason: 'user' },
+      { ...base, type: 'UsageReported', provider: 'codex', totalTokens: 100 },
+      {
+        ...base,
+        type: 'QuotaObserved',
+        provider: 'codex',
+        window: 'five_hour',
+        usedPct: 0.5,
+        status: 'allowed',
+        source: 'polled',
+      },
+      {
+        ...base,
+        type: 'TaskFailedOver',
+        fromProvider: 'codex',
+        toProvider: 'gemini',
+        reason: 'quota_exhausted',
+      },
+      { ...base, type: 'TaskParked', reason: 'fleet dry' },
+      { ...base, type: 'TaskResumed', provider: 'gemini' },
+      {
+        ...base,
+        type: 'ContextCondensed',
+        summary: 's',
+        forgottenEventIds: ['e1'],
+        keptEventCount: 2,
+      },
+      { ...base, type: 'ContextHealthChanged', status: 'ok' },
+      { ...base, type: 'VerificationObserved', kind: 'test', success: true },
     ];
 
     for (const event of events) {

@@ -82,7 +82,7 @@ describe('storage: database initialization & migrations', () => {
   it('initializes an in-memory database and runs migrations', () => {
     const db = new StorageDatabase({ path: ':memory:' });
     const result = db.open();
-    expect(result.appliedVersion).toBe(1);
+    expect(result.appliedVersion).toBe(4);
     expect(db.isOpen).toBe(true);
     db.close();
     expect(db.isOpen).toBe(false);
@@ -93,7 +93,7 @@ describe('storage: database initialization & migrations', () => {
     db.open();
     // Running runMigrations again on the same connection should be a no-op.
     const version = runMigrations(db.connection);
-    expect(version).toBe(1);
+    expect(version).toBe(4);
     db.close();
   });
 
@@ -135,6 +135,8 @@ describe('storage: database initialization & migrations', () => {
     expect(names).toContain('attention_items');
     expect(names).toContain('decisions');
     expect(names).toContain('approvals');
+    expect(names).toContain('capability_grants');
+    expect(names).toContain('briefs');
     expect(names).toContain('context_capsules');
     expect(names).toContain('_migrations');
     db.close();
@@ -238,14 +240,14 @@ describe('storage: round-trip persistence for every domain object', () => {
 
   it('Project round-trips through the database', () => {
     const project = buildProject({
-      name: 'agent-secretary',
+      name: 'florina',
       repo: { path: '/repo', remoteUrl: 'git@github.com:foo/bar.git', defaultBranch: 'main' },
       policies: { allowAutoApproval: true, livenessTimeoutMs: 30000, alwaysApprove: ['push'] },
     });
     ctx.projects.insert(project);
     const retrieved = ctx.projects.getById(project.id);
     expect(retrieved).not.toBeNull();
-    expect(retrieved!.name).toBe('agent-secretary');
+    expect(retrieved!.name).toBe('florina');
     expect(retrieved!.repo.path).toBe('/repo');
     expect(retrieved!.repo.remoteUrl).toBe('git@github.com:foo/bar.git');
     expect(retrieved!.policies.allowAutoApproval).toBe(true);
@@ -883,24 +885,30 @@ describe('storage: migration framework is forward-only', () => {
       version: number;
       description: string;
     }[];
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(4);
     expect(rows[0].version).toBe(1);
     expect(rows[0].description).toContain('Create all tables');
+    expect(rows[1].version).toBe(2);
+    expect(rows[1].description).toContain('capability_grants');
+    expect(rows[2].version).toBe(3);
+    expect(rows[2].description).toContain('briefs');
+    expect(rows[3].version).toBe(4);
+    expect(rows[3].description).toContain('chat_messages');
     db.close();
   });
 
   it('a second open on a persistent db does not re-apply migrations', () => {
     // Use a temp file to simulate a persistent database.
-    const tmp = path.join(os.tmpdir(), `asec-test-${Date.now()}.db`);
+    const tmp = path.join(os.tmpdir(), `flor-test-${Date.now()}.db`);
     const db1 = new StorageDatabase({ path: tmp });
     const r1 = db1.open();
-    expect(r1.appliedVersion).toBe(1);
+    expect(r1.appliedVersion).toBe(4);
     db1.close();
 
     const db2 = new StorageDatabase({ path: tmp });
     const r2 = db2.open();
-    // Migrations should not be re-applied; version stays at 1.
-    expect(r2.appliedVersion).toBe(1);
+    // Migrations should not be re-applied; version stays at 4.
+    expect(r2.appliedVersion).toBe(4);
     db2.close();
 
     // Clean up.

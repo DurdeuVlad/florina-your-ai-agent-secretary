@@ -1,32 +1,45 @@
-# Contributing
+# Contributing to Florina
 
-Thanks for your interest in Agent Secretary.
+Thanks for your interest. Florina is a local-first supervisory layer for
+coding agents — contributions are welcome.
 
-## Getting started
+## Development setup
 
 ```bash
 npm install
-npm run build
-npm test
+npm run typecheck   # strict TypeScript
+npm test            # vitest suite
+npm run lint        # eslint
+npm run format      # prettier
 ```
 
-See the [README](README.md) for prerequisites and the full CLI reference,
-and [`AGENTS.md`](AGENTS.md) for the toolchain/language rationale, command
-reference, conventions, and the worktree lifecycle.
+All four must pass before a change lands — CI enforces this on Node 22.x
+and 24.x.
 
-## Before opening a PR
+## Architecture
 
-- `npm run lint` and `npm run typecheck` must pass.
-- `npm test` must pass.
-- `npm run format` if you touched formatting-sensitive files.
+The codebase is strictly hexagonal (DEC-037):
 
-## Design decisions
+- `src/core/domain/` — the domain model; imports nothing outside core
+- `src/core/application/` — ports and use cases
+- `src/adapters/inbound/` — CLI, WebSocket control plane, MCP, voice, desktop
+- `src/adapters/outbound/` — agent runtimes, persistence, git, quota, model
+- `src/bootstrap/` — the only place concrete implementations are composed
 
-Architecture and product decisions are tracked in
-[`DECISION_LEDGER.md`](DECISION_LEDGER.md). If your change conflicts with an
-existing decision, open an issue to discuss it before implementing — don't
-silently diverge from a settled decision.
+`tests/architecture-boundaries.test.ts` enforces the dependency direction
+mechanically — keep new code inside the right layer.
 
-## Reporting bugs / requesting features
+## Conventions
 
-Open a GitHub issue. Include repro steps for bugs where possible.
+- ESM with `.js` extensions on relative imports
+- Every meaningful state transition is journaled before summarizing (DEC-012)
+- Florina narrows permissions, never silently widens them (DEC-011)
+- Worktree branches use the `florina/` prefix; worktrees live in
+  `.florina-worktrees/` (DEC-024)
+- Write a failing test that demonstrates the bug before fixing it, and
+  prove behavior by running the real system — not by inspection
+
+## Commit & PR style
+
+Small, focused PRs — one issue each. Commit messages describe _why_.
+See `AGENTS.md` for the full repo guide.

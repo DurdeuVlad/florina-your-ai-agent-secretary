@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { AdapterFidelityTier } from '../src/domain/enums.js';
 import type { SupervisorEvent } from '../src/domain/events.js';
 import { validateEvent } from '../src/domain/events.js';
@@ -52,7 +55,8 @@ import {
  */
 class MockCliProcess implements ClaudeCliProcess {
   readonly pid: number;
-  private exitHandler: ((exitCode: number | null, signal?: NodeJS.Signals | null) => void) | null = null;
+  private exitHandler: ((exitCode: number | null, signal?: NodeJS.Signals | null) => void) | null =
+    null;
   private killed = false;
   readonly killSignals: string[] = [];
 
@@ -192,7 +196,9 @@ describe('Claude Code hooks mapper', () => {
 
   describe('inferDestinationFromTool', () => {
     it('extracts file_path from file tools', () => {
-      expect(inferDestinationFromTool('Write', { file_path: '/src/index.ts' })).toBe('/src/index.ts');
+      expect(inferDestinationFromTool('Write', { file_path: '/src/index.ts' })).toBe(
+        '/src/index.ts',
+      );
     });
 
     it('extracts command from Bash', () => {
@@ -248,13 +254,15 @@ describe('Claude Code hooks mapper', () => {
     });
 
     it('rates git push as critical', () => {
-      expect(inferRiskLevel(CapabilityType.Shell, 'Bash', { command: 'git push origin main' })).toBe(
-        CapabilityRiskLevel.Critical,
-      );
+      expect(
+        inferRiskLevel(CapabilityType.Shell, 'Bash', { command: 'git push origin main' }),
+      ).toBe(CapabilityRiskLevel.Critical);
     });
 
     it('rates Other as critical (DEC-011)', () => {
-      expect(inferRiskLevel(CapabilityType.Other, 'UnknownTool')).toBe(CapabilityRiskLevel.Critical);
+      expect(inferRiskLevel(CapabilityType.Other, 'UnknownTool')).toBe(
+        CapabilityRiskLevel.Critical,
+      );
     });
   });
 
@@ -297,7 +305,10 @@ describe('Claude Code hooks mapper', () => {
 
     it('maps a Write tool call to ToolStarted + FileChanged', () => {
       const event: PreToolUseHookEvent = {
-        ...hookBase({ tool_name: 'Write', tool_input: { file_path: '/src/new.ts', content: '...' } }),
+        ...hookBase({
+          tool_name: 'Write',
+          tool_input: { file_path: '/src/new.ts', content: '...' },
+        }),
         hook_event_name: 'PreToolUse',
         tool_name: 'Write',
         tool_input: { file_path: '/src/new.ts', content: '...' },
@@ -475,7 +486,10 @@ describe('Claude Code hooks mapper', () => {
   describe('mapNotification', () => {
     it('maps permission_prompt to ApprovalRequested with conservative defaults', () => {
       const event: NotificationHookEvent = {
-        ...hookBase({ message: 'Claude needs your permission', notification_type: 'permission_prompt' }),
+        ...hookBase({
+          message: 'Claude needs your permission',
+          notification_type: 'permission_prompt',
+        }),
         hook_event_name: 'Notification',
         message: 'Claude needs your permission',
         notification_type: 'permission_prompt',
@@ -594,11 +608,42 @@ describe('Claude Code hooks mapper', () => {
 
     it('produces events that pass validateEvent', () => {
       const events: ClaudeHookEvent[] = [
-        { ...hookBase({ source: 'startup', model: 'm1' }), hook_event_name: 'SessionStart', source: 'startup', model: 'm1' } as ClaudeHookEvent,
-        { ...hookBase({ tool_name: 'Bash', tool_input: { command: 'ls' } }), hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } } as ClaudeHookEvent,
-        { ...hookBase({ tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {}, duration_ms: 10 }), hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {}, duration_ms: 10 } as ClaudeHookEvent,
-        { ...hookBase({ tool_name: 'Bash', tool_input: { command: 'npm i' } }), hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'npm i' } } as ClaudeHookEvent,
-        { ...hookBase({ last_assistant_message: 'done' }), hook_event_name: 'Stop', last_assistant_message: 'done' } as ClaudeHookEvent,
+        {
+          ...hookBase({ source: 'startup', model: 'm1' }),
+          hook_event_name: 'SessionStart',
+          source: 'startup',
+          model: 'm1',
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({ tool_name: 'Bash', tool_input: { command: 'ls' } }),
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'ls' },
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({
+            tool_name: 'Bash',
+            tool_input: { command: 'ls' },
+            tool_response: {},
+            duration_ms: 10,
+          }),
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'ls' },
+          tool_response: {},
+          duration_ms: 10,
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({ tool_name: 'Bash', tool_input: { command: 'npm i' } }),
+          hook_event_name: 'PermissionRequest',
+          tool_name: 'Bash',
+          tool_input: { command: 'npm i' },
+        } as ClaudeHookEvent,
+        {
+          ...hookBase({ last_assistant_message: 'done' }),
+          hook_event_name: 'Stop',
+          last_assistant_message: 'done',
+        } as ClaudeHookEvent,
       ];
       for (const event of events) {
         for (const mapped of mapHookEvent(event, ctx)) {
@@ -672,10 +717,7 @@ describe('Claude Code hooks mapper', () => {
  * 2. ClaudeHooksAdapter unit tests (mock CLI + in-memory sink)
  * ------------------------------------------------------------------ */
 describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
-  function makeAdapter(
-    spawner: MockCliSpawner,
-    sink: InMemoryHookEventSink,
-  ): ClaudeHooksAdapter {
+  function makeAdapter(spawner: MockCliSpawner, sink: InMemoryHookEventSink): ClaudeHooksAdapter {
     return new ClaudeHooksAdapter(null, { spawner, eventSink: sink });
   }
 
@@ -913,5 +955,283 @@ describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
     await adapter.connect();
     expect(adapter.fidelityTier).toBe(AdapterFidelityTier.B);
     await adapter.disconnect();
+  });
+
+  describe('scoped hooks configuration and forwarder (issue #177)', () => {
+    it('writes settings.json and forwarder.cjs in an isolated temp directory, keeping workingDir clean (DEC-024)', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-workdir-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-clean-dir-1',
+          sessionId: 'sess-clean-dir-1',
+          agentId: 'claude-code',
+          workingDir: workDir,
+          objective: 'Test clean working directory',
+        };
+
+        await adapter.startRun('task-clean-dir-1', config);
+
+        // Verify the worktree was NOT polluted with any .claude directory (DEC-024)
+        const claudeDirInWorktree = path.join(workDir, '.claude');
+        const worktreeHasClaude = await fs
+          .access(claudeDirInWorktree)
+          .then(() => true)
+          .catch(() => false);
+        expect(worktreeHasClaude).toBe(false);
+
+        // Verify --settings argument was passed to CLI pointing to isolated temp dir
+        expect(spawner.spawnCalls).toHaveLength(1);
+        const spawnArgs = spawner.spawnCalls[0].args;
+        expect(spawnArgs).toContain('--settings');
+        const settingsIdx = spawnArgs.indexOf('--settings');
+        const settingsPath = spawnArgs[settingsIdx + 1];
+        expect(settingsPath).toBeDefined();
+
+        // Verify settings.json exists in temp dir and has all hook events
+        const settingsContent = await fs.readFile(settingsPath, 'utf8');
+        const parsedSettings = JSON.parse(settingsContent) as Record<string, unknown>;
+        expect(parsedSettings.hooks).toBeDefined();
+        const hooksMap = parsedSettings.hooks as Record<string, unknown>;
+        for (const hookName of CLAUDE_HOOK_EVENT_NAMES) {
+          expect(hooksMap[hookName]).toBeDefined();
+        }
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(workDir, { recursive: true, force: true });
+      }
+    });
+
+    it('forwarder.cjs normalizes multi-line JSON to a single line and denies PermissionRequest', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-fwd-test-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-fwd-1',
+          sessionId: 'sess-fwd-1',
+          agentId: 'claude-code',
+          workingDir: workDir,
+          objective: 'Test forwarder execution',
+        };
+        await adapter.startRun('task-fwd-1', config);
+
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
+        const parsedSettings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<
+          string,
+          Record<string, Array<{ hooks: Array<{ command: string }> }>>
+        >;
+        const commandStr: string = parsedSettings.hooks.PreToolUse[0].hooks[0].command;
+
+        // Extract forwarder and sink path from command
+        const matches = [...commandStr.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+        expect(matches.length).toBeGreaterThanOrEqual(2);
+        const [forwarderPath, sinkPath] = matches;
+
+        // 1. Test multi-line / pretty-printed JSON forwarding: must become a single line in sink
+        const multiLineToolEvent = JSON.stringify(
+          {
+            hook_event_name: 'PreToolUse',
+            session_id: 'sess-fwd-1',
+            cwd: workDir,
+            tool_name: 'Bash',
+            tool_input: {
+              command: 'echo "hello\nworld"',
+              nested: { foo: 'bar' },
+            },
+          },
+          null,
+          2,
+        );
+        const run1 = spawnSync(process.execPath, [forwarderPath, sinkPath], {
+          input: multiLineToolEvent,
+          encoding: 'utf8',
+        });
+        expect(run1.status).toBe(0);
+
+        // Check sink file contains exactly one non-empty line for this event
+        const sinkContent1 = await fs.readFile(sinkPath, 'utf8');
+        const lines = sinkContent1.trim().split('\n');
+        expect(lines).toHaveLength(1);
+        const parsedSinkLine = JSON.parse(lines[0]) as Record<string, unknown>;
+        expect(parsedSinkLine.hook_event_name).toBe('PreToolUse');
+
+        // 2. Test PermissionRequest: must append to sink AND output deny to stdout (DEC-011)
+        const permEvent = {
+          hook_event_name: 'PermissionRequest',
+          session_id: 'sess-fwd-1',
+          cwd: workDir,
+          tool_name: 'Bash',
+          tool_input: { command: 'rm -rf /' },
+        };
+        const run2 = spawnSync(process.execPath, [forwarderPath, sinkPath], {
+          input: JSON.stringify(permEvent),
+          encoding: 'utf8',
+        });
+        expect(run2.status).toBe(0);
+
+        // Verify stdout decision format
+        const stdoutParsed = JSON.parse(run2.stdout.trim());
+        expect(stdoutParsed.hookSpecificOutput).toBeDefined();
+        expect(stdoutParsed.hookSpecificOutput.permissionDecision).toBe('deny');
+        expect(stdoutParsed.hookSpecificOutput.permissionDecisionReason).toContain('DEC-011');
+
+        // Check sink file recorded the PermissionRequest as a second line
+        const sinkContent2 = await fs.readFile(sinkPath, 'utf8');
+        const lines2 = sinkContent2.trim().split('\n');
+        expect(lines2).toHaveLength(2);
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(workDir, { recursive: true, force: true });
+      }
+    });
+
+    it('end-to-end: forwarder writes events into real file sink and adapter streams them', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-e2e-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-e2e-1',
+          sessionId: 'sess-e2e-1',
+          agentId: 'claude-code',
+          workingDir: workDir,
+          objective: 'Test e2e streaming',
+        };
+        await adapter.startRun('task-e2e-1', config);
+
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
+        const parsedSettings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<
+          string,
+          Record<string, Array<{ hooks: Array<{ command: string }> }>>
+        >;
+        const commandStr: string = parsedSettings.hooks.PreToolUse[0].hooks[0].command;
+        const matches = [...commandStr.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+        const [forwarderPath, sinkPath] = matches;
+
+        // Start listening to the event stream
+        const eventStream = adapter.streamEvents();
+        const collectedEventsPromise = (async () => {
+          const events: SupervisorEvent[] = [];
+          for await (const ev of eventStream) {
+            events.push(ev);
+            if (ev.type === 'ToolStarted') {
+              break; // Stop after receiving the forwarded tool event
+            }
+          }
+          return events;
+        })();
+
+        // Invoke forwarder with a PreToolUse hook event
+        spawnSync(process.execPath, [forwarderPath, sinkPath], {
+          input: JSON.stringify({
+            hook_event_name: 'PreToolUse',
+            session_id: 'sess-e2e-1',
+            cwd: workDir,
+            tool_name: 'Bash',
+            tool_input: { command: 'git status' },
+          }),
+          encoding: 'utf8',
+        });
+
+        const received = await collectedEventsPromise;
+        const types = received.map((e) => e.type);
+        expect(types).toContain('AgentStarted');
+        expect(types).toContain('ToolStarted');
+
+        const toolEvent = received.find((e) => e.type === 'ToolStarted');
+        expect(toolEvent).toBeDefined();
+        if (toolEvent && toolEvent.type === 'ToolStarted') {
+          expect(toolEvent.toolName).toBe('Bash');
+        }
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(workDir, { recursive: true, force: true });
+      }
+    });
+
+    it('cleans up temporary hooks directory on disconnect', async () => {
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-cleanup-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-clean-1',
+          sessionId: 'sess-clean-1',
+          agentId: 'claude-code',
+          workingDir: workDir,
+          objective: 'Test cleanup',
+        };
+        await adapter.startRun('task-clean-1', config);
+
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
+        const hooksDir = path.dirname(settingsPath);
+
+        // Before disconnect: hooksDir exists
+        expect(
+          await fs
+            .access(hooksDir)
+            .then(() => true)
+            .catch(() => false),
+        ).toBe(true);
+
+        await adapter.disconnect();
+
+        // After disconnect: hooksDir is cleaned up
+        expect(
+          await fs
+            .access(hooksDir)
+            .then(() => true)
+            .catch(() => false),
+        ).toBe(false);
+      } finally {
+        await fs.rm(workDir, { recursive: true, force: true });
+      }
+    });
+
+    it('uses custom hookCommand when provided in options', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-custom-cmd-test-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, {
+          spawner,
+          hookCommand: 'my-custom-forwarder.sh',
+        });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-custom-1',
+          sessionId: 'sess-custom-1',
+          agentId: 'claude-code',
+          workingDir: tempDir,
+          objective: 'Test custom hookCommand',
+        };
+        await adapter.startRun('task-custom-1', config);
+
+        const spawnArgs = spawner.spawnCalls[0].args;
+        const settingsPath = spawnArgs[spawnArgs.indexOf('--settings') + 1];
+        const settings = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+        expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe('my-custom-forwarder.sh');
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });

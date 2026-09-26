@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { WebSocket } from 'ws';
 
 import {
-  SecretaryDaemon,
+  FlorinaDaemon,
   DEFAULT_DAEMON_PORT,
   type ApiRequest,
   type ApiResponse,
@@ -22,7 +22,7 @@ import type { SupervisorEvent } from '../src/domain/index.js';
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-test-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -129,8 +129,9 @@ describe('daemon: lifecycle', () => {
   });
 
   it('starts, listens on localhost, and stops cleanly', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -152,8 +153,9 @@ describe('daemon: lifecycle', () => {
   });
 
   it('stop is a no-op when already stopped', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -179,16 +181,18 @@ describe('daemon: single-instance enforcement', () => {
   });
 
   it('second start fails when another instance holds the lockfile', async () => {
-    const first = new SecretaryDaemon({
+    const first = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
     });
     await first.start();
 
-    const second = new SecretaryDaemon({
+    const second = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -202,8 +206,9 @@ describe('daemon: single-instance enforcement', () => {
     // Write a lockfile pointing at a pid that is definitely not alive.
     const stalePid = 999_999;
     fs.writeFileSync(lockfile, String(stalePid));
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -216,13 +221,14 @@ describe('daemon: single-instance enforcement', () => {
 
 describe('daemon: control-plane API', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: WebSocket;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -371,13 +377,14 @@ describe('daemon: control-plane API', () => {
 
 describe('daemon: live event stream', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: WebSocket;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -432,6 +439,166 @@ describe('daemon: live event stream', () => {
     daemon.publishEvent(sampleEvent());
     await expect(nextEvent(client, 300)).rejects.toThrow('timed out');
   });
+
+  it('broadcasts voice-state reports to subscribed clients (issue #131)', async () => {
+    client.send(JSON.stringify({ type: 'subscribe' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const reporter = await openClient(daemon.port);
+    try {
+      // Attach the subscriber's listener BEFORE sending the command — the
+      // broadcast fires inside command execution, so the push can land
+      // before the response does.
+      const push = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no voice:state push')), 2000);
+        const onMessage = (data: unknown): void => {
+          const parsed = JSON.parse(
+            typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+          ) as Record<string, unknown>;
+          if (parsed['type'] === 'voice:state') {
+            clearTimeout(timer);
+            client.off('message', onMessage);
+            resolve(parsed);
+          }
+        };
+        client.on('message', onMessage);
+      });
+
+      // Commands take the {kind: ...} dispatch path; the response is the
+      // first non-push reply on that socket.
+      const response = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no command response')), 2000);
+        reporter.once('message', (data: unknown) => {
+          clearTimeout(timer);
+          resolve(
+            JSON.parse(
+              typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+            ) as Record<string, unknown>,
+          );
+        });
+      });
+      reporter.send(
+        JSON.stringify({
+          kind: 'voice-state',
+          state: 'processing',
+          transcript: 'ship it',
+          mode: 'whisper',
+        }),
+      );
+      expect((await response)['ok']).toBe(true);
+
+      expect(await push).toMatchObject({
+        type: 'voice:state',
+        state: 'processing',
+        transcript: 'ship it',
+        mode: 'whisper',
+      });
+    } finally {
+      reporter.close();
+    }
+  });
+
+  it('does not broadcast voice-state to unsubscribed clients', async () => {
+    client.send(JSON.stringify({ kind: 'voice-state', state: 'listening' }));
+    // The reporting client isn't subscribed — no push arrives; only the
+    // command response (which nextEvent ignores since it lacks type:'event').
+    await expect(nextEvent(client, 300)).rejects.toThrow('timed out');
+  });
+
+  it('chat-send journals the message, pushes chat:message, and chat-read returns it (#157)', async () => {
+    client.send(JSON.stringify({ type: 'subscribe' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sender = await openClient(daemon.port);
+    try {
+      // Attach the subscriber's listener BEFORE the command — the push
+      // fires inside command execution and can beat the response.
+      const push = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no chat:message push')), 2000);
+        const onMessage = (data: unknown): void => {
+          const parsed = JSON.parse(
+            typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+          ) as Record<string, unknown>;
+          if (parsed['type'] === 'chat:message') {
+            clearTimeout(timer);
+            client.off('message', onMessage);
+            resolve(parsed);
+          }
+        };
+        client.on('message', onMessage);
+      });
+
+      const response = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no command response')), 2000);
+        sender.once('message', (data: unknown) => {
+          clearTimeout(timer);
+          resolve(
+            JSON.parse(
+              typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+            ) as Record<string, unknown>,
+          );
+        });
+      });
+      sender.send(JSON.stringify({ kind: 'chat-send', text: 'status check' }));
+      expect((await response)['ok']).toBe(true);
+
+      const pushed = await push;
+      expect(pushed['type']).toBe('chat:message');
+      expect((pushed['message'] as Record<string, unknown>)['content']).toBe('status check');
+      expect((pushed['message'] as Record<string, unknown>)['role']).toBe('user');
+
+      // Resume path: a fresh read over the socket returns the journaled row.
+      const readResponse = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no chat-read response')), 2000);
+        sender.once('message', (data: unknown) => {
+          clearTimeout(timer);
+          resolve(
+            JSON.parse(
+              typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+            ) as Record<string, unknown>,
+          );
+        });
+      });
+      sender.send(JSON.stringify({ kind: 'chat-read' }));
+      const read = await readResponse;
+      expect(read['ok']).toBe(true);
+      expect((read['messages'] as Array<Record<string, unknown>>).map((m) => m['content'])).toEqual(
+        ['status check'],
+      );
+    } finally {
+      sender.close();
+    }
+  });
+
+  it('chat-clear moves the read window over the socket (#157)', async () => {
+    const sender = await openClient(daemon.port);
+    const roundTrip = (cmd: Record<string, unknown>): Promise<Record<string, unknown>> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no response')), 2000);
+        sender.once('message', (data: unknown) => {
+          clearTimeout(timer);
+          resolve(
+            JSON.parse(
+              typeof data === 'string' ? data : (data as Buffer).toString('utf8'),
+            ) as Record<string, unknown>,
+          );
+        });
+        sender.send(JSON.stringify(cmd));
+      });
+    try {
+      await roundTrip({ kind: 'chat-send', text: 'before' });
+      const cleared = await roundTrip({ kind: 'chat-clear' });
+      expect(cleared['ok']).toBe(true);
+      await roundTrip({ kind: 'chat-send', text: 'after' });
+      const read = await roundTrip({ kind: 'chat-read' });
+      expect(read['ok']).toBe(true);
+      const messages = read['messages'] as Array<Record<string, unknown>>;
+      expect(messages.map((m) => m['content'])).toEqual(['after']);
+      expect(read['clearedAt']).toBeDefined();
+    } finally {
+      sender.close();
+    }
+  });
 });
 
 describe('daemon: health check', () => {
@@ -450,8 +617,9 @@ describe('daemon: health check', () => {
   });
 
   it('returns daemon + storage status', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -469,8 +637,9 @@ describe('daemon: health check', () => {
   });
 
   it('throws when daemon is not running', () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -495,8 +664,9 @@ describe('daemon: integration (start, API, events, stop)', () => {
   });
 
   it('full flow: start daemon, call API, receive events, stop', async () => {
-    const daemon = new SecretaryDaemon({
+    const daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,

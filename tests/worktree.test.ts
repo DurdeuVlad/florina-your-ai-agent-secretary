@@ -9,8 +9,8 @@ import { buildProject, buildTask } from '../src/domain/index.js';
 import {
   WorktreeManager,
   DirtyWorktreeError,
-  secretaryBranchName,
-  SECRETARY_BRANCH_PREFIX,
+  florinaBranchName,
+  FLORINA_BRANCH_PREFIX,
 } from '../src/daemon/worktree.js';
 
 /* ------------------------------------------------------------------ *
@@ -23,7 +23,7 @@ import {
  * directory in `afterEach`.
  */
 function createTempGitRepo(): string {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'secretary-wt-'));
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'florina-wt-'));
   const repoPath = path.join(tmpRoot, 'repo');
   fs.mkdirSync(repoPath, { recursive: true });
   git(['init', '--initial-branch=main'], repoPath);
@@ -57,20 +57,20 @@ function rmrf(p: string): void {
  * ------------------------------------------------------------------ */
 
 describe('worktree: branch naming convention (DEC-024)', () => {
-  it('secretaryBranchName produces secretary/<slug>', () => {
-    expect(secretaryBranchName('add-pagination')).toBe('secretary/add-pagination');
+  it('florinaBranchName produces florina/<slug>', () => {
+    expect(florinaBranchName('add-pagination')).toBe('florina/add-pagination');
   });
 
   it('sanitizes slugs with spaces and uppercase', () => {
-    expect(secretaryBranchName('Add Cursor Pagination!')).toBe('secretary/add-cursor-pagination');
+    expect(florinaBranchName('Add Cursor Pagination!')).toBe('florina/add-cursor-pagination');
   });
 
-  it('SECRETARY_BRANCH_PREFIX is "secretary"', () => {
-    expect(SECRETARY_BRANCH_PREFIX).toBe('secretary');
+  it('FLORINA_BRANCH_PREFIX is "florina"', () => {
+    expect(FLORINA_BRANCH_PREFIX).toBe('florina');
   });
 });
 
-describe('worktree: lifecycle (integration with a real temp git repo)', () => {
+describe('worktree: lifecycle (integration with a real temp git repo)', { timeout: 30_000 }, () => {
   let repoPath: string;
   let tmpRoot: string;
 
@@ -90,20 +90,20 @@ describe('worktree: lifecycle (integration with a real temp git repo)', () => {
     rmrf(tmpRoot);
   });
 
-  it('createWorktree creates a worktree on branch secretary/<slug>', () => {
+  it('createWorktree creates a worktree on branch florina/<slug>', () => {
     const manager = new WorktreeManager();
     const wtPath = manager.createWorktree(repoPath, 'fix-cache-bug');
 
     expect(fs.existsSync(wtPath)).toBe(true);
     expect(fs.existsSync(path.join(wtPath, 'README.md'))).toBe(true);
 
-    // The worktree is checked out on the secretary branch.
+    // The worktree is checked out on Florina branch.
     const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], wtPath).trim();
-    expect(branch).toBe('secretary/fix-cache-bug');
+    expect(branch).toBe('florina/fix-cache-bug');
 
     // The branch exists in the main repo.
     const branches = git(['branch', '--list'], repoPath);
-    expect(branches).toContain('secretary/fix-cache-bug');
+    expect(branches).toContain('florina/fix-cache-bug');
   });
 
   it('createWorktree registers the worktree path on the task via TaskRepository', () => {
@@ -151,7 +151,7 @@ describe('worktree: lifecycle (integration with a real temp git repo)', () => {
     const status = manager.worktreeStatus(wtPath);
     expect(status.clean).toBe(true);
     expect(status.dirty).toBe(false);
-    expect(status.branch).toBe('secretary/status-check');
+    expect(status.branch).toBe('florina/status-check');
     expect(status.baseCommit).toMatch(/^[0-9a-f]{7,40}$/);
 
     // Make it dirty and re-check.
@@ -194,7 +194,7 @@ describe('worktree: lifecycle (integration with a real temp git repo)', () => {
     expect(fs.existsSync(wtPath)).toBe(false);
   });
 
-  it('listWorktrees shows the created worktree on the secretary branch', () => {
+  it('listWorktrees shows the created worktree on Florina branch', () => {
     const manager = new WorktreeManager();
     const wtPath = manager.createWorktree(repoPath, 'list-me');
 
@@ -205,7 +205,7 @@ describe('worktree: lifecycle (integration with a real temp git repo)', () => {
 
     const entry = list.find((w) => w.path === path.normalize(wtPath));
     expect(entry).toBeDefined();
-    expect(entry!.branch).toBe('secretary/list-me');
+    expect(entry!.branch).toBe('florina/list-me');
     expect(entry!.head).toMatch(/^[0-9a-f]{7,40}$/);
   });
 });

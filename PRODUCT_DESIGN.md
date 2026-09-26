@@ -1,17 +1,41 @@
-# Agent Secretary: Product Design
+# Florina: Product Design
 
-This is the product design document for Agent Secretary — an open-source supervisory layer for coding agents that routes human attention to what matters. The core premise is that developers can parallelize implementation with coding agents faster than they can supervise the resulting work.
+This is the product design document for Florina — an open-source supervisory layer for coding agents that routes human attention to what matters. The core premise is that developers can parallelize implementation with coding agents faster than they can supervise the resulting work.
+
+**The permanent relationship is User <-> Florina.** Providers (Codex, Claude
+Code, Gemini, Devin, `agy`), managers, workers, sessions, and subagents are
+replaceable execution infrastructure beneath her — never a second
+relationship the user has to maintain in parallel. Florina absorbs two
+forms of cognitive load: **work memory** (what's running, why, what
+finished, what needs a decision — see § Attention Model and
+`docs/RULES_MEMORY_AND_SUPERVISION.md` § 9 "Catch me up") and **operating
+memory** (how the user likes work done — rules and preferences, not just
+provider routing — see `docs/RULES_MEMORY_AND_SUPERVISION.md`). This
+document remains the canonical doctrine; four companion documents carry the
+detail that would otherwise bloat it: `docs/RULES_MEMORY_AND_SUPERVISION.md`
+(memory taxonomy, rule lifecycle, Execution Brief compiler, supervision
+ladder, resumption), `docs/PROVIDER_TOPOLOGY.md` (agent/provider vocabulary,
+brokered-vs-federated research), `docs/UX_INFORMATION_ARCHITECTURE.md`
+(navigation, terminology audit) and `docs/UX_FLOWS.md` +
+`docs/SYSTEM_FLOWS.md` (user/system flows). `docs/GAP_ANALYSIS.md` tracks
+current-vs-target and the issues that close each gap.
 
 ## Product Principles
 
 ### Attention Over Activity
 Do not surface every agent event. Surface what matters. Most agent activity should not interrupt the human.
 
+### Energy Conservation
+The mandate is to save the user's limited energy and attention across many projects and a life outside work. Never interrupt with decisions already made, scopes already granted, or answers easily inferred from preference memories and observable state — resolve silently, journal the inference, and let the human audit later. The human debates direction and ideas with the Florina; they do not manage agents.
+
+### Done Means Proven
+An agent's claim of completion is a claim, not a result. Writing code is the easy part; proving it works is the job. A task surfaces as complete only with verification evidence — tests run, build passing, behavior demonstrated. Work that produced no proof is routed back for verification, not escalated.
+
 ### Deliverables Over Transcripts
 Execution logs and conversation history are secondary. Outcomes are primary. The human interacts with Tasks, Deliverables, Attention Items, and Decisions — not agent sessions.
 
 ### Context Isolation by Default
-Never blindly mix project/task contexts. This is a non-negotiable architectural primitive. Different projects/tasks must have hard context boundaries. The global secretary retrieves specific context as needed.
+Never blindly mix project/task contexts. This is a non-negotiable architectural primitive. Different projects/tasks must have hard context boundaries. The global Florina retrieves specific context as needed.
 
 ### Progressive Disclosure
 Start with concise status/summary. Allow drill into: reasoning, diff, logs, tests, session, raw tool events — only when needed.
@@ -20,13 +44,13 @@ Start with concise status/summary. Allow drill into: reasoning, diff, logs, test
 Voice is not speech-to-text pasted into a CLI. Conversation should maintain interaction state and allow natural follow-ups. But voice defines the interaction model; the visual surface supports it. Don't turn the product into a dashboard with a microphone button.
 
 ### Provider Independence
-Agent-specific details live behind adapters. The secretary sits above heterogeneous agents. Users keep whichever coding agents they already use.
+Agent-specific details live behind adapters. Florina sits above heterogeneous agents. Users keep whichever coding agents they already use.
 
 ### User-Controlled Autonomy
 Different users/tasks may use different execution/approval policies. The product makes policy and consequences visible and configurable rather than imposing one philosophy.
 
 ### Inspectability
-User must always be able to see what actually happened beneath a secretary summary. LLM summaries are projections over the immutable event journal, never replacements.
+User must always be able to see what actually happened beneath Florina summary. LLM summaries are projections over the immutable event journal, never replacements.
 
 ## Core Domain Objects
 
@@ -37,7 +61,7 @@ Durable work context, usually corresponding to a repository or closely related w
 A goal delegated to one or more agents. Human-facing unit of work. A task may be handled by one agent, move between agents, use several parallel agents, produce several sessions, restart after failure, generate multiple Deliverables.
 
 ### Agent
-A provider/runtime capable of performing work (Codex, Claude Code, future ACP agents, etc.).
+A provider/runtime capable of performing work (Codex, Claude Code, future ACP agents, etc.). "Agent" has three senses in Florina — provider/runtime (this one), Agent Profile (a reusable role/system-prompt/tool-scope configuration applied to a Task), and Session/Run (a concrete execution instance, below). See `docs/PROVIDER_TOPOLOGY.md` § 1 for the full disambiguation and why only Agent Profile is a scoped addition to the existing model.
 
 ### Session (Run)
 A concrete execution/conversation instance belonging to a Task. Implementation detail — the human shouldn't need to care unless session-level detail becomes relevant.
@@ -63,7 +87,7 @@ The isolated body of knowledge needed to reason about one project/task/session. 
 - **Task Capsule**: Objective, agent assignment, run history, deliverables, rolled-up event summaries. Maps 1:1 with a git worktree in MVP.
 - **Session Capsule**: Raw conversation, tool calls, event stream. Ephemeral; summarized into the Task Capsule when the session ends.
 
-In MVP, capsules are stored as scoped rows/tables in the local SQLite database — not a retrieval/RAG system. The secretary loads a capsule's content into its working context on demand when discussion enters that scope, and unloads it when switching away.
+In MVP, capsules are stored as scoped rows/tables in the local SQLite database — not a retrieval/RAG system. Florina loads a capsule's content into its working context on demand when discussion enters that scope, and unloads it when switching away.
 
 ### Relationships
 - A **Project** contains multiple **Tasks**.
@@ -77,14 +101,14 @@ In MVP, capsules are stored as scoped rows/tables in the local SQLite database �
 
 ## Context Routing Model
 
-The secretary acts as a context router, not a context blender, preventing cross-project contamination.
+Florina acts as a context router, not a context blender, preventing cross-project contamination.
 
-- **Global Secretary Level**: Maintains awareness of what projects exist, what tasks are active, what changed, what requires attention, and where detailed context can be retrieved.
+- **Global Florina Level**: Maintains awareness of what projects exist, what tasks are active, what changed, what requires attention, and where detailed context can be retrieved.
 - **Project Level**: Owns repository info, project-level policies, and the task list.
 - **Task Level**: Owns the objective, agent assignment, run history, and deliverables.
 - **Session Level**: Owns the conversation, tool calls, and raw events.
 
-When the user switches subjects, the secretary routes to the relevant Context Capsule. The switch can be triggered via explicit commands or natural language references. The secretary resolves ambiguous references by evaluating active contexts rather than guessing (e.g., if asked "Did we fix the cache issue?", the secretary looks up active projects with cache work and confirms the intended context). Context is fetched on-demand only when discussion enters a specific boundary. Old context is summarized and eventually discarded when no longer active, keeping the working context lightweight and focused.
+When the user switches subjects, Florina routes to the relevant Context Capsule. The switch can be triggered via explicit commands or natural language references. Florina resolves ambiguous references by evaluating active contexts rather than guessing (e.g., if asked "Did we fix the cache issue?", Florina looks up active projects with cache work and confirms the intended context). Context is fetched on-demand only when discussion enters a specific boundary. Old context is summarized and eventually discarded when no longer active, keeping the working context lightweight and focused.
 
 ## Attention Model
 
@@ -94,7 +118,7 @@ The key insight: 'agent state' ≠ 'attention state'.
 - Done → may need HIGH attention (modified auth boundary). 
 - Five completed doc tasks → collapse into one digest.
 
-Agent Secretary transitions from standard states (running / waiting / idle / done) to actionable attention states (ignore / batch / summarize / ask / urgently interrupt).
+Florina transitions from standard states (running / waiting / idle / done) to actionable attention states (ignore / batch / summarize / ask / urgently interrupt).
 
 **Categories and Priorities**:
 - FYI (batch)
@@ -136,7 +160,7 @@ Voice and CLI share the same typed command API. Voice should never become a para
 - **Authenticated UI confirmation**: push/PR/network expansion — user must visually verify the structured approval card
 - **Strong device confirmation**: merge/deploy/destructive cloud action
 
-> **Compatibility with DEC-010**: Voice approvals do NOT approve LLM summaries. For low-risk voice approvals, the secretary reads back deterministic structured fields (task, capability, destination, scope) from the adapter data. For anything requiring the full approval card, voice merely stages the approval to a visual surface where the user verifies structured data before confirming.
+> **Compatibility with DEC-010**: Voice approvals do NOT approve LLM summaries. For low-risk voice approvals, Florina reads back deterministic structured fields (task, capability, destination, scope) from the adapter data. For anything requiring the full approval card, voice merely stages the approval to a visual surface where the user verifies structured data before confirming.
 
 ## Visual Experience
 
@@ -169,25 +193,25 @@ oauth-migration     Claude   editing
 
 There are four primary interfaces over the same local control plane:
 1. **Desktop App (Electron / Tauri)**: High-craft, lightweight desktop frontend (inspired by the clean, minimal aesthetic of Codex Desktop and Raycast). Provides the persistent visual Attention Inbox, one-click capability approval cards, side-by-side completion digest & diff viewer, and floating Push-to-Talk voice HUD with global hotkey support.
-2. **CLI (`secretary` / `asec`)**: Terminal-first workflow, scripting, headless CI/SSH environments, and automation.
+2. **CLI (`florina` / `flor`)**: Terminal-first workflow, scripting, headless CI/SSH environments, and automation.
 3. **Push-to-Talk Voice**: Global hotkey, sub-second speech-to-speech interaction for hands-free delegation, quick status queries, and spoken approvals.
 4. **Remote Companion (Near-Term / Later)**: Mobile/web paired device for push notifications, status monitoring, and away-from-desk approvals.
 
 ## Agent Adapters
 
-Heterogeneous agents appear behind a single interface. The secretary never needs to understand the internal reasoning loop of each coding agent — only operational state and artifacts. We normalize events, not agent internals, into one canonical internal event schema.
+Heterogeneous agents appear behind a single interface. Florina never needs to understand the internal reasoning loop of each coding agent — only operational state and artifacts. We normalize events, not agent internals, into one canonical internal event schema.
 
 **Adapter Fidelity Tiers**:
 - **A**: Structured permissions + events (Codex app-server JSON-RPC)
 - **B**: Structured lifecycle hooks (Claude Code hooks)
-- **C**: ACP-native (compatible agents)
-- **D**: Structured JSON CLI output (other tools)
-- **E**: PTY heuristic (last-resort compatibility)
+- **C**: ACP-native — `devin acp`, `gemini --acp`, and other Agent Client Protocol CLIs via the generic ACP adapter (DEC-030)
+- **D**: Structured JSON CLI output (`agy -p --output-format stream-json`, other tools)
+- **E**: PTY heuristic (last-resort compatibility; no adapter shipped, DEC-023)
 
 The attention engine adjusts its behavior based on adapter fidelity:
-- **Tier A–B**: Auto-approve policies are available (the secretary has structured data to evaluate). Permission requests are presented with full structured context.
+- **Tier A–B**: Auto-approve policies are available (Florina has structured data to evaluate). Permission requests are presented with full structured context.
 - **Tier C**: Auto-approve where ACP provides sufficient structured context; fall back to manual approval otherwise.
-- **Tier D–E**: No auto-approval permitted. All permission-like events require human confirmation because the secretary cannot reliably distinguish actual permission requests from other output.
+- **Tier D–E**: No auto-approval permitted. All permission-like events require human confirmation because Florina cannot reliably distinguish actual permission requests from other output.
 
 ## Task Lifecycle
 
@@ -198,7 +222,7 @@ Tasks can fail and be cancelled. A worker process terminating successfully does 
 
 ## Deliverable Review
 
-When an agent claims completion, the secretary produces a Completion Digest. The distinction between observed (deterministic) and model-inferred information must be clearly visible.
+When an agent claims completion, Florina produces a Completion Digest. The distinction between observed (deterministic) and model-inferred information must be clearly visible.
 
 **Completion Digest Structure**:
 - **Objective**: What the agent says it achieved.
@@ -219,7 +243,7 @@ When an agent claims completion, the secretary produces a Completion Digest. The
 ### MVP
 - Codex and Claude Code adapters
 - Desktop App (Electron / Tauri): Minimal, high-craft desktop frontend featuring the visual Attention Inbox (`NEEDS YOU` cards, live fleet `WORKING` status), one-click capability approvals, completion digest inspector, and global hotkey push-to-talk voice HUD
-- CLI (`secretary`, short alias `asec`): Full terminal parity (`secretary run`, `status`, `inbox`, `show`, `approve`, `stop`, `digest`)
+- CLI (`florina`, short alias `flor`): Full terminal parity (`florina run`, `status`, `inbox`, `show`, `approve`, `stop`, `digest`)
 - Multiple concurrent tasks, each mapping to one worktree and one run (no multi-agent or multi-run per task in MVP)
 - Normalized event ingestion from adapters
 - Deterministic attention engine (always-surface / batch / elevate rules + liveness timeout check)
@@ -228,7 +252,7 @@ When an agent claims completion, the secretary produces a Completion Digest. The
 - Push-to-talk voice (OpenAI Realtime API fast-start WebRTC/WebSocket bridge with local whisper.cpp fallback)
 - SQLite-backed task/event/attention state
 - Immutable event journal
-- Execution safety: MVP relies on agent-native sandboxing (Codex's built-in sandbox, Claude Code's permission system). The Secretary does not provision OS-level containers or sandboxes — it enforces policy atop existing agent security.
+- Execution safety: MVP relies on agent-native sandboxing (Codex's built-in sandbox, Claude Code's permission system). The Florina does not provision OS-level containers or sandboxes — it enforces policy atop existing agent security.
 
 ### Near-Term
 Things that logically follow after validation:
@@ -240,11 +264,20 @@ Things that logically follow after validation:
 - Continuous real-time voice (Pipecat/LiveKit)
 - Remote companion (paired E2E-encrypted)
 
+### Multi-Provider Orchestration (M6 — locked 2026-09-13, docs/ARCHITECTURE.md)
+- Florina agentic loop on LiteLLM connector (DEC-034)
+- Quota-aware capacity router: subscriptions as a pooled resource; failover mid-task; park/resume at earliest reset (DEC-029)
+- Per-project manager agents dispatching workers only through daemon MCP tools (DEC-018 amended)
+- Provider preference prompts per project + auto-learned preference memories (DEC-029)
+- Scoped auto-approval grants (DEC-007/010/011)
+- Verification-gated completion — done means proven (DEC-032)
+- Idea ledgers → compiled Briefs → human-gated delegation (DEC-033)
+- Additional providers: Devin `acp` + Gemini `--acp` (Tier C), `agy` headless (Tier D)
+
 ### Later
 Intentionally deferred:
 - Organization/team collaboration
 - Multi-user RBAC
-- Autonomous task decomposition / manager agents
 - Semantic long-term memory
 - Custom code editor / IDE
 - Cloud coding sandbox

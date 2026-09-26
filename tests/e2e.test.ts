@@ -2,7 +2,7 @@
  * End-to-end integration test: daemon + CLI client + stub adapter +
  * attention engine + metrics (issue #39).
  *
- * This is a true full-stack E2E test: it starts a real SecretaryDaemon
+ * This is a true full-stack E2E test: it starts a real FlorinaDaemon
  * bound to a localhost WebSocket port with an in-memory SQLite database,
  * connects real {@link DaemonClient} instances over the actual WebSocket
  * transport (no mocks), and exercises the complete command lifecycle
@@ -25,7 +25,7 @@ import * as path from 'node:path';
 
 import type Database from 'better-sqlite3';
 
-import { SecretaryDaemon, type Command } from '../src/daemon/index.js';
+import { FlorinaDaemon, type Command } from '../src/daemon/index.js';
 import { DaemonClient, DaemonConnectionError } from '../src/cli/client.js';
 import {
   ProjectRepository,
@@ -47,7 +47,7 @@ import { AdapterFidelityTier } from '../src/domain/enums.js';
 function uniqueLockfile(): string {
   return path.join(
     os.tmpdir(),
-    `agent-secretary-e2e-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
+    `florina-e2e-${process.pid}-${Math.random().toString(36).slice(2)}.lock`,
   );
 }
 
@@ -56,7 +56,7 @@ function uniqueLockfile(): string {
  * The daemon keeps `db` private; tests reach it via this cast (the same
  * pattern used by the existing integration tests).
  */
-function getDb(daemon: SecretaryDaemon): Database.Database {
+function getDb(daemon: FlorinaDaemon): Database.Database {
   return (daemon as unknown as { db: { connection: Database.Database } }).db.connection;
 }
 
@@ -65,7 +65,7 @@ function getDb(daemon: SecretaryDaemon): Database.Database {
  * layer. Returns the created project and task so tests can reference
  * their ids.
  */
-function seedProjectAndTask(daemon: SecretaryDaemon): {
+function seedProjectAndTask(daemon: FlorinaDaemon): {
   projectId: string;
   taskId: string;
 } {
@@ -96,7 +96,7 @@ function seedProjectAndTask(daemon: SecretaryDaemon): {
  * Seed a pending approval row for a task so the `approve` command can
  * resolve it. Returns the approval id.
  */
-function seedApproval(daemon: SecretaryDaemon, taskId: string): string {
+function seedApproval(daemon: FlorinaDaemon, taskId: string): string {
   const db = getDb(daemon);
   const approvals = new ApprovalRepository(db);
   const approval = buildApproval({
@@ -114,11 +114,7 @@ function seedApproval(daemon: SecretaryDaemon, taskId: string): string {
  * `timeoutMs`. Uses real timers (not fake) so async adapter event
  * piping progresses naturally.
  */
-async function waitFor(
-  fn: () => boolean,
-  timeoutMs = 3000,
-  intervalMs = 10,
-): Promise<void> {
+async function waitFor(fn: () => boolean, timeoutMs = 3000, intervalMs = 10): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fn()) return;
@@ -141,14 +137,15 @@ function totalEvents(snapshot: { counters: { eventsEmitted: Record<string, numbe
 
 describe('e2e: full daemon lifecycle (#39)', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: DaemonClient;
   let taskId: string;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -184,7 +181,7 @@ describe('e2e: full daemon lifecycle (#39)', () => {
     }
 
     // --- wait for stub adapter events to flow through the bus -------
-    // The stub emits 13 events; plus the AgentStarted from CommandApi.
+    // The stub emits 21 events; plus the AgentStarted from CommandApi.
     // Wait until the metrics collector has recorded a healthy number.
     await waitFor(() => {
       const snap = daemon.commandPlane;
@@ -199,9 +196,13 @@ describe('e2e: full daemon lifecycle (#39)', () => {
     // --- query-metrics (via WebSocket) ------------------------------
     // Wait until events have been counted by the MetricsCollector.
     await waitFor(() => {
-      const mc = (daemon as unknown as {
-        metricsCollector: { snapshot: () => { counters: { eventsEmitted: Record<string, number> } } };
-      }).metricsCollector;
+      const mc = (
+        daemon as unknown as {
+          metricsCollector: {
+            snapshot: () => { counters: { eventsEmitted: Record<string, number> } };
+          };
+        }
+      ).metricsCollector;
       return totalEvents(mc.snapshot()) >= 5;
     });
 
@@ -220,9 +221,11 @@ describe('e2e: full daemon lifecycle (#39)', () => {
     // Wait until the AttentionAggregator has created items from the
     // stub's ApprovalRequested / AgentCompleted / AgentFailed events.
     await waitFor(() => {
-      const inbox = (daemon as unknown as {
-        attentionInbox: { size: number };
-      }).attentionInbox;
+      const inbox = (
+        daemon as unknown as {
+          attentionInbox: { size: number };
+        }
+      ).attentionInbox;
       return inbox.size >= 1;
     });
 
@@ -282,14 +285,15 @@ describe('e2e: full daemon lifecycle (#39)', () => {
 
 describe('e2e: error scenarios (#39)', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let client: DaemonClient;
   let taskId: string;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -313,9 +317,7 @@ describe('e2e: error scenarios (#39)', () => {
     // Pick a high random port that is almost certainly unused.
     const unusedPort = 18000 + Math.floor(Math.random() * 1000);
     const badClient = new DaemonClient({ port: unusedPort, timeoutMs: 1000 });
-    await expect(badClient.send({ kind: 'query-metrics' })).rejects.toThrow(
-      DaemonConnectionError,
-    );
+    await expect(badClient.send({ kind: 'query-metrics' })).rejects.toThrow(DaemonConnectionError);
   });
 
   it('invalid command kind: returns an UnknownCommandResponse', async () => {
@@ -406,15 +408,16 @@ describe('e2e: error scenarios (#39)', () => {
 
 describe('e2e: multi-surface (CLI + desktop) (#39)', () => {
   let lockfile: string;
-  let daemon: SecretaryDaemon;
+  let daemon: FlorinaDaemon;
   let cli: DaemonClient;
   let desktop: DaemonClient;
   let taskId: string;
 
   beforeEach(async () => {
     lockfile = uniqueLockfile();
-    daemon = new SecretaryDaemon({
+    daemon = new FlorinaDaemon({
       port: 0,
+      mcpPort: 0,
       lockfile,
       dbPath: ':memory:',
       installSignalHandlers: false,
@@ -464,9 +467,13 @@ describe('e2e: multi-surface (CLI + desktop) (#39)', () => {
     // Wait for the stub's events to flow through the EventBus and be
     // counted by the MetricsCollector (shared daemon state).
     await waitFor(() => {
-      const mc = (daemon as unknown as {
-        metricsCollector: { snapshot: () => { counters: { eventsEmitted: Record<string, number> } } };
-      }).metricsCollector;
+      const mc = (
+        daemon as unknown as {
+          metricsCollector: {
+            snapshot: () => { counters: { eventsEmitted: Record<string, number> } };
+          };
+        }
+      ).metricsCollector;
       return totalEvents(mc.snapshot()) >= 5;
     });
 

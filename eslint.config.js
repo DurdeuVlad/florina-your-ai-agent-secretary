@@ -46,10 +46,19 @@ export default [
     },
   },
   {
-    files: ['eslint.config.js'],
+    files: ['eslint.config.js', 'scripts/**/*.mjs', 'scripts/**/*.cjs'],
     languageOptions: {
       globals: {
         ...globals.node,
+      },
+    },
+  },
+  {
+    // The desktop renderer is a sandboxed browser context — no Node APIs.
+    files: ['src/adapters/inbound/desktop/renderer/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
       },
     },
   },

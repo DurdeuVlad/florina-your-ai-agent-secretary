@@ -1,6 +1,6 @@
-# Agent Secretary Decision Ledger
+# Florina Decision Ledger
 
-This is the Decision Ledger for Agent Secretary — a living record that prevents future agents from repeatedly reopening settled product questions without evidence. It documents the core decisions that shape the architecture and product direction.
+This is the Decision Ledger for Florina — a living record that prevents future agents from repeatedly reopening settled product questions without evidence. It documents the core decisions that shape the architecture and product direction.
 
 ---
 
@@ -21,7 +21,7 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Date**: 2026-08-19  
 **Status**: ACCEPTED  
 **Decision**: Real-time voice is core to the product identity  
-- **Rationale**: The intended experience is closer to having a live work secretary. Voice excels at delegation, status queries, and narrowly scoped approvals.
+- **Rationale**: The intended experience is closer to having a live work Secretary—now named Florina. Voice excels at delegation, status queries, and narrowly scoped approvals.
 - **Consequences**: Must design all commands as voice-compatible; must handle voice approval security. Voice is part of the product thesis and experience, not optional. Do not quietly downgrade to 'optional voice input' without a deliberate future decision. The visual surface supports voice.
 - **Alternatives Considered**: Text-only CLI; dashboard-first with voice addon.
 - **Reconsideration Trigger**: If validation shows developers strongly prefer text-only interaction even after experiencing voice.
@@ -32,8 +32,8 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Date**: 2026-08-19  
 **Status**: ACCEPTED  
 **Decision**: Context isolation is non-negotiable  
-- **Rationale**: Without isolation, the secretary will confuse projects, merge unrelated concepts, hallucinate relationships, carry assumptions across tasks, and become less useful as concurrency increases.
-- **Consequences**: Different projects/tasks must have hard context boundaries. The global secretary retrieves specific context as needed. Context isolation is an architectural primitive, not prompt engineering.
+- **Rationale**: Without isolation, Florina will confuse projects, merge unrelated concepts, hallucinate relationships, carry assumptions across tasks, and become less useful as concurrency increases.
+- **Consequences**: Different projects/tasks must have hard context boundaries. The global Florina retrieves specific context as needed. Context isolation is an architectural primitive, not prompt engineering.
 - **Alternatives Considered**: Single shared context; soft/advisory boundaries.
 - **Reconsideration Trigger**: If a reliable technique for maintaining accuracy in very large mixed contexts is discovered.
 
@@ -119,9 +119,9 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **ID**: DEC-011  
 **Date**: 2026-08-19  
 **Status**: ACCEPTED  
-**Decision**: The secretary should narrow permissions, never silently widen them  
-- **Rationale**: A remote secretary controlling local coding agents is close to a remote shell with an LLM between user and OS. Trust model must be correct.
-- **Consequences**: The security hierarchy: OS/container boundary → agent-native sandbox → secret/capability broker → secretary policy → human approval → LLM recommendations. Never invert it. An LLM saying 'safe' must not defeat a lower-level restriction.
+**Decision**: Florina should narrow permissions, never silently widen them  
+- **Rationale**: A remote Florina controlling local coding agents is close to a remote shell with an LLM between user and OS. Trust model must be correct.
+- **Consequences**: The security hierarchy: OS/container boundary → agent-native sandbox → secret/capability broker → Florina policy → human approval → LLM recommendations. Never invert it. An LLM saying 'safe' must not defeat a lower-level restriction.
 - **Alternatives Considered**: Trust LLM risk assessments for permission decisions.
 - **Reconsideration Trigger**: If LLM safety classification reaches formal-verification levels of reliability.
 
@@ -140,12 +140,14 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-013  
 **Date**: 2026-08-19  
-**Status**: ACCEPTED (amended 2026-08-20, issue #40)  
+**Status**: ACCEPTED (amended 2026-08-20 issue #40; provider set expanded 2026-09-13, issues #60–#62)  
 **Decision**: MVP supports Codex and Claude Code only  
 - **Rationale**: These are the two highest-value coding agents with the best structured supervision surfaces. Starting narrow proves the thesis without spreading across ten adapters.
 - **Consequences**: Codex via app-server JSON-RPC (adapter fidelity A), Claude Code via installed CLI + structured lifecycle hooks (adapter fidelity B). The Claude Code hooks adapter (`src/adapters/claude-hooks-adapter.ts`) wraps the user's installed `claude` CLI in headless (`-p`) mode and configures lifecycle hooks (PreToolUse, PostToolUse, PermissionRequest, Stop, Notification, SessionStart) that emit structured JSON events, which are mapped to the canonical `SupervisorEvent` schema. The previous PTY regex adapter (`src/adapters/claude-adapter.ts`) was misclassified as Tier B; it has been reclassified as Tier E per DEC-023 (PTY heuristics are Tier E, not Tier B). Tier B = "installed CLI + structured lifecycle hooks / Agent SDK" — NOT PTY scraping.
 - **Alternatives Considered**: Support more agents immediately; start with a single agent; classify PTY regex as Tier B (rejected — contradicts DEC-023 and DEC-011).
 - **Reconsideration Trigger**: If a third agent achieves significant adoption and has a strong structured API.
+
+**Amendment 2026-09-13 (issues #60–#62)**: The provider set expands beyond the MVP pair — the capacity-routing thesis (DEC-029) requires at least three providers to be meaningful. New providers: Devin CLI via `devin acp` (Tier C, DEC-030), Gemini CLI via `gemini --acp` (Tier C), and Antigravity `agy` headless `stream-json` (Tier D). All providers are local-only; Devin Cloud sessions are explicitly out of scope.
 
 ---
 
@@ -176,7 +178,7 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Status**: ACCEPTED  
 **Decision**: Context Capsules are scoped SQLite state, not a retrieval system  
 - **Rationale**: Capsules must be simple enough for MVP. A RAG/vector-search approach adds complexity without proven value. Scoped rows in SQLite match the existing storage decision.
-- **Consequences**: Three capsule scopes: Project (repo metadata, policies, task list), Task (objective, run history, deliverables, event summaries — maps 1:1 with a worktree), Session (raw events, conversation — ephemeral, summarized into Task Capsule on completion). Secretary loads the relevant capsule on-demand when context switches.
+- **Consequences**: Three capsule scopes: Project (repo metadata, policies, task list), Task (objective, run history, deliverables, event summaries — maps 1:1 with a worktree), Session (raw events, conversation — ephemeral, summarized into Task Capsule on completion). Florina loads the relevant capsule on-demand when context switches. **Amendment 2026-09-13 (DEC-029, issue #65)**: a fourth **User scope** is added — durable preference memories (provider/model rules, work-type affinities, quota-conditioned fallbacks) auto-written by the Florina from conversation. User scope is global but read-only to managers/workers; it feeds the CapacityRouter, not task context.
 - **Alternatives Considered**: Vector database / RAG retrieval; in-memory-only capsules; single flat context.
 - **Reconsideration Trigger**: If capsule sizes exceed what fits in a single LLM context window, necessitating retrieval.
 
@@ -187,7 +189,7 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Status**: ACCEPTED  
 **Decision**: Dual-track voice pipeline: OpenAI Realtime API for sub-second fast-start, whisper.cpp for local offline  
 - **Rationale**: Realtime speech-to-speech (via WebRTC/WebSocket) natively provides sub-second latency, voice activity detection (VAD), interruption handling, and direct function/tool calling against the local daemon API without multi-week audio plumbing. `whisper.cpp` + local TTS is preserved as the local/offline privacy alternative.
-- **Consequences**: The Realtime voice session is passed the Secretary's typed tool definitions (`start_task`, `get_inbox`, `approve_permission`, etc.). Spoken intent triggers tool calls executed on `localhost`. The voice model never executes arbitrary shell commands directly.
+- **Consequences**: The Realtime voice session is passed the Florina's typed tool definitions (`start_task`, `get_inbox`, `approve_permission`, etc.). Spoken intent triggers tool calls executed on `localhost`. The voice model never executes arbitrary shell commands directly.
 - **Alternatives Considered**: Local-only whisper.cpp pipeline exclusively (high latency/robotic turns in early versions); cloud STT + LLM + cloud TTS pipeline (high latency, lacks native interruption handling).
 - **Reconsideration Trigger**: If local realtime speech-to-speech models reach sub-second parity on consumer hardware.
 
@@ -195,22 +197,23 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-026  
 **Date**: 2026-08-19  
-**Status**: ACCEPTED  
-**Decision**: Canonical CLI binary name is `secretary`, with official short alias `asec`  
-- **Rationale**: `sec` suffers from severe namespace collision with standard security tooling (e.g. `sec` Simple Event Correlator, AppSec/InfoSec scripts, SEC regulatory tools) and timing units. `secretary` is completely unambiguous, expressive, matches the product persona, and autocompletes with `sec<tab>`. `asec` (Agent SECretary) provides a clean, 4-letter, non-colliding short alias for frequent CLI use.
-- **Consequences**: Primary CLI binary is `secretary`, install symlink/alias is `asec`. Commands work interchangeably (e.g. `secretary run` or `asec run`). Package/repo name remains `agent-secretary`.
-- **Alternatives Considered**: `sec` (rejected due to security/sec namespace collision); `agent-secretary` (kept as package name, too verbose for primary CLI binary); `as` (rejected due to standard shell keyword / assembler collisions).
+**Status**: SUPERSEDED by DEC-038  
+**Decision**: Canonical CLI binary name is `florina`, with official short alias `flor`  
+- **Rationale**: `sec` suffers from severe namespace collision with standard security tooling (e.g. `sec` Simple Event Correlator, AppSec/InfoSec scripts, SEC regulatory tools) and timing units. `florina` is completely unambiguous, expressive, matches the product persona. `flor` provides a clean, 4-letter, non-colliding short alias for frequent CLI use.
+- **Consequences**: Primary CLI binary is `florina`, install symlink/alias is `flor`. Commands work interchangeably (e.g. `florina run` or `flor run`). Package/repo name is `florina`.
+- **Alternatives Considered**: `sec` (rejected due to security/sec namespace collision); `as` (rejected due to standard shell keyword / assembler collisions).
 - **Reconsideration Trigger**: If a compelling community convention emerges.
+- **History**: Originally chose `secretary`/`asec`; binary names amended by DEC-038 (project rebrand to Florina).
 
 ---
 
 **ID**: DEC-027  
 **Date**: 2026-08-19  
 **Status**: ACCEPTED  
-**Decision**: MVP relies on agent-native sandboxing, not Secretary-provisioned containers  
-- **Rationale**: Codex and Claude Code both have built-in sandboxing and permission systems. The Secretary enforces policy atop these. Provisioning OS-level containers (Docker, etc.) for local CLIs is a massive scope item with minimal thesis-validation value.
-- **Consequences**: The security hierarchy in MVP starts at the agent-native sandbox level. The Secretary's role is to broker approvals and enforce policy, not to provision execution environments. The OS/container layer in the hierarchy is documented for future hardening, not MVP implementation.
-- **Alternatives Considered**: Docker-based sandbox per task; firejail/bubblewrap per agent; Secretary-managed VMs.
+**Decision**: MVP relies on agent-native sandboxing, not Florina-provisioned containers  
+- **Rationale**: Codex and Claude Code both have built-in sandboxing and permission systems. The Florina enforces policy atop these. Provisioning OS-level containers (Docker, etc.) for local CLIs is a massive scope item with minimal thesis-validation value.
+- **Consequences**: The security hierarchy in MVP starts at the agent-native sandbox level. The Florina's role is to broker approvals and enforce policy, not to provision execution environments. The OS/container layer in the hierarchy is documented for future hardening, not MVP implementation.
+- **Alternatives Considered**: Docker-based sandbox per task; firejail/bubblewrap per agent; Florina-managed VMs.
 - **Reconsideration Trigger**: If agent-native sandboxes prove insufficient for multi-tenant or high-security use cases.
 
 ---
@@ -220,7 +223,7 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Status**: ACCEPTED  
 **Decision**: Desktop frontend is a lightweight, high-craft desktop app (Electron / Tauri)  
 - **Rationale**: To feel as polished and fast as tools like Codex Desktop, Raycast, and Claude Desktop, the visual surface needs native OS integration: global push-to-talk hotkeys, system tray status, floating HUD / attention notifications, and instant keyboard navigation (`j`/`k`, `y`, `d`).
-- **Consequences**: The Desktop UI connects to the local Secretary Daemon over `localhost` IPC/WebSocket. It renders the Attention Inbox, structured capability approval cards, side-by-side completion digest & diff views, and voice waveform indicator. It is strictly a client to the daemon, ensuring 100% feature and state parity with the CLI.
+- **Consequences**: The Desktop UI connects to the local Florina Daemon over `localhost` IPC/WebSocket. It renders the Attention Inbox, structured capability approval cards, side-by-side completion digest & diff views, and voice waveform indicator. It is strictly a client to the daemon, ensuring 100% feature and state parity with the CLI.
 - **Alternatives Considered**: Web-only browser dashboard (lacks global OS push-to-talk hotkeys and system tray hooks); pure TUI only (harder to view rich side-by-side diffs and audio visualizers).
 - **Reconsideration Trigger**: If maintaining the desktop wrapper creates unacceptable build/distribution overhead.
 
@@ -235,9 +238,69 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
   - **Credential vault** (`src/daemon/credential-broker.ts`): securely stores credentials using the OS keychain where available (Windows Credential Manager via `cmdkey`, macOS Keychain via `security`) and falls back to an AES-256-GCM encrypted local file store (PBKDF2 key derivation from machine-specific material). `listCredentials` returns names only — never values.
   - **Capability broker** (`src/daemon/capability-broker.ts`): workers call `executeAction(action, params, credentialName, context)`. The broker (1) evaluates the request against the policy engine from #12 (DEC-007, DEC-011) — a `deny` means the credential is never accessed; (2) retrieves the credential from the vault; (3) executes the action via a registered executor, passing the credential internally; (4) returns only the `ActionResult` to the worker — never the raw credential.
   - **Audit log**: every credential use is recorded in the immutable event journal (DEC-012) with the action, credential name (not value), timestamp, and success/failure.
-  - **Security hierarchy** (DEC-011): the capability broker sits at the "secret/capability broker" rung, below the secretary policy rung. Policy is evaluated before any credential is retrieved. An LLM "safe" verdict can never defeat a policy deny.
-- **Alternatives Considered**: Environment variable injection into worker processes (risks leakage via logs/process inspection); credential proxy daemon (same concept but separate process — unnecessary for MVP since the Secretary daemon already brokers); direct developer interactive auth per action (too much friction for concurrent multi-task workflows).
+  - **Security hierarchy** (DEC-011): the capability broker sits at the "secret/capability broker" rung, below Florina policy rung. Policy is evaluated before any credential is retrieved. An LLM "safe" verdict can never defeat a policy deny.
+- **Alternatives Considered**: Environment variable injection into worker processes (risks leakage via logs/process inspection); credential proxy daemon (same concept but separate process — unnecessary for MVP since the Florina daemon already brokers); direct developer interactive auth per action (too much friction for concurrent multi-task workflows).
 - **Reconsideration Trigger**: If a need arises for credential rotation, scoped/temporary credentials, or cross-machine credential sharing that the current vault model cannot support.
+
+---
+
+**ID**: DEC-039
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Generalize preference memory into a full Rules & Memory model — facts, preferences, rules, hard policies, project knowledge, decisions, temporary instructions, learned patterns, each carrying scope/provenance/confidence
+- **Rationale**: DEC-029's `PreferenceProfile` is auto-written memory scoped narrowly to provider/model routing. The first user's actual repeated complaint (per the product-research pass, `docs/RULES_MEMORY_AND_SUPERVISION.md`) is about *all* categories of repeated instruction — research-before-deciding, scope discipline, review requirements — not just which provider runs the work. The memory envelope and provenance/confidence model DEC-029 already established generalizes cleanly; it does not need to be reinvented per category.
+- **Consequences**: `PreferenceProfile` becomes one memory *kind* (preference, provider/model-focused) inside the general taxonomy in `docs/RULES_MEMORY_AND_SUPERVISION.md` § 2, not the whole memory system. A hard exclusion list (autonomy/safety loosening, credentials, deploy/merge triggers) is never written from inferred provenance regardless of repetition (§ 4 of that doc) — this is the concrete answer to DEC-011 applied to memory-writing specifically.
+- **Alternatives Considered**: Keep memory scoped to provider/model preference only and build a separate, unrelated system for general rules (rejected — duplicates the provenance/scope/confidence machinery DEC-029 already solved); a numeric confidence score (rejected — false precision for a coarse three-value signal).
+- **Reconsideration Trigger**: If the general taxonomy proves too coarse in practice (kinds need further subdivision) or too permissive (the exclusion list needs to grow).
+- **Resolved By**: This research pass; implementation tracked in `docs/GAP_ANALYSIS.md` #1, #3, #16.
+
+---
+
+**ID**: DEC-040
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Rule application to workers runs through a deterministic Execution Brief Compiler, never a raw rule dump into a prompt
+- **Rationale**: With hundreds of eventual rules (brief's stated design target), injecting all of them into every worker prompt degrades context quality and defeats DEC-003's context-isolation principle. The *selection* of which rules apply must be deterministic and auditable (tag-match + scope-filter + priority-ranked conflict resolution), with an LLM call used only for wording/compilation after selection — consistent with DEC-014's "deterministic first" philosophy already applied to the attention engine.
+- **Consequences**: Every delegated Task produces an inspectable Execution Brief (Objective / Relevant context / Applicable rules / Constraints / Required verification / Definition of done / Provider rationale — `docs/RULES_MEMORY_AND_SUPERVISION.md` § 6.4) as a journaled artifact, not a reconstructed-after-the-fact explanation. This is the literal object shown when a user asks "why did you send this to Gemini?"
+- **Alternatives Considered**: LLM-driven relevance selection (rejected — non-deterministic, harder to audit, and the failure mode is silent context bloat); no compiler, rely on managers to informally decide what to mention (rejected — already the status quo per DEC-029's amendment, doesn't scale past a handful of rules).
+- **Reconsideration Trigger**: If tag-matching proves too coarse to correctly exclude irrelevant rules at scale, revisit with a lightweight embedding-based relevance step ahead of the deterministic filter (not instead of it).
+- **Resolved By**: This research pass; implementation tracked in `docs/GAP_ANALYSIS.md` #2.
+
+---
+
+**ID**: DEC-041
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Provider-native subagent topology gets a third state — Observed — alongside Managed (dispatched by Florina) and Opaque (no visibility); federation (Florina controlling native subagent trees) is not adopted
+- **Rationale**: Primary-source research (`docs/PROVIDER_TOPOLOGY.md` § 2, access date 2026-09-20) found no provider Florina targets exposes a stable, external, structured API for a third party to enumerate and control its native subagent tree — Claude Code's Agent View and subagents are session-internal or research-preview, Gemini CLI subagents are experimental (March 2026), and ACP's `subagents` capability is still draft and gated behind bilateral negotiation. Building toward full federation now means coding against unstable, single-vendor surfaces — the same risk profile DEC-023 already rejected for PTY scraping.
+- **Consequences**: DEC-018 stands unchanged for dispatch — there is still exactly one channel (`florina_spawn_task`) through which Florina/managers create work, and native subagents bypassing it remain disallowed. A new **Observed** classification is added for read-only visibility into provider-native activity Florina did not dispatch: display-only in the inspector, explicitly excluded from journal-as-Task, policy auto-approval, and quota accounting, so it can never be mistaken for Florina's own dispatch. No adapter currently implements Observed (see `docs/GAP_ANALYSIS.md` #7 — gated on provider surfaces stabilizing).
+- **Alternatives Considered**: Full federation now (rejected — no stable provider surface to build against); purely Opaque forever (rejected — becomes a real gap once these surfaces stabilize, and a user running a provider's own multi-agent UI alongside Florina would reasonably expect at least visibility).
+- **Reconsideration Trigger**: If a provider ships a stable, documented, external control/observation API for its native subagent topology.
+- **Resolved By**: `docs/PROVIDER_TOPOLOGY.md`; implementation tracked in `docs/GAP_ANALYSIS.md` #7.
+
+---
+
+**ID**: DEC-042
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Resumption ("catch me up") is a first-class, explicitly designed capability — not an emergent property of chat history
+- **Rationale**: The product's central promise is that the user doesn't have to reconstruct their own operational state after stepping away. Today's Chat resumes journaled history (DEC-012) but does not compile a since-you-were-away digest — the user would still have to scroll and infer. This is the flagship flow identified across the product-research pass (brief § 10, § 15C) and was previously implicit rather than specified.
+- **Consequences**: A `last_active_at` watermark is introduced (global per user session, not per-task); catch-up queries the journal/attention/task-status since that watermark and compiles a digest through the same deterministic-facts-first pipeline as completion digests (`PRODUCT_DESIGN.md` § Deliverable Review). The watermark advances only after the digest is confirmed delivered, so a crash before delivery doesn't skip a window. Full mechanism: `docs/RULES_MEMORY_AND_SUPERVISION.md` § 9.
+- **Alternatives Considered**: Rely on the user asking specific questions after returning (rejected — reintroduces the exact reconstruction burden the product exists to remove); auto-summarize on every idle gap regardless of length (rejected — noisy for short breaks; a threshold is used instead).
+- **Reconsideration Trigger**: If the chosen idle threshold produces digests that are either too frequent (noise) or too sparse (state loss) in practice.
+- **Resolved By**: This research pass; implementation tracked in `docs/GAP_ANALYSIS.md` #5.
+
+---
+
+**ID**: DEC-043
+**Date**: 2026-09-20
+**Status**: ACCEPTED
+**Decision**: Desktop information architecture simplifies from the current 7-item sidebar to five top-level destinations — Florina (home) / Attention / Work / History / Settings
+- **Rationale**: The current nav (Chat, Inbox, Tasks, Fleet, Ideas, Preferences, Secretary — `docs/UX_GUIDELINES.md` § 2) accumulated one entry per implementation slice (#120, #126–129, #157–163) rather than being designed as an information architecture. It puts diagnostic surfaces (Fleet, raw Preferences forms) at the same level as the product's actual center, and splits "what's happening" across Inbox/Tasks/Inspector without a clear ownership line.
+- **Consequences**: Chat + Secretary merge into **Florina** (home, unchanged as the launch view); Inbox renames to **Attention** (same substance); Tasks + Projects + the non-historical part of Session Inspector become **Work** (one progressive drill-down: project -> manager -> task -> worker -> run -> event); a new **History** surface holds completed/reviewed work, resolved decisions, and journal search; Fleet + Preferences + provider setup + desktop-local prefs become **Settings**, reframed as an audit/inspection surface (per DEC-031's "ordinary configuration happens conversationally" promise) rather than the primary way to configure Florina. Full mapping and rationale per item: `docs/UX_INFORMATION_ARCHITECTURE.md`. This is a navigation relabel/regroup only — it does not change any individual screen's internal component design (DG-01 tokens and card patterns from #180–#190 are unaffected).
+- **Alternatives Considered**: Keep the 7-item nav and rely on user habituation (rejected — doesn't fix the underlying category error of mixing product surfaces with diagnostics); collapse everything into the conversation with no addressable screens (rejected — brief § 12 explicitly wants the GUI to remain a navigable visual extension, not chat-only).
+- **Reconsideration Trigger**: If user testing shows the five-item split doesn't reduce navigation confusion versus the current seven.
+- **Resolved By**: `docs/UX_INFORMATION_ARCHITECTURE.md`; implementation tracked in `docs/GAP_ANALYSIS.md` #8, #9, #10.
 
 ---
 
@@ -247,7 +310,7 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Date**: 2026-08-19  
 **Status**: DEFERRED  
 **Decision**: Full remote control  
-- **Rationale**: Happy already proves the remote UX is feasible. Agent Secretary should validate the local attention thesis first.
+- **Rationale**: Happy already proves the remote UX is feasible. Florina should validate the local attention thesis first.
 - **Consequences**: Keep future remote supervision architecturally possible (outbound connections, E2E encryption, paired devices), but do not allow it to balloon initial scope.
 - **Alternatives Considered**: Build mobile-first from day one; exclude remote control entirely from future architecture.
 - **Reconsideration Trigger**: Strong user demand for mobile/remote supervision.
@@ -267,12 +330,12 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 
 **ID**: DEC-018  
 **Date**: 2026-08-19  
-**Status**: DEFERRED  
-**Decision**: Autonomous task decomposition  
-- **Rationale**: Those features obscure the hypothesis being tested (is attention compression valuable?).
-- **Consequences**: MVP: one human objective → one selected worker. No manager agents auto-selecting Claude vs Codex, no automatic sub-task creation.
-- **Alternatives Considered**: Hierarchical task decomposition with manager agents; automatic agent routing based on task type.
-- **Reconsideration Trigger**: Users consistently want automated multi-step workflows.
+**Status**: ACCEPTED (amended 2026-09-13, issue #63)  
+**Decision**: Autonomous task decomposition via per-project manager agents  
+- **Rationale**: Originally deferred because decomposition obscured the attention-compression hypothesis. The first user's workflow requires it: the Florina delegates to a per-project manager agent (itself a provider agent), which decomposes objectives and spawns workers.
+- **Consequences**: Manager agents exist but may only dispatch workers through the Florina daemon's MCP tool server (`florina_spawn_task` and friends). Every spawn is journaled (DEC-012), policy-checked (DEC-011), quota-checked (DEC-029), and visible in the attention inbox. Native provider subagents that bypass the daemon are disallowed — there is no parallel orchestration channel. A manager is a Task with a special capsule/tool set and is itself quota-tracked.
+- **Alternatives Considered**: Managers spawning workers natively inside their own runtime (rejected: invisible to journal, policy, and quota); no manager agents (superseded).
+- **Reconsideration Trigger**: If manager-driven decomposition generates attention noise that defeats DEC-015's metric.
 
 ---
 
@@ -294,7 +357,7 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Status**: ACCEPTED  
 **Decision**: PTY fallback adapter design — omit PTY fallback in early versions (Approach C); Tier E contract preserved but no concrete adapter shipped  
 - **Rationale**: The PTY fallback (Tier E) is a last-resort path for agents with no structured supervision surface. Three approaches were evaluated in `docs/PTY_FALLBACK_DESIGN.md`: (A) generic regex matching on terminal output, (B) PTY scrape with a vision model, (C) omit PTY fallback entirely in early versions. Approach C is recommended because it aligns with DEC-013 (MVP = Codex Tier A + Claude Code Tier B only), DEC-011 (never silently widen permissions — refusing to guess at permission prompts from unstructured text is the conservative choice), and the product thesis DEC-015 (attention compression requires trustworthy event sources; a fragile regex scraper or hallucination-prone vision classifier generates false-positive confirmation cards and missed prompts, both worsening Attention Compression Ratio). Approach A is deterministic but fragile (per-agent pattern maintenance, version drift). Approach B imports a non-deterministic vision model into event generation, in tension with DEC-014 (deterministic attention engine) and complicating audit (DEC-012).
-- **Consequences**: No concrete Tier E PTY adapter is implemented in the MVP or near-term. Unsupported agents run outside the Secretary until they receive a structured adapter (Tier A–D). `AdapterFidelityTier.E` and the Tier E contract (no auto-approve; all permission-like events require human confirmation) remain defined in `src/domain/enums.ts` and `src/adapters/base.ts` so the attention engine and policy layer are forward-compatible. The confidence gap is eliminated by not attempting detection — the strongest possible strategy. When a third agent achieves significant adoption (DEC-013 reconsideration trigger), first pursue a structured adapter (ACP-native Tier C or JSON CLI Tier D); only fall back to a PTY heuristic if no structured surface exists and demand justifies the maintenance burden, preferring Approach A (regex, deterministic, auditable) over Approach B (vision) as the interim.
+- **Consequences**: No concrete Tier E PTY adapter is implemented in the MVP or near-term. Unsupported agents run outside the Florina until they receive a structured adapter (Tier A–D). `AdapterFidelityTier.E` and the Tier E contract (no auto-approve; all permission-like events require human confirmation) remain defined in `src/domain/enums.ts` and `src/adapters/base.ts` so the attention engine and policy layer are forward-compatible. The confidence gap is eliminated by not attempting detection — the strongest possible strategy. When a third agent achieves significant adoption (DEC-013 reconsideration trigger), first pursue a structured adapter (ACP-native Tier C or JSON CLI Tier D); only fall back to a PTY heuristic if no structured surface exists and demand justifies the maintenance burden, preferring Approach A (regex, deterministic, auditable) over Approach B (vision) as the interim.
 - **Alternatives Considered**: Generic regex matching on terminal output (Approach A — pragmatic but fragile, high maintenance); PTY scrape with vision model (Approach B — robust detection but high complexity, cost, non-deterministic input, hallucination risk); omit PTY fallback entirely in early versions (Approach C — chosen).
 - **Resolved By**: Issue #13 — `docs/PTY_FALLBACK_DESIGN.md`.
 
@@ -304,8 +367,8 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 **Date**: 2026-08-19  
 **Status**: ACCEPTED  
 **Decision**: Worktree lifecycle management  
-- **Rationale**: Each Task maps 1:1 to one git worktree and one run in MVP (DEC-020). A deterministic branch naming convention and a safe prune policy are required so Secretary-managed work is clearly distinguishable from human-authored branches and uncommitted work is never silently destroyed.
-- **Consequences**: Branch naming convention is `secretary/<task-slug>` (sanitized slug, lowercase alphanumeric + hyphens). Worktrees are placed in a sibling `.secretary-worktrees/` directory at a deterministic path. Worktrees are retained until an explicit prune; `pruneWorktree` removes only clean worktrees and throws `DirtyWorktreeError` on dirty ones (DEC-011 — never silently destroy uncommitted work). Dirty detection via `git status --porcelain` surfaces a status the attention engine can elevate for human review. Implemented in `src/daemon/worktree.ts` (`WorktreeManager`).
+- **Rationale**: Each Task maps 1:1 to one git worktree and one run in MVP (DEC-020). A deterministic branch naming convention and a safe prune policy are required so Florina-managed work is clearly distinguishable from human-authored branches and uncommitted work is never silently destroyed.
+- **Consequences**: Branch naming convention is `florina/<task-slug>` (sanitized slug, lowercase alphanumeric + hyphens). Worktrees are placed in a sibling `.florina-worktrees/` directory at a deterministic path. Worktrees are retained until an explicit prune; `pruneWorktree` removes only clean worktrees and throws `DirtyWorktreeError` on dirty ones (DEC-011 — never silently destroy uncommitted work). Dirty detection via `git status --porcelain` surfaces a status the attention engine can elevate for human review. Implemented in `src/daemon/worktree.ts` (`WorktreeManager`).
 - **Alternatives Considered**: Automatic worktree deletion on task completion; retain all worktrees until explicit user prune; ephemeral temp directories.
 - **Resolved By**: Issue #7 — `src/daemon/worktree.ts`.
 
@@ -319,3 +382,145 @@ This is the Decision Ledger for Agent Secretary — a living record that prevent
 - **Consequences**: Need a deterministic disambiguation hierarchy for natural language queries (e.g., "how is the auth task doing?" when multiple projects have auth tasks).
 - **Alternatives Considered**: Interactive conversational clarification ("Did you mean Project A or Project B?"); recency bias (most recently active project); error on ambiguity.
 - **Blocked On**: Context routing design.
+
+---
+
+**ID**: DEC-029  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Quota-aware capacity routing across the user's provider subscriptions  
+- **Rationale**: The first user pays for multiple agent subscriptions (Codex, Claude, Devin, Gemini/Antigravity) with per-provider preferences and per-provider quota windows. Treating subscriptions as a pooled capacity resource — rather than silos — is the product's differentiator: work migrates when a provider runs dry and pauses only when all providers are exhausted.
+- **Consequences**:
+  - `QuotaLedger` normalizes per-provider quota as `{provider, window, used_pct, resets_at, source}`. Sources: Codex `account/rateLimits/read` over app-server JSON-RPC (authoritative), Claude statusline `rate_limits` / underlying `anthropic-ratelimit-unified-*` headers, and reactive 429/exhaustion detection for Devin and Gemini/agy (no official quota API).
+  - `CapacityRouter` routes new work to the highest-preference provider with capacity (proactive polling where supported) and triggers failover on exhaustion (reactive everywhere).
+  - **Failover mechanism**: freeze the current session, then resume the Task on the next preferred provider in the *same git worktree*, primed from the Task Capsule (DEC-020/024). All providers are local, so worktree + capsule is the uniform handoff artifact — no diff shipping or cloud handoff.
+  - When every provider is exhausted the project parks; the daemon schedules resume at the earliest `resets_at`.
+  - A **provider preference profile** is a model-level ruleset, not a provider ranking: `provider → model → work-type → quota-conditional fallback`. It supports per-model allow/deny rules (e.g. "Claude: never Opus, never Faber; default latest Sonnet; Haiku for repeatable reading work") and quota-conditioned chains (e.g. "Devin: GPT extra-high until quota, then SWE-2 or GLM-5 whichever is free/better"). The Florina **auto-writes preference memories** captured from ordinary conversation — stated preferences are persisted without requiring a formal interview — and the profile remains editable via CLI. Built config-first for a single user; generalized onboarding is not a goal. Preference memories persist in a **User-scope Context Capsule** (a fourth scope; see DEC-020 amendment).
+  - **Preferences are prompts, not code** (amendment, 2026-09-13): preference rules are natural-language text injected into manager prompts on a **need-to-know basis** — a project's manager sees only its own project's preferences plus global defaults (DEC-003). Different projects carry different preferences ("this project matters → Claude/Codex priority; that one → Devin/Gemini only"). The split is two-layer: managers *express preference* in their `florina_spawn_task` calls (soft layer, NL-interpreted); the daemon *enforces feasibility* against the QuotaLedger, model deny-rules, and policy (hard layer — an LLM's provider choice can never defeat a quota exhaustion or a deny rule, per DEC-011). Per-project prompts live in the Project capsule; global defaults in the User capsule.
+- **Alternatives Considered**: Reactive-only failover (insufficient — proactive polling prevents mid-task stalls on Codex/Claude); static per-task provider pinning (rejected — defeats quota pooling); Devin Cloud participation in failover (rejected — local-only providers; cloud handoff breaks the uniform worktree+capsule model).
+- **Resolved By**: Issues #60, #64, #65.
+
+---
+
+**ID**: DEC-030  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: ACP (Agent Client Protocol) is the generic Tier C adapter surface  
+- **Rationale**: Both local Devin CLI (`devin acp`) and Gemini CLI (`gemini --acp`) expose ACP — JSON-RPC 2.0 over stdio with session management, structured permission requests, and usage notifications. One ACP client adapts both providers at Tier C fidelity instead of two bespoke adapters. ACP's `PromptResponse.usage` / `UsageUpdate` also feeds the QuotaLedger (DEC-029).
+- **Consequences**: `src/adapters/acp-adapter.ts` implements a generic ACP client; per-provider config supplies launch command, auth, and capability flags. ACP `session/request_permission` maps to `ApprovalRequested` (supports DEC-010 structured approvals). Native higher-fidelity adapters remain for Codex (Tier A — required for `account/rateLimits/read`) and Claude Code (Tier B hooks). Antigravity `agy` stays Tier D headless stream-json (requires a PTY bridge for its non-TTY output bug — an I/O shim, not Tier E scraping). Gemini ACP has known flaky-429 issues under OAuth; treat 429s as a reactive quota signal.
+- **Alternatives Considered**: Bespoke per-provider adapters (rejected — duplicated effort; ACP already standardizes sessions and permissions); Tier D stream-json for all CLIs (lower fidelity, no structured permission surface).
+- **Resolved By**: Issues #61, #62.
+
+---
+
+**ID**: DEC-031  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Interruption discipline — resolve from memory, grants, and context before ever asking the human  
+- **Rationale**: The user's scarce resource is energy, not information. The product exists so the human can debate direction and ideas with the Florina — not manage agents. Interrupting with a question whose answer is already recorded (preference memories, granted scopes, project policies) or easily inferable from observable state is a product failure regardless of how politely it is phrased.
+- **Consequences**: Before any Attention Item or spoken question reaches the human, the Florina must check: User-scope preference memories (DEC-020/029), granted capability scopes (#67), project/task capsule contents, and deterministic observable state (git, tests, quota ledger). A question that resolves there is answered silently and journaled — the human may audit the inference afterward but is never blocked on it. Conversational clarification (DEC-025) is the *last* resort, reserved for genuine ambiguity with material consequences.
+- **Alternatives Considered**: Ask-when-uncertain defaults (rejected — converts the human back into the router); blanket autonomy (rejected by DEC-011 for anything not covered by grants/policy).
+- **Reconsideration Trigger**: If silent inference produces materially wrong decisions that erode trust.
+
+---
+
+**ID**: DEC-032  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Done means proven — task completion is gated on verification evidence, not agent self-report  
+- **Rationale**: Writing code is the easy part; proving it works is the hard, important part. An agent's claim of completion is a claim. The human's attention should only be spent reviewing *verified* deliverables.
+- **Consequences**: A Task may not surface as `completed` in the inbox without verification evidence attached to its Completion Digest: tests run with results, build/lint/typecheck status, and — where applicable — observed runtime behavior. Manager agents (DEC-018) are responsible for driving verification before reporting completion; a "finished" worker that produced no proof is routed back with a verification objective, not surfaced to the human. Verification results are deterministic adapter/journal facts (DEC-010 discipline applies — observed evidence is primary, LLM narrative is supplemental).
+- **Alternatives Considered**: Trust agent self-reports with a human-review step (rejected — review burden lands on the human); post-hoc review agent for everything (kept as Level B diff intelligence, opt-in per PRODUCT_DESIGN).
+- **Resolved By**: Issue #68.
+
+---
+
+**ID**: DEC-033  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Collaborative idea ledger — the Florina is a thinking partner during ideation, with an explicit human gate before anything becomes delegated work  
+- **Rationale**: The first user ideates chaotically — long unstructured voice monologues mixing goals, constraints, and tangents. The Florina's job is to think *with* them: build on the ideas, run background research, surface structure, name the fog and open questions, and ask the questions the user cannot ask themselves — living in the user's shoes. She does NOT silently convert conversation into work.
+- **Consequences**:
+  - **Per-idea markdown ledger**: each idea (or each system being updated by an idea) gets a persistent, growing markdown document the Florina maintains — structured spec, research notes, open questions, decisions-in-progress. The file is a first-class artifact the user can read and edit. Ledgers live in a **global Florina ideas directory** by default (ideas precede project selection); when a project is specified for an idea, its ledger is **promoted** — moved into that project. Format: single `.md` + YAML frontmatter (status, linked project, created/updated) so the daemon can index and promote without parsing prose.
+  - **Compile-on-request**: when the user says they're ready, the Florina offers to compile the ledger into an actionable **Brief** (spec + delegation plan: which project, which manager, what task breakdown, provider/model per task). The Brief is *shown to the user* — "if it's all right, I start giving it to agents; if not, we keep working on it."
+  - **Hard delegation gate**: no agent is ever dispatched from ideation without explicit user confirmation of the compiled Brief. Confirming a Brief is a Decision, journaled (DEC-012).
+  - On confirmation, the Brief decomposes into Tasks dispatched to the project's manager agent (DEC-018) through the normal daemon path — no special channel.
+  - Delegation plans include building the **testing/proving systems** first-class — verification infrastructure is part of every task order, per DEC-032 (done means proven).
+- **Alternatives Considered**: Automatic distillation-to-dispatch (rejected — the user must review before agents act); transcript summarization after the fact (rejected — loses the live collaborative-research loop); dedicated ideation mode switch (rejected — ideation is ambient, not a mode).
+- **Resolved By**: Issue #69.
+
+---
+
+**ID**: DEC-034  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: The Florina runs on our own agentic loop — loop + todo + tools + context management — with LiteLLM as the model connector  
+- **Rationale**: The Florina is the only agent loop we own (DEC-001); every worker/manager is a provider agent. Owning the loop means the Florina's reasoning model is pluggable (today's best reasoning model tomorrow, a local model for privacy later) and her capabilities (background research, spec structuring, preference capture, inbox triage) are our tools, not a provider's.
+- **Consequences**:
+  - **`src/florina/`** module: the reasoning-action loop, a typed tool registry, a plan/todo tool (the model maintains its own plan, per goose's "maintain a plan" pattern), and context management (capsule load/unload per DEC-020 + condenser-style history compression per OpenHands).
+  - **Connector**: LiteLLM proxy — OpenAI-compatible `/chat/completions` against 100+ providers, plus spend tracking/budgets that feed the QuotaLedger (DEC-029). The daemon calls the proxy endpoint; no provider SDKs in our code.
+  - **Voice boundary unchanged** (DEC-021): Realtime API remains the ears/mouth (VAD, interruptions, speech-to-speech). Its tool calls land on the same typed command API; heavyweight reasoning (research, spec structuring, Brief compilation) runs in the Florina loop on LiteLLM-connected models. The split is turn-taking vs. thinking.
+  - **Patterns stolen from open source**: OpenHands — stateless loop over an append-only event stream (already our journal, DEC-012), condenser, confirmation mode, max-iterations/budget guards; goose — tool inspection pipeline (security → permission → repetition checks before execution) and profile-based capability sets; Cline SDK — harness separated from surfaces so CLI/voice/desktop share one loop; opencode — durable admission before execution (we already journal-first).
+  - Florina loop events are journaled like provider events (DEC-012) — her reasoning is inspectable, not hidden.
+- **Alternatives Considered**: Riding a provider's agent SDK for the Florina loop (rejected — reintroduces provider dependence at the one layer that must be ours); LangChain/LangGraph (rejected — heavyweight abstraction for a loop we understand and want to keep small); direct per-provider SDK calls (rejected — LiteLLM gives plug-and-play + spend tracking for free).
+- **Resolved By**: Issue #70.
+
+---
+
+**ID**: DEC-035  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Continuous agents (Florina, managers) use a three-layer context model — hot working context, warm condenser + capsules, cold journal + durable memory  
+- **Rationale**: The Florina and project managers run for days, not sessions. Unbounded context growth degrades reasoning and inflates cost; naive truncation loses the plot. OpenHands' condenser and two-tier memory are proven open-source patterns that map cleanly onto our existing journal + capsule primitives.
+- **Consequences**: Threshold-triggered summarization (keep first N + last M verbatim, summarize the middle — OpenHands `RollingCondenser` pattern); condensation itself emits a journaled event carrying `forgotten_event_ids` so compression never destroys the record (DEC-012). Durable memory is two-tier, mirroring capsules: User scope (cross-project preferences, DEC-029) + Project scope (repo knowledge). Context health (window fill, last condensation, memory size) is a first-class per-agent status the attention engine can elevate. Full design: `docs/DESKTOP_UI.md` § Continuous-agent context.
+- **Alternatives Considered**: Fixed sliding window (loses early goals/spec); restart-fresh sessions (breaks continuity, forces manual context carry); vector-store RAG (rejected per DEC-020 — capsules stay simple scoped state).
+- **Reconsideration Trigger**: If condensation measurably drops task-critical facts (detect via verification regressions, DEC-032).
+- **Resolved By**: Issues #75 (condenser), #76 (capsule rollup pipeline), #77 (context health).
+
+---
+
+**ID**: DEC-036  
+**Date**: 2026-09-13  
+**Status**: ACCEPTED  
+**Decision**: Federated sub-Florina daemons — remote machines run the full stack and register with a parent daemon as capacity pools  
+- **Rationale**: The first user already runs Codex/Claude on a separate server. A machine-to-machine federation extends capacity across devices without inventing a second protocol: a child daemon presents to its parent as a provider-shaped adapter, so the recursion is the architecture.
+- **Consequences**:
+  - `RemoteFlorinaAdapter` on the parent connects to the child daemon's control-plane WebSocket. The child's entire fleet appears in the parent's QuotaLedger as `provider@host` entries; the child reports its own quota state upstream.
+  - Delegation uses the identical typed command API; the child's `SupervisorEvent`s roll up the chain (fidelity stays structured end-to-end — Tier A/B quality is inherited, not re-derived).
+  - Worktrees and event journals remain local to each machine. The **Task Capsule is the delegation payload** — the same handoff artifact as cross-provider failover (DEC-029), so "move task to the server" and "move task to Gemini" are the same mechanism.
+  - The project (repo) must exist on the remote machine. Recursion composes: a child may itself have sub-secretaries.
+  - **Security**: explicit pairing/auth between daemons; the parent may narrow but never widen a child's policy (DEC-011). Remote commands are capability-scoped like everything else.
+  - Distinct from DEC-016 (remote *control* — the human-facing phone companion, still deferred): this is remote *capacity*.
+- **Alternatives Considered**: SSH-managed remote agents (rejected — loses the child's own journal, attention engine, and quota ledger; a shell is not a supervisor); treating remote providers as direct adapters over SSH (rejected — no local policy boundary on the remote machine).
+- **Reconsideration Trigger**: If upstream event volume or trust-boundary complexity defeats the attention model.
+- **Resolved By**: Issue #78.
+
+---
+
+**ID**: DEC-037
+**Date**: 2026-09-13
+**Status**: ACCEPTED
+**Decision**: Repository-wide hexagonal (ports & adapters) architecture — the core owns the domain model and all port contracts; adapters depend inward; the bootstrap layer alone composes concrete implementations
+- **Rationale**: The codebase had grown consumer-owned contracts (e.g. `AgentAdapter` living in `src/adapters/base.ts`, `WorktreeStatus` in `src/daemon/worktree.ts`) and a flat module layout where any module could import any other. As adapters, daemon services, storage, and surfaces multiply, inward-pointing dependencies must be enforced mechanically rather than by convention.
+- **Consequences**:
+  - **`src/core/domain/`** is the canonical home of the domain model (enums, types, factories, capabilities, policy, approval, SupervisorEvent). **`src/core/application/ports/`** holds the pure port contracts the core owns (`ClockPort`, `IdGeneratorPort`, `EventBusPort`/`EventPublisherPort`/`EventSubscriberPort`, `AgentRuntimePort`, `WorktreePort`). Core files may import only other core files — never adapters, daemon, storage, node builtins, or external packages.
+  - Dependency direction: `domain <- application ports/use-cases <- inbound/outbound adapters`. A future **`src/bootstrap/`** layer is the only place concrete implementations are composed into the core.
+  - **Compatibility facades**: legacy `src/domain/*.ts` paths are thin `export *` re-exports resolving inward to `src/core/domain`, so existing consumers keep working while migration proceeds incrementally. Facades are temporary migration surfaces, not permanent API.
+  - Conformance is enforced by `tests/architecture-boundaries.test.ts`, which statically scans core import specifiers and the legacy facades — the boundary is a test, not a convention.
+- **Alternatives Considered**: Keep the flat layout and rely on code review (rejected — no mechanical enforcement); big-bang rewrite moving all consumers at once (rejected — unsafe mid-flight with parallel feature work); ports owned by their consumers (rejected — inverts the dependency direction this decision exists to establish).
+- **Resolved By**: Issue #90.
+
+---
+
+**ID**: DEC-038
+**Date**: 2026-09-14
+**Status**: ACCEPTED
+**Decision**: Rebrand the project from Agent Secretary to **Florina** — full rename, clean break
+- **Rationale**: Owner direction — Florina is the product and persona name. A full rename avoids the ambiguity of maintaining two names (product vs persona) and keeps the vocabulary self-consistent.
+- **Consequences**:
+  - Package name `florina`; CLI binaries `florina` + `flor` (amends DEC-026).
+  - Persona name is Florina throughout: `FlorinaDaemon`, `FlorinaLoop`, `FlorinaMcpServer`, `RemoteFlorinaAdapter`, etc.
+  - Internal identifiers renamed with no compatibility aliases: `florina/` branch prefix (amends DEC-024), `.florina-worktrees/`, `florina_*` MCP tool names, `florina.lock` lockfile. Pre-rebrand worktrees and saved manager configs are not migrated.
+  - Repo rename to `florina` is a follow-up (GitHub-side operation).
+- **Alternatives Considered**: Florina as product name with "Secretary" retained as the in-product persona (rejected — two names, permanent ambiguity); rename with backward-compatible aliases for `secretary_*` tool names and worktree paths (rejected — pre-1.0, clean break is cheaper than a permanent compat layer).
+- **Resolved By**: Issue #66.

@@ -1,4 +1,4 @@
-# Agent Secretary
+# Florina
 
 > **An open-source attention broker for coding agents.**
 
@@ -6,7 +6,7 @@ One inbox that lets developers delegate work, monitors heterogeneous agent
 sessions, suppresses routine noise, and interrupts only when a human decision
 is genuinely needed.
 
-Agent Secretary sits between **human attention** and **agent sessions**,
+Florina sits between **human attention** and **agent sessions**,
 turning a messy collection of parallel agent work into a manageable stream of
 tasks, deliverables, decisions, and attention requests.
 
@@ -22,13 +22,15 @@ tasks, deliverables, decisions, and attention requests.
 
 | Component | Description |
 |-----------|-------------|
-| **Daemon** | Local control plane — a WebSocket server on `ws://127.0.0.1:17419` that fans out to concurrent agent sessions (DEC-005). |
-| **Adapters** | Bridges from Codex (JSON-RPC, Tier A) and Claude Code (structured lifecycle hooks, Tier B) into a canonical `SupervisorEvent` stream (DEC-019). A PTY heuristic adapter (Tier E) and a stub adapter are included for compatibility and local testing. |
+| **Florina loop** | The only self-owned agent loop — reasoning, plan/todo tool, typed tool registry, context management — connected to any model via a LiteLLM proxy (DEC-034). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
+| **Daemon** | Local control plane — a WebSocket server on `ws://127.0.0.1:17419` that fans out to concurrent agent sessions (DEC-005). Hosts the MCP tool server managers dispatch through (DEC-018). |
+| **Capacity router** | Quota-aware provider routing: `QuotaLedger` tracks per-provider windows (`used_pct`, `resets_at`), `CapacityRouter` enforces the hard floor — quota, deny rules — while managers express NL preferences (DEC-029). |
+| **Adapters** | Bridges into a canonical `SupervisorEvent` stream (DEC-019): Codex (JSON-RPC, Tier A), Claude Code (hooks, Tier B), ACP-native CLIs — `devin acp`, `gemini --acp` (Tier C, DEC-030), `agy` headless stream-json (Tier D). A stub adapter is included for local testing. |
 | **Attention engine** | Deterministic policy that ranks events into a priority inbox, suppresses routine noise, and supports adaptive tuning (DEC-014). |
 | **Voice pipeline** | OpenAI Realtime API with a `whisper.cpp` fallback; supports voice approvals and spoken notifications (DEC-021). |
-| **Desktop skeleton** | Electron/Tauri-ready client with an IPC bridge and view components (DEC-028). |
-| **Storage** | Immutable SQLite event journal, context capsules, and completion digests — summaries never replace source events (DEC-012/020). |
-| **Security** | Audit framework and hardening utilities enforcing DEC-011 (the Secretary narrows permissions, never silently widens them). |
+| **Desktop app** | Electron app — a strict daemon client (DEC-028). Chat-first: the launch view is a persistent Secretary conversation with dictation and two-way voice mode in the composer, backed by mockup-faithful supporting screens (inbox, session inspector, fleet/quota, ideas, preferences, secretary), an inline five-state PTT HUD with a global hotkey, system tray + close-to-tray, auto-reconnect, and daemon auto-start. `npm run desktop`. |
+| **Storage** | Immutable SQLite event journal, context capsules, completion digests, and per-idea markdown ledgers (DEC-012/020/033). |
+| **Security** | Audit framework and hardening utilities enforcing DEC-011 (the Florina narrows permissions, never silently widens them). |
 
 ## Quick Start
 
@@ -50,52 +52,52 @@ npm run build
 
 ### Run
 
-The daemon runs in-process for the MVP — `secretary start` blocks the calling
+The daemon runs in-process for the MVP — `florina start` blocks the calling
 terminal until stopped. Use two terminals:
 
 ```bash
 # Terminal 1 — start the daemon (blocks until stopped)
-secretary start
+florina start
 
 # Terminal 2 — query the running daemon
-secretary inbox     # view attention items
-secretary tasks     # list tasks
-secretary help      # see all commands
-secretary stop      # stop the daemon (from Terminal 2)
+florina inbox     # view attention items
+florina tasks     # list tasks
+florina help      # see all commands
+florina stop      # stop the daemon (from Terminal 2)
 ```
 
-The CLI connects to the daemon at `ws://127.0.0.1:17419` by default. `asec` is
-available as an alias for `secretary` (DEC-026).
+The CLI connects to the daemon at `ws://127.0.0.1:17419` by default. `flor` is
+available as an alias for `florina` (DEC-026).
 
 ## CLI Usage
 
 ```bash
-secretary start                              # start the daemon (blocks; use a separate terminal for other commands)
-secretary stop                               # stop the running daemon
-secretary status                             # show daemon status
+florina start                              # start the daemon (blocks; use a separate terminal for other commands)
+florina stop                               # stop the running daemon
+florina status                             # show daemon status
 
-secretary inbox                              # list attention inbox items
-secretary inbox --priority Critical           # filter by priority
-secretary inbox --status Pending              # filter by item state
+florina inbox                              # list attention inbox items
+florina inbox --priority Critical           # filter by priority
+florina inbox --status Pending              # filter by item state
 
-secretary approve <taskId> <approvalId> --grant   # grant a pending approval
-secretary approve <taskId> <approvalId> --deny    # deny a pending approval
-secretary ack <itemId>                       # acknowledge an attention item
-secretary resolve <itemId>                   # resolve an attention item
-secretary escalate <itemId>                  # escalate an item to Critical
+florina approve <taskId> <approvalId> --grant   # grant a pending approval
+florina approve <taskId> <approvalId> --deny    # deny a pending approval
+florina ack <itemId>                       # acknowledge an attention item
+florina resolve <itemId>                   # resolve an attention item
+florina escalate <itemId>                  # escalate an item to Critical
 
-secretary tasks                              # list tasks
-secretary tasks --status InProgress           # filter by task state
-secretary task <taskId>                      # show task details
-secretary digest <taskId>                    # show completion digest for a task
+florina tasks                              # list tasks
+florina tasks --status InProgress           # filter by task state
+florina task <taskId>                      # show task details
+florina digest <taskId>                    # show completion digest for a task
 
-secretary metrics                            # show metrics snapshot
-secretary metrics --since 3600000             # metrics for the last hour
+florina metrics                            # show metrics snapshot
+florina metrics --since 3600000             # metrics for the last hour
 
-secretary prune <taskId>                     # prune a task's worktree
-secretary voice [--api-key <key>]            # start a voice session (push-to-talk)
-secretary version                            # print version
-secretary help                               # print full help
+florina prune <taskId>                     # prune a task's worktree
+florina voice [--api-key <key>]            # start a voice session (push-to-talk)
+florina version                            # print version
+florina help                               # print full help
 ```
 
 ## Development
@@ -116,10 +118,11 @@ secretary help                               # print full help
 
 ```
 src/
-  daemon/      # local control plane (IPC/WebSocket server)
-  adapters/    # Codex / Claude Code bridges -> SupervisorEvent
+  daemon/      # local control plane (IPC/WebSocket server), quota ledger, capacity router
+  adapters/    # Codex / Claude Code / ACP bridges -> SupervisorEvent
   attention/   # deterministic attention engine (DEC-014)
-  cli/         # `secretary` / `asec` binary (DEC-026)
+  florina/   # the self-owned agent loop (DEC-034)
+  cli/         # `florina` / `flor` binary (DEC-026)
   voice/       # Realtime + whisper.cpp pipeline (DEC-021)
   desktop/     # Electron/Tauri client (DEC-028)
   storage/     # SQLite event journal + Context Capsules (DEC-012/020)
@@ -143,6 +146,18 @@ architecture, contracts, models, and code are derived from them.
 | [`DEEP_RESEARCH.md`](DEEP_RESEARCH.md) | Landscape analysis, reusable components, what's solved vs. open |
 | [`DECISION_LEDGER.md`](DECISION_LEDGER.md) | Settled and open product decisions with rationale |
 
+Supervisory-model research (2026-09-20) adds five focused companion docs
+under `docs/`, all cross-linked from `PRODUCT_DESIGN.md`:
+[`RULES_MEMORY_AND_SUPERVISION.md`](docs/RULES_MEMORY_AND_SUPERVISION.md)
+(memory taxonomy, rule lifecycle, Execution Brief compiler, supervision
+ladder, resumption/catch-up), [`PROVIDER_TOPOLOGY.md`](docs/PROVIDER_TOPOLOGY.md)
+(agent vocabulary, brokered-vs-federated subagent research),
+[`UX_INFORMATION_ARCHITECTURE.md`](docs/UX_INFORMATION_ARCHITECTURE.md)
+(nav redesign, terminology audit), [`UX_FLOWS.md`](docs/UX_FLOWS.md) +
+[`SYSTEM_FLOWS.md`](docs/SYSTEM_FLOWS.md) (user and agent/system flows), and
+[`GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) (current vs. target, mapped to the
+`Florina — Persistent AI Supervisor` milestone).
+
 ## Status
 
 **MVP — actively implemented.** 32+ issues landed, 1585+ tests passing.
@@ -153,19 +168,27 @@ architecture, contracts, models, and code are derived from them.
 - Codex (JSON-RPC, Tier A) and Claude Code (hooks, Tier B) adapters
 - Deterministic attention engine with priority inbox
 - SQLite event journal, context capsules, completion digests
-- CLI (`secretary` / `asec`) with inbox, approvals, tasks, digest, metrics, voice
+- CLI (`florina` / `flor`) with inbox, approvals, tasks, digest, metrics, voice
 - Voice pipeline (OpenAI Realtime + whisper.cpp fallback) wired into daemon + CLI
-- Desktop skeleton (Electron/Tauri-ready IPC bridge)
+- Desktop app (`npm run desktop`) — chat-first Electron client: one persistent Secretary
+  conversation (journaled, resumes on connect) with dictation and two-way voice mode in
+  the composer, plus inbox/inspector/fleet/ideas/preferences screens, PTT HUD + tray
 - Security/audit framework (DEC-011 compliance)
 - Git worktree lifecycle per task (DEC-024)
 
-**Planned:**
+**Planned (milestone [M6-Multi-Provider-Orchestration](https://github.com/DurdeuVlad/florina/milestone/7)):**
 
-- Production desktop client packaging
-- Additional adapter integrations
+- Florina agentic loop + LiteLLM model connector (DEC-034, #70)
+- Quota-aware capacity routing across subscriptions (DEC-029, #60, #71)
+- ACP generic adapter → Devin + Gemini; `agy` headless (DEC-030, #61, #62)
+- Per-project manager agents dispatching via daemon MCP tools (DEC-018, #63)
+- Cross-provider failover via worktree + Task Capsule (#64)
+- Auto-learned preference memories, scoped auto-approval (DEC-029, #65, #67)
+- Idea ledgers → compiled Briefs → gated delegation (DEC-033, #69)
+- Verification-gated completion — done means proven (DEC-032, #68)
+- Production desktop client packaging (#43)
 - Refined adaptive attention tuning
-- Multi-run task lifecycle beyond 1:1 worktree mapping
 
 ## License
 
-TBD
+[MIT](LICENSE)

@@ -1,12 +1,12 @@
 /**
- * Daemon module — the local control plane the Secretary runs on (DEC-008).
+ * Daemon module — the local control plane the Florina runs on (DEC-008).
  *
  * Adapters, the attention engine, voice, and the desktop client all talk to
  * this daemon over localhost WebSocket. The daemon owns process lifecycle,
  * single-instance enforcement, the typed control-plane API, the live event
  * stream, and a health check endpoint.
  */
-export { SecretaryDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_LOCKFILE } from './daemon.js';
+export { FlorinaDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_LOCKFILE } from './daemon.js';
 export type { DaemonOptions, DaemonState, DaemonEvents } from './daemon.js';
 export { ControlPlaneApi, dispatch, parseApiRequest } from './api.js';
 export type {
@@ -85,6 +85,25 @@ export type {
   CapabilityBrokerOptions,
 } from './capability-broker.js';
 
+/* Quota-aware capacity routing (DEC-029, issue #60) */
+export { QuotaLedger } from './quota-ledger.js';
+export type {
+  QuotaSource,
+  QuotaWindow,
+  QuotaWindowStatus,
+  ProviderQuotaState,
+  QuotaLedgerOptions,
+} from './quota-ledger.js';
+export { CapacityRouter } from './capacity-router.js';
+export type {
+  RoutingRule,
+  DenyRule,
+  PreferenceProfile,
+  RouteRequest,
+  RouteResult,
+  CapacityRouterOptions,
+} from './capacity-router.js';
+
 /* Runtime metrics instrumentation (DEC-015, issue #18) */
 export { MetricsCollector, DEFAULT_HISTOGRAM_BUCKETS } from './metrics.js';
 export type { MetricsCollectorOptions, MetricsSnapshot, HistogramSummary } from './metrics.js';
@@ -148,7 +167,12 @@ export { SessionManager } from './session-manager.js';
 export type { SessionInfo, StartSessionResult, StopSessionResult } from './session-manager.js';
 
 /* Voice session management (DEC-021, DEC-002, issue #41) */
-export { VoiceSessionManager, buildDefaultVoiceTools, mapToolCallToCommand, DEFAULT_VOICE_INSTRUCTIONS } from './voice-session-manager.js';
+export {
+  VoiceSessionManager,
+  buildDefaultVoiceTools,
+  mapToolCallToCommand,
+  DEFAULT_VOICE_INSTRUCTIONS,
+} from './voice-session-manager.js';
 export type {
   VoiceSessionManagerOptions,
   CommandExecutor,
@@ -157,3 +181,10 @@ export type {
   VoiceToolCallCallback,
   VoiceStateCallback,
 } from './voice-session-manager.js';
+
+/* Durable preference profile store (DEC-020/029, issue #65) */
+export {
+  PreferenceProfileStore,
+  PreferenceProfileError,
+  validatePreferenceProfile,
+} from './preference-profile.js';
