@@ -45,6 +45,7 @@ import { BaseAdapter, type SessionConfig, type StartRunResult } from './base.js'
 import {
   mapHookEvent,
   isHookEvent,
+  buildHooksConfig,
   type ClaudeHookEvent,
   type ClaudeHooksMapperContext,
 } from './claude-hooks-mapper.js';
@@ -93,6 +94,8 @@ export interface ClaudeCliSpawner {
  * directly.
  */
 export interface HookEventSink {
+  /** The file path backing this sink, when backed by a file. */
+  readonly filePath?: string;
   /**
    * Read the next available hook event, blocking until one arrives or the
    * sink is closed. Returns `null` when the sink is closed and no more events
@@ -208,10 +211,75 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       autonomyLevel: sessionConfig.autonomyLevel,
     });
 
+    // Configure scoped hooks in the task worktree (.claude/settings.json).
+    let settingsPathWritten: string | null = null;
+    try {
+      const { promises: fs } = await import('node:fs');
+      const { join } = await import('node:path');
+      const claudeDir = join(sessionConfig.workingDir, '.claude');
+      await fs.mkdir(claudeDir, { recursive: true });
+
+      const sink = this.options.eventSink ?? this.ownEventSink;
+      const sinkPath = sink?.filePath;
+
+      let hookCmd = this.options.hookCommand;
+      if (!hookCmd && sinkPath) {
+        const forwarderPath = join(claudeDir, 'forwarder.cjs');
+        const forwarderCode = [
+          "const fs = require('node:fs');",
+          'try {',
+          "  const input = fs.readFileSync(0, 'utf8').trim();",
+          '  if (input.length > 0) {',
+          '    const sink = process.argv[2];',
+          '    if (sink) {',
+          "      fs.appendFileSync(sink, input + '\\n', 'utf8');",
+          '    }',
+          '    const parsed = JSON.parse(input);',
+          "    if (parsed && parsed.hook_event_name === 'PermissionRequest') {",
+          '      process.stdout.write(JSON.stringify({',
+          '        hookSpecificOutput: {',
+          "          permissionDecision: 'deny',",
+          "          permissionDecisionReason: 'Escalated to Florina attention broker for human approval (DEC-011)',",
+          '        },',
+          "      }) + '\\n');",
+          '    }',
+          '  }',
+          '} catch (_) {}',
+          'process.exit(0);',
+        ].join('\n');
+        await fs.writeFile(forwarderPath, forwarderCode, 'utf8');
+        hookCmd = `node "${forwarderPath.replace(/\\/g, '/')}" "${sinkPath.replace(/\\/g, '/')}"`;
+      }
+
+      if (hookCmd) {
+        const hooksConfig = buildHooksConfig(hookCmd);
+        const settingsPath = join(claudeDir, 'settings.json');
+        let existingSettings: Record<string, unknown> = {};
+        try {
+          const content = await fs.readFile(settingsPath, 'utf8');
+          existingSettings = JSON.parse(content) as Record<string, unknown>;
+        } catch {
+          // No existing settings or invalid JSON; start clean.
+        }
+        existingSettings.hooks = {
+          ...((existingSettings.hooks as Record<string, unknown>) || {}),
+          ...hooksConfig,
+        };
+        await fs.writeFile(settingsPath, JSON.stringify(existingSettings, null, 2), 'utf8');
+        settingsPathWritten = settingsPath;
+      }
+    } catch {
+      // Gracefully continue if workingDir is virtual or unwritable in tests.
+    }
+
     // Spawn the CLI in headless (print) mode with the objective as a prompt.
     const spawner = this.options.spawner ?? (await createNodeCliSpawner());
     const baseArgs = this.options.args ?? [];
-    const cliArgs = ['-p', sessionConfig.objective, ...baseArgs];
+    const cliArgs = ['-p'];
+    if (settingsPathWritten && !baseArgs.includes('--settings')) {
+      cliArgs.push('--settings', settingsPathWritten);
+    }
+    cliArgs.push(sessionConfig.objective, ...baseArgs);
     this.cliProcess = spawner.spawn({
       file: this.options.command ?? 'claude',
       args: cliArgs,
@@ -503,7 +571,7 @@ async function createJsonlFileSink(): Promise<HookEventSink> {
  * appends lines; the sink polls for new content and parses each line as JSON.
  */
 class JsonlFileHookEventSink implements HookEventSink {
-  private readonly filePath: string;
+  public readonly filePath: string;
   private offset = 0;
   private closed = false;
   private readonly lineBuffer: string[] = [];

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { AdapterFidelityTier } from '../src/domain/enums.js';
 import type { SupervisorEvent } from '../src/domain/events.js';
 import { validateEvent } from '../src/domain/events.js';
@@ -952,5 +955,203 @@ describe('ClaudeHooksAdapter (mock CLI, Tier B)', () => {
     await adapter.connect();
     expect(adapter.fidelityTier).toBe(AdapterFidelityTier.B);
     await adapter.disconnect();
+  });
+
+  describe('scoped hooks configuration and forwarder (issue #177)', () => {
+    it('writes .claude/settings.json and forwarder.cjs in a real worktree directory', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-hooks-test-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-real-dir-1',
+          sessionId: 'sess-real-dir-1',
+          agentId: 'claude-code',
+          workingDir: tempDir,
+          objective: 'Test hooks writing',
+        };
+
+        await adapter.startRun('task-real-dir-1', config);
+
+        // Verify .claude/settings.json exists
+        const settingsPath = path.join(tempDir, '.claude', 'settings.json');
+        const settingsContent = await fs.readFile(settingsPath, 'utf8');
+        const parsedSettings = JSON.parse(settingsContent) as Record<string, unknown>;
+
+        expect(parsedSettings.hooks).toBeDefined();
+        const hooksMap = parsedSettings.hooks as Record<string, unknown>;
+        for (const hookName of CLAUDE_HOOK_EVENT_NAMES) {
+          expect(hooksMap[hookName]).toBeDefined();
+        }
+
+        // Verify .claude/forwarder.cjs exists
+        const forwarderPath = path.join(tempDir, '.claude', 'forwarder.cjs');
+        const forwarderContent = await fs.readFile(forwarderPath, 'utf8');
+        expect(forwarderContent).toContain('fs.appendFileSync');
+        expect(forwarderContent).toContain('PermissionRequest');
+        expect(forwarderContent).toContain('permissionDecision');
+
+        // Verify --settings argument was passed to CLI
+        expect(spawner.spawnCalls).toHaveLength(1);
+        expect(spawner.spawnCalls[0].args).toContain('--settings');
+        expect(spawner.spawnCalls[0].args).toContain(settingsPath);
+        expect(spawner.spawnCalls[0].args).toContain('Test hooks writing');
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('forwarder.cjs appends stdin events to the sink file and denies PermissionRequest', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-forwarder-test-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-fwd-1',
+          sessionId: 'sess-fwd-1',
+          agentId: 'claude-code',
+          workingDir: tempDir,
+          objective: 'Test forwarder execution',
+        };
+        await adapter.startRun('task-fwd-1', config);
+
+        const settingsPath = path.join(tempDir, '.claude', 'settings.json');
+        const parsedSettings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<
+          string,
+          Record<string, Array<{ hooks: Array<{ command: string }> }>>
+        >;
+        const commandStr: string = parsedSettings.hooks.PreToolUse[0].hooks[0].command;
+
+        // Extract forwarder and sink path from command
+        const matches = [...commandStr.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+        expect(matches.length).toBeGreaterThanOrEqual(2);
+        const [forwarderPath, sinkPath] = matches;
+
+        // 1. Test regular event forwarding (e.g. PreToolUse)
+        const toolEvent = {
+          hook_event_name: 'PreToolUse',
+          session_id: 'sess-fwd-1',
+          cwd: tempDir,
+          tool_name: 'Bash',
+          tool_input: { command: 'echo 42' },
+        };
+        const run1 = spawnSync(process.execPath, [forwarderPath, sinkPath], {
+          input: JSON.stringify(toolEvent) + '\n',
+          encoding: 'utf8',
+        });
+        expect(run1.status).toBe(0);
+
+        // Check sink file contains the event
+        const sinkContent1 = await fs.readFile(sinkPath, 'utf8');
+        expect(sinkContent1).toContain('"hook_event_name":"PreToolUse"');
+        expect(sinkContent1).toContain('echo 42');
+
+        // 2. Test PermissionRequest: must append to sink AND output deny to stdout
+        const permEvent = {
+          hook_event_name: 'PermissionRequest',
+          session_id: 'sess-fwd-1',
+          cwd: tempDir,
+          tool_name: 'Bash',
+          tool_input: { command: 'rm -rf /' },
+        };
+        const run2 = spawnSync(process.execPath, [forwarderPath, sinkPath], {
+          input: JSON.stringify(permEvent) + '\n',
+          encoding: 'utf8',
+        });
+        expect(run2.status).toBe(0);
+
+        // Verify stdout decision format
+        const stdoutParsed = JSON.parse(run2.stdout.trim());
+        expect(stdoutParsed.hookSpecificOutput).toBeDefined();
+        expect(stdoutParsed.hookSpecificOutput.permissionDecision).toBe('deny');
+        expect(stdoutParsed.hookSpecificOutput.permissionDecisionReason).toContain('DEC-011');
+
+        // Check sink file also recorded the PermissionRequest
+        const sinkContent2 = await fs.readFile(sinkPath, 'utf8');
+        expect(sinkContent2).toContain('"hook_event_name":"PermissionRequest"');
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('merges hooks into existing .claude/settings.json preserving existing keys', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-merge-test-'));
+      try {
+        const claudeDir = path.join(tempDir, '.claude');
+        await fs.mkdir(claudeDir, { recursive: true });
+        const existingSettings = {
+          model: 'claude-opus-4',
+          customKey: 'preserve-me',
+        };
+        await fs.writeFile(
+          path.join(claudeDir, 'settings.json'),
+          JSON.stringify(existingSettings, null, 2),
+          'utf8',
+        );
+
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, { spawner });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-merge-1',
+          sessionId: 'sess-merge-1',
+          agentId: 'claude-code',
+          workingDir: tempDir,
+          objective: 'Test merging settings',
+        };
+        await adapter.startRun('task-merge-1', config);
+
+        const mergedSettings = JSON.parse(
+          await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf8'),
+        );
+        expect(mergedSettings.model).toBe('claude-opus-4');
+        expect(mergedSettings.customKey).toBe('preserve-me');
+        expect(mergedSettings.hooks).toBeDefined();
+        expect(mergedSettings.hooks.SessionStart).toBeDefined();
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('uses custom hookCommand when provided in options', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-custom-cmd-test-'));
+      try {
+        const spawner = new MockCliSpawner();
+        const adapter = new ClaudeHooksAdapter(null, {
+          spawner,
+          hookCommand: 'my-custom-forwarder.sh',
+        });
+        await adapter.connect();
+
+        const config: SessionConfig = {
+          taskId: 'task-custom-1',
+          sessionId: 'sess-custom-1',
+          agentId: 'claude-code',
+          workingDir: tempDir,
+          objective: 'Test custom hookCommand',
+        };
+        await adapter.startRun('task-custom-1', config);
+
+        const settings = JSON.parse(
+          await fs.readFile(path.join(tempDir, '.claude', 'settings.json'), 'utf8'),
+        );
+        expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe('my-custom-forwarder.sh');
+
+        await adapter.disconnect();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });
