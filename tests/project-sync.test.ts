@@ -595,7 +595,7 @@ describe('Project Sync (issue #175)', () => {
         '../src/adapters/outbound/persistence/sqlite/repositories/project.js'
       );
 
-      const db = new StorageDatabase({ memory: true });
+      const db = new StorageDatabase({ path: ':memory:' });
       await db.open();
       try {
         const projectRepo = new ProjectRepository(db.connection);
