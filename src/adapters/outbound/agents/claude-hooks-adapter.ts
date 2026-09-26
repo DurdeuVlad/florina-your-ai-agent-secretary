@@ -45,6 +45,7 @@ import { BaseAdapter, type SessionConfig, type StartRunResult } from './base.js'
 import {
   mapHookEvent,
   isHookEvent,
+  buildHooksConfig,
   type ClaudeHookEvent,
   type ClaudeHooksMapperContext,
 } from './claude-hooks-mapper.js';
@@ -93,6 +94,8 @@ export interface ClaudeCliSpawner {
  * directly.
  */
 export interface HookEventSink {
+  /** The file path backing this sink, when backed by a file. */
+  readonly filePath?: string;
   /**
    * Read the next available hook event, blocking until one arrives or the
    * sink is closed. Returns `null` when the sink is closed and no more events
@@ -151,6 +154,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
   private ownEventSink: HookEventSink | null = null;
   private activeSession: SessionConfig | null = null;
   private mapperCtx: ClaudeHooksMapperContext | null = null;
+  private sessionHooksDir: string | null = null;
 
   /** Internal queue of mapped SupervisorEvents awaiting streamEvents. */
   private eventQueue: SupervisorEvent[] = [];
@@ -208,10 +212,65 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       autonomyLevel: sessionConfig.autonomyLevel,
     });
 
+    // Configure scoped hooks in an isolated temp directory passed via --settings (DEC-024, DEC-011).
+    let settingsPath: string | null = null;
+    const sink = this.options.eventSink ?? this.ownEventSink;
+    const sinkPath = sink?.filePath;
+    let hookCmd = this.options.hookCommand;
+
+    if (sinkPath || hookCmd) {
+      const { promises: fs } = await import('node:fs');
+      const { join } = await import('node:path');
+      const { tmpdir } = await import('node:os');
+
+      const hooksDir = join(tmpdir(), `florina-claude-hooks-${sessionConfig.sessionId}`);
+      await fs.mkdir(hooksDir, { recursive: true });
+      this.sessionHooksDir = hooksDir;
+
+      if (!hookCmd && sinkPath) {
+        const forwarderPath = join(hooksDir, 'forwarder.cjs');
+        const forwarderCode = [
+          "const fs = require('node:fs');",
+          'try {',
+          "  const input = fs.readFileSync(0, 'utf8').trim();",
+          '  if (input.length > 0) {',
+          '    const parsed = JSON.parse(input);',
+          '    const sink = process.argv[2];',
+          '    if (sink && parsed) {',
+          "      fs.appendFileSync(sink, JSON.stringify(parsed) + '\\n', 'utf8');",
+          '    }',
+          "    if (parsed && parsed.hook_event_name === 'PermissionRequest') {",
+          '      process.stdout.write(JSON.stringify({',
+          '        hookSpecificOutput: {',
+          "          permissionDecision: 'deny',",
+          "          permissionDecisionReason: 'Escalated to Florina attention broker for human approval (DEC-011)',",
+          '        },',
+          "      }) + '\\n');",
+          '    }',
+          '  }',
+          '} catch (_) {}',
+          'process.exit(0);',
+        ].join('\n');
+        await fs.writeFile(forwarderPath, forwarderCode, 'utf8');
+        const nodeExe = process.env.FLORINA_NODE_PATH || 'node';
+        hookCmd = `${nodeExe} "${forwarderPath.replace(/\\/g, '/')}" "${sinkPath.replace(/\\/g, '/')}"`;
+      }
+
+      if (hookCmd) {
+        const hooksConfig = buildHooksConfig(hookCmd);
+        settingsPath = join(hooksDir, 'settings.json');
+        await fs.writeFile(settingsPath, JSON.stringify({ hooks: hooksConfig }, null, 2), 'utf8');
+      }
+    }
+
     // Spawn the CLI in headless (print) mode with the objective as a prompt.
     const spawner = this.options.spawner ?? (await createNodeCliSpawner());
     const baseArgs = this.options.args ?? [];
-    const cliArgs = ['-p', sessionConfig.objective, ...baseArgs];
+    const cliArgs = ['-p'];
+    if (settingsPath && !baseArgs.includes('--settings')) {
+      cliArgs.push('--settings', settingsPath);
+    }
+    cliArgs.push(sessionConfig.objective, ...baseArgs);
     this.cliProcess = spawner.spawn({
       file: this.options.command ?? 'claude',
       args: cliArgs,
@@ -273,6 +332,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       this.completeStream();
     }
     this.activeSession = null;
+    void this.cleanupHooksDir();
   }
 
   async disconnect(): Promise<void> {
@@ -291,8 +351,22 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       this.ownEventSink.close();
       this.ownEventSink = null;
     }
+    await this.cleanupHooksDir();
     if (this.connectionState !== 'disconnected') {
       this.setConnectionState('disconnected');
+    }
+  }
+
+  private async cleanupHooksDir(): Promise<void> {
+    if (this.sessionHooksDir) {
+      const dir = this.sessionHooksDir;
+      this.sessionHooksDir = null;
+      try {
+        const { promises: fs } = await import('node:fs');
+        await fs.rm(dir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup
+      }
     }
   }
 
@@ -383,6 +457,7 @@ export class ClaudeHooksAdapter extends BaseAdapter {
     }
     this.completeStream();
     this.activeSession = null;
+    void this.cleanupHooksDir();
   }
 
   /* ---------------------------------------------------------------- *
@@ -503,7 +578,7 @@ async function createJsonlFileSink(): Promise<HookEventSink> {
  * appends lines; the sink polls for new content and parses each line as JSON.
  */
 class JsonlFileHookEventSink implements HookEventSink {
-  private readonly filePath: string;
+  public readonly filePath: string;
   private offset = 0;
   private closed = false;
   private readonly lineBuffer: string[] = [];
