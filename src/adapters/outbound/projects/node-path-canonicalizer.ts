@@ -26,7 +26,7 @@ export class NodePathCanonicalizer implements PathCanonicalizerPort {
     this.platform = options.platform ?? process.platform;
     this.realpathFn = options.realpathFn ?? ((p: string) => {
       try {
-        return realpathSync.native ? realpathSync.native(p) : realpathSync(p);
+        return realpathSync(p);
       } catch {
         return resolve(p);
       }
@@ -49,7 +49,17 @@ export class NodePathCanonicalizer implements PathCanonicalizerPort {
     // 2. Normalize backslashes to forward slashes
     let normalized = resolved.replace(/\\/g, '/');
 
-    // 3. Strip trailing slashes, preserving drive root (e.g. "C:/") or root ("/")
+    // 3. Strip Windows extended-length path prefix (//?/ or //?/UNC/)
+    if (normalized.startsWith('//?/')) {
+      const lower = normalized.toLowerCase();
+      if (lower.startsWith('//?/unc/')) {
+        normalized = '//' + normalized.slice(8);
+      } else {
+        normalized = normalized.slice(4);
+      }
+    }
+
+    // 4. Strip trailing slashes, preserving drive root (e.g. "C:/") or root ("/")
     if (normalized.length > 1 && normalized.endsWith('/')) {
       // Check if it's a Windows drive root like "C:/" or POSIX root "/"
       const isDriveRoot = /^[a-zA-Z]:\/$/.test(normalized);

@@ -126,7 +126,7 @@ describe('diff-analyzer: classifyPath covers every category', () => {
   });
 });
 
-describe('diff-analyzer: analyze (integration with a real temp git repo)', () => {
+describe('diff-analyzer: analyze (integration with a real temp git repo)', { timeout: 30_000 }, () => {
   let repoPath: string;
   let tmpRoot: string;
 

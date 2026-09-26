@@ -7,7 +7,7 @@
  * READ-ONLY GUARANTEE: Never writes to or modifies any Antigravity configuration
  * file or directory.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +23,7 @@ export interface AntigravityProjectScannerOptions {
   readonly readFileSyncFn?: (path: string, encoding: 'utf8') => string;
   readonly existsSyncFn?: (path: string) => boolean;
   readonly readdirSyncFn?: (path: string) => readonly string[];
+  readonly statSyncFn?: (path: string) => { mtimeMs: number };
 }
 
 export class AntigravityProjectScanner implements ProviderProjectScannerPort {
@@ -31,6 +32,7 @@ export class AntigravityProjectScanner implements ProviderProjectScannerPort {
   private readonly readFile: (path: string, encoding: 'utf8') => string;
   private readonly exists: (path: string) => boolean;
   private readonly readdir: (path: string) => readonly string[];
+  private readonly stat: (path: string) => { mtimeMs: number };
 
   constructor(options: AntigravityProjectScannerOptions = {}) {
     const home = options.homeDir ?? homedir();
@@ -38,6 +40,7 @@ export class AntigravityProjectScanner implements ProviderProjectScannerPort {
     this.readFile = options.readFileSyncFn ?? readFileSync;
     this.exists = options.existsSyncFn ?? existsSync;
     this.readdir = options.readdirSyncFn ?? readdirSync;
+    this.stat = options.statSyncFn ?? statSync;
   }
 
   scanProjects(): readonly DiscoveredProviderProject[] {
@@ -52,21 +55,38 @@ export class AntigravityProjectScanner implements ProviderProjectScannerPort {
     const brainDir = join(this.baseDir, 'brain');
     if (this.exists(brainDir)) {
       try {
-        const convoDirs = this.readdir(brainDir).slice(0, 20); // sample recent
+        const convoDirs = this.readdir(brainDir)
+          .map((id) => {
+            const fullPath = join(brainDir, id);
+            let mtimeMs = 0;
+            try {
+              mtimeMs = this.stat(fullPath).mtimeMs;
+            } catch {
+              mtimeMs = 0;
+            }
+            return { id, mtimeMs };
+          })
+          .sort((a, b) => b.mtimeMs - a.mtimeMs)
+          .map((item) => item.id)
+          .slice(0, 20);
+
         for (const convoId of convoDirs) {
           const logFile = join(brainDir, convoId, '.system_generated', 'logs', 'transcript.jsonl');
           if (this.exists(logFile)) {
             try {
               const content = this.readFile(logFile, 'utf8');
-              const match = content.match(/"workspaceUris"\s*:\s*\[\s*"([^"]+)"/);
-              if (match && match[1]) {
-                const folder = decodeWorkspaceUri(match[1]);
-                if (folder && !seen.has(folder)) {
-                  seen.add(folder);
-                  projects.push({
-                    provider: this.providerId,
-                    folderPath: folder,
-                  });
+              const uriRegex = /"workspaceUris"\s*:\s*\[\s*"([^"]+)"/g;
+              let match: RegExpExecArray | null;
+              while ((match = uriRegex.exec(content)) !== null) {
+                if (match[1]) {
+                  const folder = decodeWorkspaceUri(match[1]);
+                  if (folder && !seen.has(folder)) {
+                    seen.add(folder);
+                    projects.push({
+                      provider: this.providerId,
+                      folderPath: folder,
+                    });
+                  }
                 }
               }
             } catch {

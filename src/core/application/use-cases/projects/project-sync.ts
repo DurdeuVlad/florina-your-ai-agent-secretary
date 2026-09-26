@@ -31,10 +31,15 @@ import type {
   ProviderProjectScannerPort,
 } from '../../ports/outbound/provider-projects.js';
 
+export interface ProjectSyncContext {
+  readonly taskId?: EntityId;
+  readonly sessionId?: EntityId;
+}
+
 export interface ProjectSyncOptions {
   readonly projects: ProjectRepositoryPort;
-  readonly eventJournal: EventJournalPort;
   readonly canonicalizer: PathCanonicalizerPort;
+  readonly eventJournal?: EventJournalPort;
   readonly taskStore?: TaskRepositoryPort;
   readonly now?: () => string;
 }
@@ -71,15 +76,15 @@ function sanitizeSlug(name: string): string {
 
 export class ProjectSyncService {
   private readonly projects: ProjectRepositoryPort;
-  private readonly eventJournal: EventJournalPort;
   private readonly canonicalizer: PathCanonicalizerPort;
+  private readonly eventJournal?: EventJournalPort;
   private readonly taskStore?: TaskRepositoryPort;
   private readonly now: () => string;
 
   constructor(options: ProjectSyncOptions) {
     this.projects = options.projects;
-    this.eventJournal = options.eventJournal;
     this.canonicalizer = options.canonicalizer;
+    this.eventJournal = options.eventJournal;
     this.taskStore = options.taskStore;
     this.now = options.now ?? (() => new Date().toISOString());
   }
@@ -89,9 +94,13 @@ export class ProjectSyncService {
    * 1. Discover projects from each provider.
    * 2. Canonicalize each folder path.
    * 3. Match against existing Florina projects (idempotent).
-   * 4. For unseen folders, create a new Florina project and journal it (DEC-012).
+   * 4. For unseen folders, create a new Florina project and journal it (DEC-012)
+   *    if task/session execution context is provided.
    */
-  async sync(scanners: readonly ProviderProjectScannerPort[]): Promise<ProjectSyncResult> {
+  async sync(
+    scanners: readonly ProviderProjectScannerPort[],
+    context?: ProjectSyncContext,
+  ): Promise<ProjectSyncResult> {
     const allDiscovered: DiscoveredProviderProject[] = [];
     for (const scanner of scanners) {
       try {
@@ -156,22 +165,25 @@ export class ProjectSyncService {
         created.push(newProject);
         project = newProject;
 
-        // Journal project creation in immutable event log (DEC-012)
-        this.eventJournal.insert({
-          id: `evt-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-          taskId: '',
-          sessionId: '',
-          timestamp,
-          kind: 'AgentProgress',
-          payload: {
-            action: 'project_created_from_sync',
-            projectId: newProject.id,
-            name: newProject.name,
-            folderPath: discovered.folderPath,
-            canonicalPath: canonical,
-            provider: discovered.provider,
-          },
-        });
+        // Journal project creation if running within valid task/session context (DEC-012)
+        if (this.eventJournal && context?.taskId && context?.sessionId) {
+          this.eventJournal.insert({
+            id: `evt-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+            taskId: context.taskId,
+            sessionId: context.sessionId,
+            timestamp,
+            kind: 'AgentProgress',
+            payload: {
+              message: `Project created from sync: ${newProject.name}`,
+              action: 'project_created_from_sync',
+              projectId: newProject.id,
+              name: newProject.name,
+              folderPath: discovered.folderPath,
+              canonicalPath: canonical,
+              provider: discovered.provider,
+            },
+          });
+        }
       }
 
       matched.push({

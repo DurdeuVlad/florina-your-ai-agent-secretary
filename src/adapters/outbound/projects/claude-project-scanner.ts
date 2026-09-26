@@ -43,7 +43,7 @@ export class ClaudeProjectScanner implements ProviderProjectScannerPort {
       try {
         const raw = this.readFile(configFile, 'utf8');
         const data = JSON.parse(raw) as { projects?: Record<string, unknown> };
-        if (data.projects && typeof data.projects === 'object') {
+        if (data.projects && typeof data.projects === 'object' && !Array.isArray(data.projects)) {
           for (const folderPath of Object.keys(data.projects)) {
             if (folderPath && !seen.has(folderPath)) {
               seen.add(folderPath);

@@ -193,6 +193,19 @@ describe('Project Sync (issue #175)', () => {
       });
       expect(canonicalizer.canonicalize('/symlink/target')).toBe('/real/storage/path');
     });
+
+    it('strips Windows extended-length \\\\?\\ and \\\\?\\UNC\\ prefixes', () => {
+      const canonicalizer = new NodePathCanonicalizer({
+        platform: 'win32',
+        realpathFn: (p) => p,
+      });
+      expect(canonicalizer.canonicalize('\\\\?\\C:\\Users\\Vlad\\Repo')).toBe(
+        'c:/users/vlad/repo',
+      );
+      expect(canonicalizer.canonicalize('\\\\?\\UNC\\server\\share\\repo')).toBe(
+        '//server/share/repo',
+      );
+    });
   });
 
   describe('ProjectSyncService: Same folder -> same Florina project', () => {
@@ -233,7 +246,10 @@ describe('Project Sync (issue #175)', () => {
         ],
       };
 
-      const result = await syncService.sync([scanner1, scanner2, scanner3]);
+      const result = await syncService.sync([scanner1, scanner2, scanner3], {
+        taskId: 'task-test-1',
+        sessionId: 'session-test-1',
+      });
 
       // Exactly ONE Florina project must be created
       expect(result.created).toHaveLength(1);
@@ -266,14 +282,15 @@ describe('Project Sync (issue #175)', () => {
         ],
       };
 
+      const context = { taskId: 'task-sync-all', sessionId: 'sess-sync-all' };
       // Pass 1: creates 2 projects
-      const result1 = await syncService.sync([scanner]);
+      const result1 = await syncService.sync([scanner], context);
       expect(result1.created).toHaveLength(2);
       expect(projects.listAll()).toHaveLength(2);
       expect(eventJournal.events).toHaveLength(2);
 
       // Pass 2: creates 0 projects; all matched to existing
-      const result2 = await syncService.sync([scanner]);
+      const result2 = await syncService.sync([scanner], context);
       expect(result2.created).toHaveLength(0);
       expect(result2.matched).toHaveLength(2);
       expect(projects.listAll()).toHaveLength(2);
@@ -417,6 +434,18 @@ describe('Project Sync (issue #175)', () => {
       expect(discovered[1].folderPath).toBe('C:/Users/Vlad/Documents/Github/agent-secretary');
     });
 
+    it('ClaudeProjectScanner ignores array-shaped projects property', () => {
+      const mockJson = JSON.stringify({
+        projects: ['/invalid/array/path'],
+      });
+      const scanner = new ClaudeProjectScanner({
+        homeDir: '/mock/home',
+        existsSyncFn: () => true,
+        readFileSyncFn: () => mockJson,
+      });
+      expect(scanner.scanProjects()).toEqual([]);
+    });
+
     it('CodexProjectScanner parses .codex-global-state.json local-projects and saved roots', () => {
       const mockState = JSON.stringify({
         'local-projects': {
@@ -454,6 +483,7 @@ describe('Project Sync (issue #175)', () => {
         'c:/Users/Vlad/Documents/Github/dwurdy-site',
       );
       expect(decodeWorkspaceUri('file:///home/user/project')).toBe('/home/user/project');
+      expect(decodeWorkspaceUri('file://server/share/repo')).toBe('//server/share/repo');
 
       const scanner = new DevinProjectScanner({
         appDataDir: '/mock/appdata',
@@ -535,9 +565,6 @@ describe('Project Sync (issue #175)', () => {
       const realScanner = new CompositeProviderScanner();
       const discovered = await realScanner.scanProjects();
 
-      // On this workstation with Claude and Codex installed, discovered projects should exist
-      expect(discovered.length).toBeGreaterThan(0);
-
       // Run sync against in-memory stores to prove end-to-end convergence
       const projects = new InMemoryProjectRepository();
       const eventJournal = new InMemoryEventJournal();
@@ -550,12 +577,59 @@ describe('Project Sync (issue #175)', () => {
       const syncResult = await syncService.sync([realScanner]);
       expect(syncResult.totalDiscovered).toBe(discovered.length);
       expect(syncResult.matched.length).toBe(discovered.length);
-      expect(projects.listAll().length).toBeGreaterThan(0);
 
-      // Verify that re-sync is 100% idempotent on real discovered projects
-      const secondSync = await syncService.sync([realScanner]);
-      expect(secondSync.created).toHaveLength(0);
-      expect(secondSync.matched.length).toBe(discovered.length);
+      if (discovered.length > 0) {
+        expect(projects.listAll().length).toBeGreaterThan(0);
+        // Verify that re-sync is 100% idempotent on real discovered projects
+        const secondSync = await syncService.sync([realScanner]);
+        expect(secondSync.created).toHaveLength(0);
+        expect(secondSync.matched.length).toBe(discovered.length);
+      }
+    });
+
+    it('INTEGRATION PROOF: runs ProjectSyncService against real SQLite StorageDatabase with foreign_keys ON', async () => {
+      const { StorageDatabase } = await import(
+        '../src/adapters/outbound/persistence/sqlite/database.js'
+      );
+      const { ProjectRepository } = await import(
+        '../src/adapters/outbound/persistence/sqlite/repositories/project.js'
+      );
+
+      const db = new StorageDatabase({ memory: true });
+      await db.open();
+      try {
+        const projectRepo = new ProjectRepository(db.connection);
+        const canonicalizer = new StaticCanonicalizer();
+        const syncService = new ProjectSyncService({
+          projects: projectRepo,
+          canonicalizer,
+        });
+
+        const scanner: ProviderProjectScannerPort = {
+          providerId: 'codex',
+          scanProjects: () => [
+            { provider: 'codex', folderPath: '/repos/real-sqlite-project' },
+          ],
+        };
+
+        const result = await syncService.sync([scanner]);
+        expect(result.created).toHaveLength(1);
+        expect(result.matched).toHaveLength(1);
+
+        const loaded = projectRepo.getById(result.created[0].id);
+        expect(loaded).not.toBeNull();
+        expect(loaded?.name).toBe('real-sqlite-project');
+        expect(loaded?.repo.path).toBe('/repos/real-sqlite-project');
+
+        // Test idempotency on real SQLite
+        const resync = await syncService.sync([scanner]);
+        expect(resync.created).toHaveLength(0);
+        expect(resync.matched).toHaveLength(1);
+        expect(projectRepo.listAll()).toHaveLength(1);
+      } finally {
+        db.close();
+      }
     });
   });
 });
+

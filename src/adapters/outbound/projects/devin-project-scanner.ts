@@ -12,6 +12,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type {
   DiscoveredProviderProject,
@@ -30,14 +31,18 @@ export interface DevinProjectScannerOptions {
 export function decodeWorkspaceUri(uri: string): string {
   if (uri.startsWith('file://')) {
     try {
-      const parsed = new URL(uri);
-      let pathName = decodeURIComponent(parsed.pathname);
-      if (/^\/[a-zA-Z]:/.test(pathName)) {
-        pathName = pathName.slice(1);
-      }
-      return pathName;
+      return fileURLToPath(uri).replace(/\\/g, '/');
     } catch {
-      return uri;
+      try {
+        const parsed = new URL(uri);
+        let pathName = decodeURIComponent(parsed.pathname);
+        if (/^\/[a-zA-Z]:/.test(pathName)) {
+          pathName = pathName.slice(1);
+        }
+        return pathName.replace(/\\/g, '/');
+      } catch {
+        return uri;
+      }
     }
   }
   return uri;
