@@ -4,3 +4,5 @@
  */
 export * from './os-credential-vault.js';
 export * from './dotenv.js';
+export * from './encrypted-file-secrets-vault.js';
+
