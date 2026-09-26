@@ -118,6 +118,10 @@ function findCodexWindowsCandidates(localAppData: string, home: string): string[
   const candidates: string[] = [join(home, '.codex', '.sandbox-bin', 'codex.exe')];
   const base = join(localAppData, 'OpenAI', 'Codex', 'bin');
   if (existsSync(base)) {
+    const directCandidate = join(base, 'codex.exe');
+    if (existsSync(directCandidate)) {
+      candidates.push(directCandidate);
+    }
     try {
       for (const entry of readdirSync(base)) {
         const candidate = join(base, entry, 'codex.exe');

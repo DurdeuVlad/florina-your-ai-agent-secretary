@@ -122,7 +122,11 @@ export class CodexAdapter extends BaseAdapter {
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
   >();
 
   /** Active thread id tracked for modern protocol turns. */
@@ -190,18 +194,33 @@ export class CodexAdapter extends BaseAdapter {
     // Attempt the modern initialize handshake if protocolMode allows it.
     if (this.options.protocolMode !== 'legacy') {
       try {
+        const initTimeout = this.options.connectTimeoutMs ?? 5000;
         const initResult = (await this.sendRequest(
           'initialize',
           {
             clientInfo: { name: 'florina', version: '0.1.0' },
             capabilities: null,
           },
-          1500,
+          initTimeout,
         )) as { userAgent?: string; platformOs?: string } | null;
         this.serverInfo = initResult;
         this.isModernProtocol = true;
-      } catch {
-        this.isModernProtocol = false;
+        // Notify the server that initialization is complete per protocol specification
+        try {
+          this.transport?.send(
+            JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} }),
+          );
+        } catch {
+          // Transport might be closed
+        }
+      } catch (err) {
+        if (this.options.protocolMode === 'auto') {
+          this.isModernProtocol = false;
+        } else {
+          // Modern mode explicitly requested; do not downgrade to legacy
+          this.isModernProtocol = true;
+          throw err;
+        }
       }
     }
   }
@@ -260,7 +279,7 @@ export class CodexAdapter extends BaseAdapter {
           msg.includes('unknown variant') ||
           msg.includes('Method not found') ||
           msg.includes('not recognized');
-        if (!isMethodNotFound) {
+        if (!isMethodNotFound || this.options.protocolMode === 'modern') {
           throw err;
         }
         // Fall back to legacy codex.startTurn
@@ -434,14 +453,14 @@ export class CodexAdapter extends BaseAdapter {
       params: params ?? {},
     };
     return new Promise<unknown>((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-      this.transport!.send(JSON.stringify(request));
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(new Error(`JSON-RPC request "${method}" (id=${id}) timed out`));
         }
       }, timeoutMs);
+      this.pendingRequests.set(id, { resolve, reject, timer });
+      this.transport!.send(JSON.stringify(request));
     });
   }
 
@@ -459,16 +478,20 @@ export class CodexAdapter extends BaseAdapter {
     if (typeof parsed !== 'object' || parsed === null) {
       return;
     }
-    const msg = parsed as Record<string, unknown>;
-    if (msg['method'] !== undefined && msg['id'] !== undefined) {
-      // JSON-RPC request from server (e.g. approval prompt).
-      void this.handleServerRequest(msg as unknown as JsonRpcRequest);
-    } else if (msg['method'] !== undefined && msg['id'] === undefined) {
-      // JSON-RPC notification (streamed event).
-      this.handleNotification(msg as unknown as JsonRpcNotification);
-    } else if (msg['id'] !== undefined) {
-      // JSON-RPC response (matches a pending request).
-      this.handleResponse(msg as unknown as JsonRpcResponse);
+    try {
+      const msg = parsed as Record<string, unknown>;
+      if (msg['method'] !== undefined && msg['id'] !== undefined) {
+        // JSON-RPC request from server (e.g. approval prompt).
+        void this.handleServerRequest(msg as unknown as JsonRpcRequest);
+      } else if (msg['method'] !== undefined && msg['id'] === undefined) {
+        // JSON-RPC notification (streamed event).
+        this.handleNotification(msg as unknown as JsonRpcNotification);
+      } else if (msg['id'] !== undefined) {
+        // JSON-RPC response (matches a pending request).
+        this.handleResponse(msg as unknown as JsonRpcResponse);
+      }
+    } catch {
+      // Ignore errors caused by corrupt message payloads.
     }
   }
 
@@ -477,7 +500,7 @@ export class CodexAdapter extends BaseAdapter {
    * Enqueues an ApprovalRequested event and responds per DEC-011 (decline by default).
    */
   private async handleServerRequest(request: JsonRpcRequest): Promise<void> {
-    if (this.mapperCtx) {
+    if (this.activeSession && !this.streamComplete && this.mapperCtx) {
       const mapped = mapCodexNotification(request.method, request.params, this.mapperCtx);
       if (mapped) {
         this.enqueueEvent(mapped);
@@ -514,7 +537,7 @@ export class CodexAdapter extends BaseAdapter {
    * SupervisorEvent and enqueue it for streamEvents.
    */
   private handleNotification(notification: JsonRpcNotification): void {
-    if (!this.mapperCtx) {
+    if (!this.activeSession || this.streamComplete || !this.mapperCtx) {
       return;
     }
     const mapped = mapCodexNotification(
@@ -544,6 +567,7 @@ export class CodexAdapter extends BaseAdapter {
     if (!pending) {
       return;
     }
+    clearTimeout(pending.timer);
     this.pendingRequests.delete(response.id);
     if (response.error) {
       pending.reject(new Error(response.error.message));
@@ -556,11 +580,16 @@ export class CodexAdapter extends BaseAdapter {
    * Handle unexpected transport closure.
    */
   private handleClose(code: number, reason: string): void {
-    // Reject all pending requests.
-    for (const [, { reject }] of this.pendingRequests) {
+    // Reject all pending requests and clear timers.
+    for (const [, { reject, timer }] of this.pendingRequests) {
+      clearTimeout(timer);
       reject(new Error(`Transport closed (code=${code}, reason=${reason})`));
     }
     this.pendingRequests.clear();
+    // Update connection state to disconnected if not already disconnected.
+    if (this.connectionState !== 'disconnected') {
+      this.setConnectionState('disconnected');
+    }
     // If the stream is not yet complete, emit a failure event.
     if (!this.streamComplete && this.mapperCtx && this.activeSession) {
       this.enqueueEvent({

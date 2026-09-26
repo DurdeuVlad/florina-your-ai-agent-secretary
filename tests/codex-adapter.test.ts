@@ -118,6 +118,8 @@ class MockCodexServer {
     this.sendNotification('codex.event', event);
   }
 
+  public readonly receivedNotifications: string[] = [];
+
   /**
    * Wire up the connection handler. Must be called before the client
    * connects.
@@ -150,6 +152,10 @@ class MockCodexServer {
     const msg = parsed as Record<string, unknown>;
     const id = msg['id'];
     const method = msg['method'];
+
+    if (id === undefined && typeof method === 'string') {
+      this.receivedNotifications.push(method);
+    }
 
     if (method === 'initialize') {
       this.sendResponse(ws, id, {
@@ -818,6 +824,50 @@ describe('Codex mapper', () => {
     }
   });
 
+  it('maps modern turn/completed with status inProgress -> AgentProgress', () => {
+    const inProg = mapModernTurnCompleted(
+      { threadId: 'thread-1', turn: { id: 'turn-1', status: 'inProgress' } },
+      ctx,
+    );
+    expect(inProg).not.toBeNull();
+    expect(inProg?.type).toBe('AgentProgress');
+  });
+
+  it('handles null, undefined, or missing properties in modern mappers defensively', () => {
+    // None of these should throw TypeError; they should safely return null
+    expect(mapModernTurnCompleted({} as unknown as Parameters<typeof mapModernTurnCompleted>[0], ctx)).toBeNull();
+    expect(mapModernTurnCompleted({ threadId: 't1' } as unknown as Parameters<typeof mapModernTurnCompleted>[0], ctx)).toBeNull();
+    expect(mapModernItemStarted({} as unknown as Parameters<typeof mapModernItemStarted>[0], ctx)).toBeNull();
+    expect(mapModernItemStarted({ threadId: 't1' } as unknown as Parameters<typeof mapModernItemStarted>[0], ctx)).toBeNull();
+    expect(mapModernItemCompleted({} as unknown as Parameters<typeof mapModernItemCompleted>[0], ctx)).toBeNull();
+    expect(mapModernItemCompleted({ threadId: 't1' } as unknown as Parameters<typeof mapModernItemCompleted>[0], ctx)).toBeNull();
+    expect(mapModernMessageDelta({} as unknown as Parameters<typeof mapModernMessageDelta>[0], ctx)).toBeNull();
+    expect(mapCommandExecutionApproval(null as unknown as Parameters<typeof mapCommandExecutionApproval>[0], ctx)).toBeNull();
+    expect(mapFileChangeApproval(null as unknown as Parameters<typeof mapFileChangeApproval>[0], ctx)).toBeNull();
+    expect(mapPermissionsApproval(null as unknown as Parameters<typeof mapPermissionsApproval>[0], ctx)).toBeNull();
+  });
+
+  it('maps modern file change approval request with multiple files into combined destination and scope', () => {
+    const multiApproval = mapFileChangeApproval(
+      {
+        threadId: 't1',
+        turnId: 'turn-1',
+        itemId: 'i2',
+        changes: [
+          { path: 'src/a.ts', kind: 'modify', diff: '...' },
+          { path: 'src/b.ts', kind: 'add', diff: '...' },
+        ],
+      },
+      ctx,
+    );
+    expect(multiApproval).not.toBeNull();
+    expect(multiApproval?.type).toBe('ApprovalRequested');
+    if (multiApproval?.type === 'ApprovalRequested') {
+      expect(multiApproval.destination).toBe('src/a.ts, src/b.ts');
+      expect(multiApproval.scope[0].targets).toEqual(['src/a.ts', 'src/b.ts']);
+    }
+  });
+
   it('mapCodexNotification routes all modern and legacy variants', () => {
     expect(mapCodexNotification('turn/started', { threadId: 't1', turn: { id: 'turn-1' } }, ctx)?.type).toBe(
       'AgentStarted',
@@ -1220,9 +1270,33 @@ describe('CodexAdapter (mock transport)', () => {
     expect(cancelMsg.params.threadId).toBe('thread-999');
     expect(cancelMsg.params.turnId).toBe('turn-999');
 
+    // Server sends turn/completed after interrupt; verify it does NOT produce duplicate AgentStopped
+    transport.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/completed',
+        params: { threadId: 'thread-999', turn: { id: 'turn-999', status: 'interrupted' } },
+      }),
+    );
+
     const events = await streaming;
-    expect(events.some((e) => e.type === 'AgentStopped')).toBe(true);
+    const stoppedEvents = events.filter((e) => e.type === 'AgentStopped');
+    expect(stoppedEvents).toHaveLength(1);
     await adapter.disconnect();
+  });
+
+  it('unexpected transport closure sets connectionState to disconnected and rejects pending requests', async () => {
+    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const transport = new MockTransport();
+    adapter.setTransport(transport);
+    expect(adapter.connectionState).toBe('connected');
+
+    const startPromise = adapter.startRun('task-codex-1', sampleSessionConfig());
+    // Transport unexpectedly drops
+    transport.close();
+
+    await expect(startPromise).rejects.toThrow(/Transport closed/);
+    expect(adapter.connectionState).toBe('disconnected');
   });
 
   it('handles server approval requests with decline and enqueues ApprovalRequested (DEC-011)', async () => {
@@ -1627,6 +1701,25 @@ describe('CodexAdapter integration (mock WebSocket app-server)', () => {
       expect(stopped[0].reason).toBe('user');
     }
 
+    await adapter.disconnect();
+  });
+
+  it('sends initialized notification after initialize request in modern mode', async () => {
+    await server.close();
+    server = new MockCodexServer({ events: [] });
+    server.setupHandlers();
+    const port = await server.start();
+
+    const adapter = new CodexAdapter(null, {
+      endpoint: `ws://127.0.0.1:${port}`,
+      protocolMode: 'modern',
+      connectTimeoutMs: 2000,
+    });
+    await adapter.connect();
+    // Allow brief tick for loopback WebSocket message delivery
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(server.receivedNotifications).toContain('initialized');
     await adapter.disconnect();
   });
 

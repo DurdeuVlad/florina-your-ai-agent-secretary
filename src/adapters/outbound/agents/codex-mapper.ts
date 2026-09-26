@@ -653,11 +653,14 @@ export function mapModernTurnStarted(
   };
 }
 
-/** Map modern `turn/completed` -> `AgentCompleted` | `AgentFailed` | `AgentStopped`. */
+/** Map modern `turn/completed` -> `AgentCompleted` | `AgentFailed` | `AgentStopped` | `AgentProgress` | null. */
 export function mapModernTurnCompleted(
   params: ModernTurnCompletedNotification,
   ctx: MapperContext,
-): SupervisorEvent {
+): SupervisorEvent | null {
+  if (!params || typeof params !== 'object' || !params.turn || typeof params.turn !== 'object') {
+    return null;
+  }
   const turn = params.turn;
   if (turn.status === 'failed') {
     return {
@@ -683,17 +686,31 @@ export function mapModernTurnCompleted(
       details: 'Codex turn interrupted',
     };
   }
-  return {
-    type: 'AgentCompleted',
-    timestamp: now(),
-    taskId: ctx.taskId,
-    sessionId: ctx.sessionId,
-    agentId: ctx.agentId,
-    adapterFidelityTier: ctx.adapterFidelityTier,
-    summary: 'Codex turn completed',
-    deliverables: [],
-    durationMs: turn.durationMs ?? undefined,
-  };
+  if (turn.status === 'inProgress') {
+    return {
+      type: 'AgentProgress',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      message: 'Codex turn in progress',
+    };
+  }
+  if (turn.status === 'completed') {
+    return {
+      type: 'AgentCompleted',
+      timestamp: now(),
+      taskId: ctx.taskId,
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      adapterFidelityTier: ctx.adapterFidelityTier,
+      summary: 'Codex turn completed',
+      deliverables: [],
+      durationMs: turn.durationMs ?? undefined,
+    };
+  }
+  return null;
 }
 
 /** Map modern `item/started` -> `ToolStarted` | `AgentProgress` | null. */
@@ -701,6 +718,9 @@ export function mapModernItemStarted(
   params: ModernItemStartedNotification,
   ctx: MapperContext,
 ): SupervisorEvent | null {
+  if (!params || typeof params !== 'object' || !params.item || typeof params.item !== 'object') {
+    return null;
+  }
   const item = params.item;
   if (item.type === 'commandExecution') {
     const command = typeof item['command'] === 'string' ? item['command'] : '';
@@ -762,6 +782,9 @@ export function mapModernItemCompleted(
   params: ModernItemCompletedNotification,
   ctx: MapperContext,
 ): SupervisorEvent | null {
+  if (!params || typeof params !== 'object' || !params.item || typeof params.item !== 'object') {
+    return null;
+  }
   const item = params.item;
   if (item.type === 'commandExecution') {
     const command = typeof item['command'] === 'string' ? item['command'] : '';
@@ -839,11 +862,14 @@ export function mapModernItemCompleted(
   return null;
 }
 
-/** Map modern `item/agentMessage/delta` -> `AgentProgress`. */
+/** Map modern `item/agentMessage/delta` -> `AgentProgress` | null. */
 export function mapModernMessageDelta(
   params: ModernAgentMessageDeltaNotification,
   ctx: MapperContext,
-): SupervisorEvent {
+): SupervisorEvent | null {
+  if (!params || typeof params !== 'object' || typeof params.delta !== 'string') {
+    return null;
+  }
   return {
     type: 'AgentProgress',
     timestamp: now(),
@@ -855,11 +881,14 @@ export function mapModernMessageDelta(
   };
 }
 
-/** Map modern command execution approval request -> `ApprovalRequested` (DEC-010/011). */
+/** Map modern command execution approval request -> `ApprovalRequested` | null (DEC-010/011). */
 export function mapCommandExecutionApproval(
   params: ModernCommandExecutionApprovalParams,
   ctx: MapperContext,
-): SupervisorEvent {
+): SupervisorEvent | null {
+  if (!params || typeof params !== 'object') {
+    return null;
+  }
   const cmd = params.command ?? 'shell';
   return {
     type: 'ApprovalRequested',
@@ -879,13 +908,21 @@ export function mapCommandExecutionApproval(
   };
 }
 
-/** Map modern file change approval request -> `ApprovalRequested` (DEC-010/011). */
+/** Map modern file change approval request -> `ApprovalRequested` | null (DEC-010/011). */
 export function mapFileChangeApproval(
   params: ModernFileChangeApprovalParams,
   ctx: MapperContext,
-): SupervisorEvent {
-  const firstChange = params.changes?.[0];
-  const path = firstChange?.path ?? 'files';
+): SupervisorEvent | null {
+  if (!params || typeof params !== 'object') {
+    return null;
+  }
+  const changes = Array.isArray(params.changes) ? params.changes : [];
+  const paths = changes
+    .map((c) => (c && typeof c === 'object' && typeof c.path === 'string' ? c.path : ''))
+    .filter((p) => p.length > 0);
+  const targetPaths = paths.length > 0 ? paths : ['files'];
+  const destination = targetPaths.join(', ');
+  const firstChange = changes[0];
   return {
     type: 'ApprovalRequested',
     timestamp: now(),
@@ -896,19 +933,22 @@ export function mapFileChangeApproval(
     task: ctx.objective,
     agent: ctx.agentId,
     capability: CapType.Filesystem,
-    destination: path,
+    destination,
     command: firstChange?.kind ?? 'patch',
     workingDir: ctx.workingDir,
-    scope: [{ type: CapType.Filesystem, targets: [path] }],
+    scope: [{ type: CapType.Filesystem, targets: targetPaths }],
     riskLevel: RiskLevel.High,
   };
 }
 
-/** Map modern permissions approval request -> `ApprovalRequested` (DEC-010/011). */
+/** Map modern permissions approval request -> `ApprovalRequested` | null (DEC-010/011). */
 export function mapPermissionsApproval(
   params: ModernPermissionsApprovalParams,
   ctx: MapperContext,
-): SupervisorEvent {
+): SupervisorEvent | null {
+  if (!params || typeof params !== 'object') {
+    return null;
+  }
   const target = params.reason ?? 'permissions';
   return {
     type: 'ApprovalRequested',
@@ -952,6 +992,9 @@ export function mapCodexNotification(
     case 'item/agentMessage/delta':
       return mapModernMessageDelta(params as ModernAgentMessageDeltaNotification, ctx);
     case 'item/fileChange/patchUpdated': {
+      if (!params || typeof params !== 'object') {
+        return null;
+      }
       const p = params as ModernPatchUpdatedNotification;
       return {
         type: 'FileChanged',
