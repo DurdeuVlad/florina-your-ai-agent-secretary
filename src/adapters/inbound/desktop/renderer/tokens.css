@@ -17,6 +17,11 @@
   --orange: #e2814f;
   --purple: #a98af0;
   --slate: #7d7d87;
+  /* views emit color: 'blue' (issue #265) — alias to the accent blue;
+   * yellow/gray alias the nearest tokens (dormant approval/PTT paths) */
+  --blue: var(--accent);
+  --yellow: var(--amber);
+  --gray: var(--slate);
   --border-hover: #3a3a40;
 
   --radius-sm: 6px;
@@ -318,6 +323,49 @@ header .spacer {
 .chip.orange {
   color: var(--orange);
   border-color: var(--orange);
+}
+.chip.blue {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+.chip.slate {
+  color: var(--slate);
+}
+
+/* c-* color utilities (issue #265): propsToClass emits c-{color} on
+ * non-chip tags — kind labels, summaries, inspector titles. Covers the
+ * token vocabulary plus the severity aliases InspRowTitle uses. */
+.c-red,
+.c-error {
+  color: var(--red);
+}
+.c-amber,
+.c-warn {
+  color: var(--amber);
+}
+.c-green,
+.c-success {
+  color: var(--green);
+}
+.c-orange {
+  color: var(--orange);
+}
+.c-blue {
+  color: var(--blue);
+}
+.c-purple {
+  color: var(--purple);
+}
+.c-slate,
+.c-info,
+.c-gray {
+  color: var(--slate);
+}
+.c-yellow {
+  color: var(--yellow);
+}
+.c-muted {
+  color: var(--muted);
 }
 
 button {

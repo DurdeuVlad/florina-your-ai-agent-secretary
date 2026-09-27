@@ -26,6 +26,34 @@ const ICONS = {
   stop: '■',
   mic: '🎙',
   'mic-off': '⌀',
+  /* issue #265 — names the views emit that used to render the '·'
+   * fallback (priority glyphs flame/arrow-up/minus/arrow-down included) */
+  flame: '🔥',
+  'arrow-up': '↑',
+  minus: '−',
+  'arrow-down': '↓',
+  search: '🔍',
+  memory: '🧠',
+  crown: '♛',
+  dot: '•',
+  circle: '●',
+  diff: '±',
+  file: '📄',
+  folder: '📁',
+  archive: '▣',
+  bookmark: '🔖',
+  'chevron-left': '‹',
+  'chevron-right': '›',
+  pencil: '✎',
+  'git-pull-request': '⎇',
+  sparkles: '✨',
+  spinner: '⟳',
+  warning: '⚠',
+  bolt: '⚡',
+  waveform: '〰',
+  'power-off': '⏻',
+  'mic-on': '🎙',
+  speaker: '🔊',
 };
 
 const TAG_CLASS = {
@@ -136,7 +164,6 @@ function propsToClass(tag, props) {
   if (props) {
     if (props.priority) cls.push(String(props.priority));
     if (props.color && TAG_CLASS[tag] !== 'chip') cls.push('c-' + props.color);
-    if (props.color && tag === 'PriorityLabel') cls.push(String(props.priority || props.color));
     if (props.variant) cls.push(String(props.variant));
     if (props.weight === 'bold' || props.weight === 'semibold') cls.push('w-' + props.weight);
     if (props.spacing) cls.push('sp-' + props.spacing);
@@ -215,10 +242,8 @@ function renderNode(node) {
     if (props && props.selected) el.classList.add('sel');
     if (props && props.muted) el.classList.add('cond');
   }
-  if (tag === 'InspRowTitle' && props && props.color) {
-    const c = { error: 'red', warn: 'amber', success: 'green', info: 'slate' }[props.color];
-    if (c) el.style.color = 'var(--' + c + ')';
-  }
+  /* InspRowTitle severity colors (#265): handled by the c-* utility
+   * classes (c-error/c-warn/c-success/c-info) — no inline special-case. */
   if (tag === 'DetailMono') el.style.whiteSpace = 'pre-wrap';
 
   /* --- fleet/quota bar (issue #127): <div class="bar"><i style="width:N%"></i></div> --- */
