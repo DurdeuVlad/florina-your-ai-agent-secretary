@@ -22,6 +22,7 @@ import type {
   WindowOptions,
 } from '../src/desktop/index.js';
 import { DictationService } from '../src/core/application/use-cases/voice/dictation-service.js';
+import { CatchUpAutoTrigger } from '../src/adapters/inbound/desktop/catchup-auto-trigger.js';
 
 /* ------------------------------------------------------------------ *
  * Mock daemon WebSocket server (pushes state updates to the desktop app)
@@ -933,6 +934,267 @@ describe('handleRendererCommand', () => {
       res: { ok: true },
     });
     expect(sawCommand).toBe(false);
+  });
+});
+
+/* ================================================================== *
+ * catchup:opened — idle catch-up digest wiring (issue #260, DEC-042 §9)
+ * ================================================================== */
+describe('catchup:opened', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  const digest = {
+    since: '2026-09-27T08:00:00.000Z',
+    until: '2026-09-27T11:00:00.000Z',
+    notable: [
+      {
+        taskId: 'task_1',
+        objective: 'refactor auth router',
+        state: 'Completed',
+        updatedAt: '2026-09-27T09:00:00.000Z',
+      },
+    ],
+    stillRunning: [
+      {
+        taskId: 'task_2',
+        objective: 'sync provider dirs',
+        state: 'Running',
+        updatedAt: '2026-09-27T10:00:00.000Z',
+      },
+    ],
+    pendingAttention: [
+      {
+        id: 'attn_1',
+        taskId: 'task_9',
+        kind: 'ApprovalRequest',
+        priority: 'High',
+        status: 'Pending',
+        createdAt: '2026-09-27T10:30:00.000Z',
+        payload: {},
+      },
+    ],
+    failovers: [],
+    isEmpty: false,
+  };
+
+  const emptyDigest = {
+    since: '2026-09-27T08:00:00.000Z',
+    until: '2026-09-27T11:00:00.000Z',
+    notable: [],
+    stillRunning: [],
+    pendingAttention: [],
+    failovers: [],
+    isEmpty: true,
+  };
+
+  type Responder = (cmd: Record<string, unknown>, send: (r: unknown) => void) => void;
+
+  /** Connect an app (fresh trigger, 60s idle window) and record daemon-bound commands. */
+  async function connectedApp(
+    transport: MockIpcTransport,
+    respond: Responder,
+  ): Promise<{ app: DesktopApp; cmds: Record<string, unknown>[]; socket: WebSocket }> {
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      catchUpTrigger: new CatchUpAutoTrigger({ idleThresholdMs: 60_000 }),
+    });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    const cmds: Record<string, unknown>[] = [];
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (typeof cmd['kind'] !== 'string') return; // subscribe frame
+      cmds.push(cmd);
+      respond(cmd, (r) => socket.send(JSON.stringify(r)));
+    });
+    return { app, cmds, socket };
+  }
+
+  const okCatchUp: Responder = (cmd, send) => {
+    if (cmd['kind'] === 'get-catchup') send({ ok: true, digest });
+    else send({ ok: true });
+  };
+
+  it('journals the digest as an assistant message, then confirms — in order', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds } = await connectedApp(transport, okCatchUp);
+
+    await app.handleRendererCommand({ id: 1, cmd: 'catchup:opened' });
+
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup', 'chat-append', 'confirm-catchup']);
+    const append = cmds[1]!;
+    expect(append['role']).toBe('assistant');
+    expect(append['text']).toContain('catch-up');
+    expect(append['text']).toContain('refactor auth router');
+    expect(append['text']).toContain('sync provider dirs');
+    expect(append['text']).toContain('ApprovalRequest');
+    const confirm = cmds[2]!;
+    expect(confirm['until']).toBe(digest.until);
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 1,
+      res: { ok: true },
+    });
+  });
+
+  it('an empty digest advances the watermark without appending a message', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'get-catchup') send({ ok: true, digest: emptyDigest });
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 2, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup', 'confirm-catchup']);
+  });
+
+  it('a second open within the idle threshold does not re-fire', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds } = await connectedApp(transport, okCatchUp);
+    await app.handleRendererCommand({ id: 3, cmd: 'catchup:opened' });
+    await app.handleRendererCommand({ id: 4, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup', 'chat-append', 'confirm-catchup']);
+  });
+
+  it('a turn in flight defers the digest — the trigger stays armed', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds, socket } = await connectedApp(transport, okCatchUp);
+    // Turn in flight: ephemeral chat:event drives chatWorking.
+    socket.send(JSON.stringify({ type: 'chat:event', event: { kind: 'iteration' } }));
+    await waitFor(() => transport.toRenderer.some((m) => m.channel === 'chat:update'));
+
+    await app.handleRendererCommand({ id: 5, cmd: 'catchup:opened' });
+    expect(cmds).toEqual([]);
+
+    socket.send(JSON.stringify({ type: 'chat:event', event: { kind: 'completed' } }));
+    await waitFor(
+      () => transport.toRenderer.filter((m) => m.channel === 'chat:update').length >= 2,
+    );
+    await app.handleRendererCommand({ id: 6, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup', 'chat-append', 'confirm-catchup']);
+  });
+
+  it('a failed get-catchup leaves the trigger armed — the next open retries', async () => {
+    const transport = new MockIpcTransport();
+    let catchupCalls = 0;
+    const { app, cmds } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'get-catchup') {
+        catchupCalls += 1;
+        send(
+          catchupCalls === 1
+            ? { ok: false, digest: null, error: 'daemon busy' }
+            : { ok: true, digest },
+        );
+      } else {
+        send({ ok: true });
+      }
+    });
+    await app.handleRendererCommand({ id: 7, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup']);
+    await app.handleRendererCommand({ id: 8, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual([
+      'get-catchup',
+      'get-catchup',
+      'chat-append',
+      'confirm-catchup',
+    ]);
+  });
+
+  it('a failed chat-append neither confirms nor consumes the fire', async () => {
+    const transport = new MockIpcTransport();
+    let appendFails = true;
+    const { app, cmds } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'get-catchup') send({ ok: true, digest });
+      else if (cmd['kind'] === 'chat-append' && appendFails)
+        send({ ok: false, error: 'journal write failed' });
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 9, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup', 'chat-append']);
+    // Trigger still armed → the next open retries the whole sequence.
+    appendFails = false;
+    await app.handleRendererCommand({ id: 10, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual([
+      'get-catchup',
+      'chat-append',
+      'get-catchup',
+      'chat-append',
+      'confirm-catchup',
+    ]);
+  });
+
+  it('a turn starting mid-fetch wins — no append, trigger stays armed', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds, socket } = await connectedApp(transport, (cmd, send) => {
+      // Slow the digest fetch so the turn starts while it is in flight.
+      if (cmd['kind'] === 'get-catchup') setTimeout(() => send({ ok: true, digest }), 40);
+      else send({ ok: true });
+    });
+    const opened = app.handleRendererCommand({ id: 11, cmd: 'catchup:opened' });
+    socket.send(JSON.stringify({ type: 'chat:event', event: { kind: 'iteration' } }));
+    await opened;
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup']);
+    // Turn ends → next open delivers the same window.
+    socket.send(JSON.stringify({ type: 'chat:event', event: { kind: 'completed' } }));
+    await waitFor(
+      () => transport.toRenderer.filter((m) => m.channel === 'chat:update').length >= 2,
+    );
+    await app.handleRendererCommand({ id: 12, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual([
+      'get-catchup',
+      'get-catchup',
+      'chat-append',
+      'confirm-catchup',
+    ]);
+  });
+
+  it('chat-read turnInFlight is the working gate — refresh reports daemon truth', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'get-catchup') send({ ok: true, digest });
+      else if (cmd['kind'] === 'chat-read') send({ ok: true, messages: [], turnInFlight: true });
+      else send({ ok: true });
+    });
+    // A refresh while the daemon reports a live turn must gate the digest
+    // even though no chat:event was ever seen on this client.
+    await app.refreshNow();
+    await app.handleRendererCommand({ id: 13, cmd: 'catchup:opened' });
+    expect(cmds.some((c) => c['kind'] === 'get-catchup')).toBe(false);
+  });
+
+  it('a failed confirm still consumes the fire — delivered once per window', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'get-catchup') send({ ok: true, digest });
+      else if (cmd['kind'] === 'confirm-catchup')
+        send({ ok: false, error: 'watermark store down' });
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 14, cmd: 'catchup:opened' });
+    await app.handleRendererCommand({ id: 15, cmd: 'catchup:opened' });
+    // Delivered once; the second open does not re-fetch.
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup', 'chat-append', 'confirm-catchup']);
+  });
+
+  it('a malformed ok-without-digest response leaves the trigger armed', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'get-catchup')
+        send({ ok: true }); // no digest field
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 16, cmd: 'catchup:opened' });
+    expect(cmds.map((c) => c['kind'])).toEqual(['get-catchup']);
   });
 });
 

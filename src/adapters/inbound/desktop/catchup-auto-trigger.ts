@@ -2,13 +2,13 @@
  * Idle-threshold auto-catch-up trigger for the Florina/home view (DEC-042,
  * issue #195/#218). See `docs/RULES_MEMORY_AND_SUPERVISION.md` § 9.
  *
- * Pure decision logic, deliberately decoupled from the actual view/IPC
- * wiring (which view fires it, how the digest gets rendered) — the same
- * scope split #217 drew between the daemon commands and their adapter
- * persistence. A future issue wires `onViewOpened()` into the desktop
- * app's actual focus/mount event and calls `florina catchup` (or the
- * `get-catchup`/`confirm-catchup` commands directly) when it returns
- * `true`.
+ * Pure decision logic, deliberately decoupled from the view/IPC wiring
+ * (which view fires it, how the digest gets rendered) — the same scope
+ * split #217 drew between the daemon commands and their adapter
+ * persistence. Wired by issue #260: the renderer reports view
+ * open/focus via `catchup:opened`; `DesktopApp.handleCatchUpOpened`
+ * consults this trigger, fetches `get-catchup`, journals the digest as
+ * an assistant message via `chat-append`, then sends `confirm-catchup`.
  */
 
 /** Default idle threshold: 30 minutes. Configurable per §9's reconsideration trigger (DEC-042). */
