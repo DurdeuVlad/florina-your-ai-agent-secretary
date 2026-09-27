@@ -117,6 +117,22 @@ describe('renderSecretaryScreen', () => {
     expect(cmds).toContain('memwrite:reject:mw-1');
   });
 
+  it('marks memory-write cards selectable so j/k + Enter reach Confirm', () => {
+    /* #262: the lens is keyboard-navigable — data-selectable lands on the
+     * card and Enter activates its primary (non-danger) button. */
+    const tree = renderSecretaryScreen(RESPONSE);
+    const card = findAll(tree, 'PrefCard').find((c) =>
+      commands(c).includes('memwrite:confirm:mw-1'),
+    );
+    expect(card?.props?.['selectable']).toBe(true);
+    /* read-only sections stay unselectable — selection noise would land
+     * Enter on cards with no actionable primary button */
+    const health = findAll(tree, 'PrefCard').find((c) =>
+      texts(c).join(' ').includes('42% of context window'),
+    );
+    expect(health?.props?.['selectable']).toBeUndefined();
+  });
+
   it('renders honest empty states when the surface is empty', () => {
     const tree = renderSecretaryScreen({
       ok: true,

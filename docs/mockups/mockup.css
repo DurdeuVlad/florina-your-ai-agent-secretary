@@ -788,7 +788,8 @@ button.danger:hover {
 
 /* chat activity/diff drawer (#181) — toggleable, reuses .taskrow/.chip/.stat
  * (the same task-row shape as Fleet/Tasks) rather than a new component. */
-.drawer-toggle.open {
+.drawer-toggle.open,
+.ghost.open {
   border-color: var(--accent);
   color: var(--accent);
 }
