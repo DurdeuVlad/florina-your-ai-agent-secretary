@@ -67,7 +67,9 @@ export function renderInboxItem(item: AttentionItemView): RenderTree {
     [
       el('ItemHeader', { layout: 'row', gap: 'sm' }, [
         el('Icon', { name: item.priorityMeta.icon, color: item.priorityMeta.color }, []),
-        el('PriorityLabel', { color: item.priorityMeta.color }, [text(item.priorityMeta.label)]),
+        el('PriorityLabel', { color: item.priorityMeta.color, priority: item.priority }, [
+          text(item.priorityMeta.label),
+        ]),
         el('KindLabel', { color: item.kindMeta.color, icon: item.kindMeta.icon }, [
           text(item.kindMeta.label),
         ]),

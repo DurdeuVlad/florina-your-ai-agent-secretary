@@ -212,6 +212,35 @@ header .spacer {
 .card .kind {
   font-weight: 600;
 }
+/* kind labels carry the kind's semantic color — matches the app's
+ * c-* utilities (issue #265) */
+.kind.c-amber {
+  color: var(--amber);
+}
+.kind.c-red {
+  color: var(--red);
+}
+.kind.c-slate {
+  color: var(--slate);
+}
+.kind.c-blue {
+  color: var(--accent);
+}
+.kind.c-orange {
+  color: var(--orange);
+}
+.kind.c-green {
+  color: var(--green);
+}
+/* priority chips by color name — the mockup uses chip blue/slate
+ * literally; the app styles them via .chip.Medium/.chip.Low (#265) */
+.chip.blue {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.chip.slate {
+  color: var(--slate);
+}
 .card .title {
   font-size: 15px;
   font-weight: 600;

@@ -56,8 +56,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function captureWindow(win, file) {
   /* capturePage returns the LAST presented frame — a DOM state read can
    * confirm a view switch while the compositor still holds the previous
-   * view's paint (esp. when the window is even briefly occluded). Wait
-   * two animation frames so the frame we grab reflects current DOM. */
+   * view's paint (esp. when the window is even briefly occluded). Mark
+   * the frame dirty and wait two animation frames so the frame we grab
+   * reflects current DOM. */
+  /* An occluded window can keep serving the stale frame even after
+   * invalidate() — the compositor culls paints it thinks are invisible.
+   * Raise the window into the foreground before marking the frame. */
+  win.show();
+  win.moveTop();
+  win.webContents.invalidate();
   await win.webContents.executeJavaScript(
     `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`,
   );
@@ -209,37 +216,51 @@ async function shotApp() {
   // A Retry-bearing card needs a retained row, which only real insert
   // failures produce — the shot proves the card + acknowledge path;
   // retry wiring is covered by tests/desktop.test.ts.
+  // Two extra Custom items at Medium/Low prove the per-priority icon
+  // and chip-color gap fix (issue #265) in the same capture.
   const WebSocket = require('ws');
   const os = require('node:os');
   const daemonUrl = process.env.FLORINA_DAEMON_URL ?? 'ws://127.0.0.1:17419';
   const ws = new WebSocket(daemonUrl);
-  const raised = await new Promise((resolvePromise) => {
-    const timer = setTimeout(() => resolvePromise(null), 5000);
-    const sendRaise = () => {
-      ws.send(
-        JSON.stringify({
-          kind: 'raise-attention',
-          taskId: 'qa-journal-gap',
-          summary: 'visual-qa journal gap probe',
-          itemKind: 'JournalFailure',
-          priority: 'High',
-          source: 'visual-qa',
-        }),
-      );
+  const RAISES = [
+    {
+      taskId: 'qa-journal-gap',
+      summary: 'visual-qa journal gap probe',
+      itemKind: 'JournalFailure',
+      priority: 'High',
+    },
+    {
+      taskId: 'qa-medium',
+      summary: 'visual-qa medium probe',
+      itemKind: 'Custom',
+      priority: 'Medium',
+    },
+    { taskId: 'qa-low', summary: 'visual-qa low probe', itemKind: 'Custom', priority: 'Low' },
+  ];
+  const raisedIds = [];
+  await new Promise((resolvePromise) => {
+    const timer = setTimeout(() => resolvePromise(), 5000);
+    const sendRaises = () => {
+      for (const r of RAISES) {
+        ws.send(JSON.stringify({ kind: 'raise-attention', source: 'visual-qa', ...r }));
+      }
     };
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(String(data));
-        // Auth handshake ack — send the command only after it.
+        // Auth handshake ack — send the commands only after it.
         if (msg !== null && msg.type === 'auth') {
-          if (msg.ok === true) sendRaise();
-          else resolvePromise(null);
+          if (msg.ok === true) sendRaises();
+          else resolvePromise();
           return;
         }
         // Command responses carry `ok`; pushes carry `type` — skip those.
         if (msg !== null && typeof msg === 'object' && 'ok' in msg) {
-          clearTimeout(timer);
-          resolvePromise(msg);
+          if (msg.ok === true && typeof msg.itemId === 'string') raisedIds.push(msg.itemId);
+          if (raisedIds.length === RAISES.length) {
+            clearTimeout(timer);
+            resolvePromise();
+          }
         }
       } catch {
         /* non-JSON frame — ignore */
@@ -257,11 +278,11 @@ async function shotApp() {
         }
       }
       if (token) ws.send(JSON.stringify({ type: 'auth', token }));
-      else sendRaise();
+      else sendRaises();
     });
-    ws.once('error', () => resolvePromise(null));
+    ws.once('error', () => resolvePromise());
   });
-  const raisedId = raised && raised.ok ? raised.itemId : null;
+  const raisedId = raisedIds[0] ?? null;
   if (raisedId === null) {
     console.log('[visual-qa] raise-attention did not land — journal-fail shot may be empty');
   }
@@ -295,9 +316,12 @@ async function shotApp() {
   await captureWindow(win, path.join(SHOTS, 'app-inbox-journalfail.png'));
   console.log('[visual-qa] captured journal-failure inbox card');
   // Prove the acknowledge path end-to-end: the renderer's resolve:<id>
-  // verb → real resolve-item → post-mutation refresh → card gone.
-  if (raisedId !== null) {
-    await win.webContents.executeJavaScript(`window.florina.command('resolve:${raisedId}')`);
+  // verb → real resolve-item → post-mutation refresh → card gone. All
+  // raised items are resolved so the daemon is left clean.
+  for (const itemId of raisedIds) {
+    await win.webContents.executeJavaScript(`window.florina.command('resolve:${itemId}')`);
+  }
+  if (raisedIds.length > 0) {
     let gone = false;
     for (let i = 0; i < 20; i++) {
       const stillVisible = await win.webContents.executeJavaScript(
