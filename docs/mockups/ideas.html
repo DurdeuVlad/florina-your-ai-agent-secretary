@@ -2,57 +2,59 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Florina — Ideas (mockup)</title>
+    <title>Florina — Work · Ideas (mockup)</title>
     <link rel="stylesheet" href="mockup.css" />
   </head>
   <body>
     <div class="shell">
       <nav>
         <div class="logo">Flor<em>ina</em></div>
-        <div class="navitem">✳ Chat</div>
-        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
-        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-        <div class="navitem">◔ Fleet</div>
-        <div class="navitem active">◇ Ideas</div>
-        <div class="navitem">◍ Preferences</div>
-        <div class="navitem">☰ Secretary</div>
+        <a class="navitem" href="chat.html">✳ Florina</a>
+        <a class="navitem" href="inbox.html">◈ Attention<span class="navbadge">3</span></a>
+        <a class="navitem active" href="inspector.html" aria-current="page"
+          >◧ Work<span class="navbadge">5</span></a
+        >
+        <a class="navitem" href="history.html">▤ History</a>
+        <a class="navitem" href="preferences.html">◍ Settings</a>
         <div class="sidefoot">
           <div class="statusline"><span class="dot on"></span>daemon connected</div>
         </div>
       </nav>
       <main>
         <header>
-          <h1>Ideas</h1>
-          <span class="sub">ledger entries — compile a Brief when one is ready</span>
-          <span class="spacer"></span><button class="ghost">+ New idea</button>
+          <h1>Work</h1>
+          <span class="sub">delegated work and its state</span>
+          <span class="spacer"></span>
+          <div class="hud pill" title="Push to talk">
+            <div class="ring">🎙</div>
+            <div class="hudtext">
+              <b>Ctrl+Space to talk</b><span>or click — daemon connected</span>
+            </div>
+          </div>
         </header>
         <div class="content">
           <div class="column">
-            <div class="sect">Open <span class="n">4</span></div>
+            <div class="worksubnav">
+              <a class="worksubtab" href="inspector.html">Tasks</a>
+              <a class="worksubtab" href="fleet.html">Fleet</a>
+              <button class="worksubtab active">Ideas</button>
+            </div>
+
+            <div class="pref-addbar"><button class="ghost">+ New idea</button></div>
+
+            <div class="sect">Open <span class="n">3</span></div>
 
             <div class="card">
               <div class="top">
-                <span class="kind">Multi-repo context sync</span><span class="chip">6 entries</span>
+                <span class="kind mono">Multi-repo context sync</span
+                ><span class="chip">6 entries</span
+                ><span class="chip amber">project:agent-secretary</span>
               </div>
               <div class="summary">
                 Let project capsules publish a read-only interface summary other projects can import
                 — controlled, journaled sharing instead of blind mixing.
               </div>
-              <div class="meta">agent-secretary · last touched Sep 15 · status: developing</div>
-              <div class="actions">
-                <button>Compile brief</button><button class="ghost">Read ledger</button>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="top">
-                <span class="kind">Voice macro approvals</span><span class="chip">3 entries</span>
-              </div>
-              <div class="summary">
-                "Approve all npm-registry requests for this task" — a scoped standing grant with a
-                visible expiry.
-              </div>
-              <div class="meta">agent-secretary · Sep 14</div>
+              <div class="meta">agent-secretary · last touched Sep 15 · status: open</div>
               <div class="actions">
                 <button class="ghost">Compile brief</button
                 ><button class="ghost">Read ledger</button>
@@ -61,12 +63,30 @@
 
             <div class="card">
               <div class="top">
-                <span class="kind">Onboarding tour copy</span><span class="chip">2 entries</span>
+                <span class="kind mono">Voice macro approvals</span
+                ><span class="chip">3 entries</span
+                ><span class="chip amber">project:agent-secretary</span>
+              </div>
+              <div class="summary">
+                "Approve all npm-registry requests for this task" — a scoped standing grant with a
+                visible expiry.
+              </div>
+              <div class="meta">agent-secretary · last touched Sep 14 · status: open</div>
+              <div class="actions">
+                <button class="ghost">Compile brief</button
+                ><button class="ghost">Read ledger</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="top">
+                <span class="kind mono">Onboarding tour copy</span
+                ><span class="chip">2 entries</span>
               </div>
               <div class="summary">
                 First-run flow: connect a provider, set one preference, delegate one task.
               </div>
-              <div class="meta">wayfinder · Sep 11</div>
+              <div class="meta">last touched Sep 11 · status: open</div>
               <div class="actions">
                 <button class="ghost">Compile brief</button
                 ><button class="ghost">Read ledger</button>
@@ -76,14 +96,17 @@
             <div class="sect">Compiled → awaiting your decision <span class="n">1</span></div>
             <div class="card Medium">
               <div class="top">
-                <span class="chip Medium">BRIEF</span
-                ><span class="kind">Tray notification center</span>
+                <span class="chip amber">BRIEF</span
+                ><span class="kind mono">Tray notification center</span>
               </div>
               <div class="summary">
                 Brief compiled Sep 15 — delegation gated on your approval (DEC-033).
               </div>
+              <div class="mono">
+                project agent-secretary · add tray batching → devin · surface quota events in HUD
+              </div>
               <div class="actions">
-                <button>Review & approve</button><button class="danger">Send back</button>
+                <button>Review &amp; approve</button>
               </div>
             </div>
           </div>

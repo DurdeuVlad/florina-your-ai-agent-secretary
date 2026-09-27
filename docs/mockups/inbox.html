@@ -2,29 +2,35 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Florina — Inbox (mockup)</title>
+    <title>Florina — Attention (mockup)</title>
     <link rel="stylesheet" href="mockup.css" />
   </head>
   <body>
     <div class="shell">
       <nav>
         <div class="logo">Flor<em>ina</em></div>
-        <div class="navitem">✳ Chat</div>
-        <div class="navitem active">◈ Inbox<span class="navbadge">3</span></div>
-        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-        <div class="navitem">◔ Fleet</div>
-        <div class="navitem">◇ Ideas</div>
-        <div class="navitem">◍ Preferences</div>
-        <div class="navitem">☰ Secretary</div>
+        <a class="navitem" href="chat.html">✳ Florina</a>
+        <a class="navitem active" href="inbox.html" aria-current="page"
+          >◈ Attention<span class="navbadge">3</span></a
+        >
+        <a class="navitem" href="inspector.html">◧ Work<span class="navbadge">5</span></a>
+        <a class="navitem" href="history.html">▤ History</a>
+        <a class="navitem" href="preferences.html">◍ Settings</a>
         <div class="sidefoot">
           <div class="statusline"><span class="dot on"></span>daemon connected</div>
         </div>
       </nav>
       <main>
         <header>
-          <h1>Attention Inbox</h1>
-          <span class="sub">what needs you right now</span> <span class="spacer"></span
-          ><button class="ghost">Filter</button>
+          <h1>Attention</h1>
+          <span class="sub">what needs you right now</span>
+          <span class="spacer"></span>
+          <div class="hud pill" title="Push to talk">
+            <div class="ring">🎙</div>
+            <div class="hudtext">
+              <b>Ctrl+Space to talk</b><span>or click — daemon connected</span>
+            </div>
+          </div>
         </header>
         <div class="content">
           <div class="column">
@@ -32,13 +38,13 @@
 
             <div class="card High">
               <div class="top">
-                <span class="chip High">HIGH</span><span class="kind">Approval required</span
-                ><span class="chip">network</span>
+                <span class="icon" style="color: var(--amber)">·</span
+                ><span class="chip amber">High</span><span class="kind">Approval required</span>
               </div>
               <div class="title">checkout-refactor — Codex wants network access</div>
-              <div class="observed">
-                <b>observed:</b> <span class="mono">registry.npmjs.org</span> · scope: this task
-                only · requested by hook <span class="mono">pre_tool_use</span>
+              <div class="summary">
+                observed: registry.npmjs.org · scope: this task only · requested by hook
+                pre_tool_use
               </div>
               <div class="actions">
                 <button>Allow once</button><button class="danger">Deny</button
@@ -48,58 +54,74 @@
 
             <div class="card Medium">
               <div class="top">
-                <span class="chip Medium">MED</span><span class="kind">Completion digest</span
-                ><span class="chip green">verified</span>
+                <span class="icon" style="color: var(--blue)">·</span
+                ><span class="chip blue">Medium</span><span class="kind">Digest</span>
               </div>
               <div class="title">password-reset — 9 files, +284/−71, 23/23 tests, build green</div>
               <div class="summary">
-                <span class="inferred">inferred:</span> token invalidation behavior changed —
-                sessions now revoke on password change
+                inferred: token invalidation behavior changed — sessions now revoke on password
+                change
               </div>
               <div class="actions">
-                <button>Review digest</button><button class="ghost">Open diff</button
+                <button>Read digest</button><button class="ghost">Open diff</button
                 ><button class="ghost">Create PR</button>
               </div>
             </div>
 
             <div class="card Low">
               <div class="top">
-                <span class="chip Low">LOW</span><span class="kind">3 tasks completed</span>
+                <span class="icon" style="color: var(--slate)">·</span
+                ><span class="chip slate">Low</span><span class="kind">Custom</span>
               </div>
               <div class="title">docs-cleanup · api-comments · test-rename</div>
               <div class="summary">no production behavior changed — grouped digest</div>
               <div class="actions">
-                <button class="ghost">Read combined digest</button
-                ><button class="ghost">Dismiss</button>
+                <button class="ghost">Inspect</button>
               </div>
             </div>
 
             <div class="sect">Working <span class="n">5</span></div>
             <div class="taskrow">
               <span class="obj">invoice-pagination</span><span class="chip">codex</span
-              ><span class="stat">tests running</span>
+              ><span class="stat">running</span>
             </div>
             <div class="taskrow">
               <span class="obj">oauth-migration</span><span class="chip">claude-code</span
-              ><span class="stat">editing</span>
+              ><span class="stat">running</span>
             </div>
             <div class="taskrow">
               <span class="obj">schema-cleanup</span><span class="chip">devin</span
-              ><span class="stat">delegated to manager</span>
+              ><span class="stat">delegated</span>
             </div>
             <div class="taskrow">
               <span class="obj">image-pipeline</span><span class="chip">gemini</span
-              ><span class="stat parked">parked — resumes 14:32</span>
+              ><span class="stat">blocked</span>
             </div>
             <div class="taskrow">
               <span class="obj">florina-branding</span><span class="chip">codex</span
-              ><span class="stat">tests running</span>
+              ><span class="stat">running</span>
             </div>
 
-            <div class="sect">Done today <span class="n">4</span></div>
+            <div class="sect">Done <span class="n">2</span></div>
             <div class="taskrow">
-              <span class="obj muted">preference-profile</span
-              ><span class="chip purple">accepted</span><span class="stat">merged 11:20</span>
+              <span class="obj">preference-profile</span><span class="chip">devin</span
+              ><span class="stat">accepted</span
+              ><span class="stat" style="color: var(--accent)">Prove it</span>
+            </div>
+            <div class="taskrow">
+              <span class="obj">password-reset</span><span class="chip">codex</span
+              ><span class="stat">completed</span
+              ><span class="stat" style="color: var(--accent)">Prove it</span>
+            </div>
+
+            <!-- When Needs-you is empty the app renders this state inside
+                 the section (DG-01 calm empty state) — shown here so the
+                 state exists in the mockup set. -->
+            <div class="sect">Empty state — when nothing is pending</div>
+            <div class="empty">
+              <span class="empty-big">◈</span>
+              Nothing needs you right now
+              <div class="empty-hint">Items will appear here as agents surface attention.</div>
             </div>
           </div>
         </div>

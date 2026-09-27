@@ -9,13 +9,11 @@
     <div class="shell">
       <nav>
         <div class="logo">Flor<em>ina</em></div>
-        <div class="navitem">✳ Chat</div>
-        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
-        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-        <div class="navitem">◔ Fleet</div>
-        <div class="navitem">◇ Ideas</div>
-        <div class="navitem">◍ Preferences</div>
-        <div class="navitem">☰ Secretary</div>
+        <a class="navitem" href="chat.html">✳ Florina</a>
+        <a class="navitem" href="inbox.html">◈ Attention<span class="navbadge">3</span></a>
+        <a class="navitem" href="inspector.html">◧ Work<span class="navbadge">5</span></a>
+        <a class="navitem" href="history.html">▤ History</a>
+        <a class="navitem" href="preferences.html">◍ Settings</a>
         <div class="sidefoot">
           <div class="statusline"><span class="dot on"></span>daemon connected</div>
         </div>
@@ -24,6 +22,13 @@
         <header>
           <h1>Push-to-Talk HUD</h1>
           <span class="sub">floating overlay · always-on-top · global hotkey (hold Space)</span>
+          <span class="spacer"></span>
+          <div class="hud pill" title="Push to talk">
+            <div class="ring">🎙</div>
+            <div class="hudtext">
+              <b>Ctrl+Space to talk</b><span>or click — daemon connected</span>
+            </div>
+          </div>
         </header>
         <div class="content">
           <div class="column" style="display: grid; gap: 22px">
@@ -70,7 +75,7 @@
               <div class="hud">
                 <div class="ring" style="border-color: var(--slate); color: var(--slate)">⌀</div>
                 <div class="hudtext">
-                  <b>Daemon unreachable</b>start it with <span class="mono">florina daemon</span>
+                  <b>Daemon unreachable</b>start it with <span class="mono">florina start</span>
                 </div>
               </div>
             </div>

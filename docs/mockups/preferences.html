@@ -2,38 +2,44 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Florina — Preferences (mockup)</title>
+    <title>Florina — Settings (mockup)</title>
     <link rel="stylesheet" href="mockup.css" />
   </head>
   <body>
     <div class="shell">
       <nav>
         <div class="logo">Flor<em>ina</em></div>
-        <div class="navitem">✳ Chat</div>
-        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
-        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-        <div class="navitem">◔ Fleet</div>
-        <div class="navitem">◇ Ideas</div>
-        <div class="navitem active">◍ Preferences</div>
-        <div class="navitem">☰ Secretary</div>
+        <a class="navitem" href="chat.html">✳ Florina</a>
+        <a class="navitem" href="inbox.html">◈ Attention<span class="navbadge">3</span></a>
+        <a class="navitem" href="inspector.html">◧ Work<span class="navbadge">5</span></a>
+        <a class="navitem" href="history.html">▤ History</a>
+        <a class="navitem active" href="preferences.html" aria-current="page">◍ Settings</a>
         <div class="sidefoot">
           <div class="statusline"><span class="dot on"></span>daemon connected</div>
         </div>
       </nav>
       <main>
         <header>
-          <h1>Preferences</h1>
-          <span class="sub">learned routing profile — edit or revoke</span>
-          <span class="spacer"></span><button class="ghost">+ Add rule</button>
+          <h1>Settings</h1>
+          <span class="sub">durable routing rules and denies</span>
+          <span class="spacer"></span>
+          <div class="hud pill" title="Push to talk">
+            <div class="ring">🎙</div>
+            <div class="hudtext">
+              <b>Ctrl+Space to talk</b><span>or click — daemon connected</span>
+            </div>
+          </div>
         </header>
         <div class="content">
           <div class="column">
+            <div class="pref-addbar"><button class="ghost">+ Add rule</button></div>
+
             <div class="sect">Routing rules <span class="n">3</span></div>
 
             <div class="card">
               <div class="top"><span class="kind mono">codex · catch-all</span></div>
               <div class="summary">"prefer Codex for heavy lifting"</div>
-              <div class="meta">learned from voice · Sep 13 · global scope</div>
+              <div class="meta">global scope</div>
               <div class="actions">
                 <button class="ghost">Edit</button><button class="danger">Revoke</button>
               </div>
@@ -45,7 +51,7 @@
                 ><span class="chip amber">project:agent-secretary</span>
               </div>
               <div class="summary">"use Devin for migrations in this repo"</div>
-              <div class="meta">learned from voice · Sep 15 · project scope</div>
+              <div class="meta">project scope</div>
               <div class="actions">
                 <button class="ghost">Edit</button><button class="danger">Revoke</button>
               </div>
@@ -54,7 +60,7 @@
             <div class="card">
               <div class="top"><span class="kind mono">claude-code · work-type: ui</span></div>
               <div class="summary">"Claude for frontend polish"</div>
-              <div class="meta">learned from chat · Sep 12 · global scope</div>
+              <div class="meta">global scope</div>
               <div class="actions">
                 <button class="ghost">Edit</button><button class="danger">Revoke</button>
               </div>
@@ -64,32 +70,109 @@
 
             <div class="card">
               <div class="top">
-                <span class="kind mono">gemini / gemini-2.5-pro</span
-                ><span class="chip amber">project:payments-api</span
-                ><span class="chip red">denied</span>
+                <span class="kind mono">gemini/gemini-2.5-pro</span
+                ><span class="chip red">denied</span
+                ><span class="chip amber">project:payments-api</span>
               </div>
               <div class="summary">"never pro models on payments-api — cost"</div>
-              <div class="meta">learned from voice · Sep 14 · project scope</div>
+              <div class="meta">project scope</div>
               <div class="actions"><button class="danger">Revoke deny</button></div>
             </div>
 
-            <div class="sect">Notes <span class="n">1</span></div>
+            <div class="sect">Memory &amp; rules</div>
+            <div class="pref-form">
+              <span class="chip active">All scopes</span>
+              <span class="chip">Global</span>
+              <span class="chip">Project</span>
+              <span class="chip active">All kinds</span>
+              <span class="chip">fact</span>
+              <span class="chip">preference</span>
+              <span class="chip">rule</span>
+              <span class="chip">hard-policy</span>
+              <span class="chip">project-knowledge</span>
+              <span class="chip">decision</span>
+              <span class="chip">temporary-instruction</span>
+              <span class="chip">learned-pattern</span>
+            </div>
+
             <div class="card">
-              <div class="summary">"Ask before spending on anything above sonnet-class"</div>
-              <div class="meta">authored by you · Sep 13</div>
+              <div class="title">prefer Codex for heavy lifting</div>
+              <div class="actions">
+                <span class="chip">preference</span>
+                <span class="chip">global</span>
+                <span class="chip green">explicit</span>
+                <span class="chip green">confidence: high</span>
+              </div>
+              <div class="actions">
+                <button class="ghost">Forget</button>
+                <button class="ghost" title="Promote this rule to global scope? — asks to confirm">
+                  Promote to global
+                </button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="title">use Devin for migrations in this repo</div>
+              <div class="actions">
+                <span class="chip">preference</span>
+                <span class="chip">project:agent-secretary</span>
+                <span class="chip amber">inferred</span>
+                <span class="chip amber">confidence: medium</span>
+              </div>
+              <div class="actions"><button class="ghost">Forget</button></div>
+            </div>
+
+            <div class="sect">Repos</div>
+            <div class="historysearch">
+              <input type="text" placeholder="search repos by name" />
+              <button>Search</button>
+            </div>
+            <div class="pref-addbar">
+              <button>+ Add folder</button>
+              <button class="ghost">Use default folder</button>
+            </div>
+            <div class="taskrow">
+              <span class="n">1</span><span class="obj mono">~/Github</span>
+              <div class="actions">
+                <button class="ghost">↓</button><button class="ghost">Remove</button>
+              </div>
+            </div>
+            <div class="taskrow">
+              <span class="n">2</span><span class="obj mono">~/Documents/Github</span>
+              <div class="actions">
+                <button class="ghost">↑</button><button class="ghost">Remove</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="title">agent-secretary</div>
+              <div class="summary mono">~/Documents/Github/agent-secretary</div>
+            </div>
+            <div class="card">
+              <div class="title">wayfinder</div>
+              <div class="summary mono">~/Github/wayfinder</div>
             </div>
 
             <div class="sect">Desktop &amp; voice</div>
             <div class="card">
-              <div class="summary">
-                Microphone — USB Condenser Mic<br />
-                Dictation language — ro<br />
-                ☑ open chat in voice mode &nbsp; ☐ stop daemon on quit
+              <div class="pref-addform">
+                <label class="desk-row">
+                  Microphone
+                  <select>
+                    <option>System default</option>
+                  </select>
+                </label>
+                <label class="desk-row">
+                  Dictation language
+                  <input type="text" placeholder="auto-detect (e.g. en, fr, ro)" />
+                </label>
+                <label class="desk-check"
+                  ><input type="checkbox" checked /> Open chat in voice mode</label
+                >
+                <label class="desk-check"
+                  ><input type="checkbox" /> Stop the daemon when the app quits</label
+                >
+                <div><button>Save desktop settings</button></div>
               </div>
-              <div class="meta">
-                local to this device · ~/.florina/desktop-settings.json · not a routing rule
-              </div>
-              <div class="actions"><button class="ghost">Save desktop settings</button></div>
             </div>
           </div>
         </div>

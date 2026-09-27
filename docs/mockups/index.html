@@ -9,65 +9,84 @@
     <div class="gallery">
       <h1>Florina — UI Mockups</h1>
       <p>
-        Static mockups implementing the design guide in <code>docs/UX_GUIDELINES.md</code>. One
-        shared stylesheet (<code>mockup.css</code>) holds the token mapping — change a token there
-        and every screen follows. Open each file directly in a browser.
+        Static mockups of the shipped desktop app, matching the design guide in
+        <code>docs/UX_GUIDELINES.md</code> and the five-item IA in
+        <code>docs/UX_INFORMATION_ARCHITECTURE.md</code> (DEC-043). One shared stylesheet
+        (<code>mockup.css</code>) holds the token mapping — change a token there and every screen
+        follows. Nav items are links; Work's Tasks/Fleet/Ideas sub-tabs link across the three Work
+        mockups, same as the real sub-tab bar.
       </p>
 
       <a href="chat.html"
-        ><b>Chat — the central thread</b>
+        ><b>Florina — home · launch view</b>
         <span
-          >One conversation with the Secretary. Messages + collapsed tool-activity rows, working
-          indicator, composer with dictation mic (live partial text), voice-mode toggle, and send.
-          History persists — resume is automatic.</span
+          >One journaled conversation with the Secretary. Messages + collapsed tool-activity rows,
+          working indicator, docked composer with dictation mic (live partial text) and voice-mode
+          toggle, and the live-activity drawer.</span
         ></a
       >
 
       <a href="inbox.html"
-        ><b>Attention Inbox — home</b>
+        ><b>Attention — needs-you inbox</b>
         <span
-          >NEEDS YOU / WORKING / DONE. Approval card with structured observed fields, verified
-          completion digest, grouped completions, parked task in the working strip.</span
+          >Needs you / Working / Done with live counts, the calm empty state, approval and digest
+          cards with real action sets, and Prove-it affordances on completed work.</span
         ></a
       >
 
       <a href="inspector.html"
-        ><b>Session Inspector — drill-down</b>
+        ><b>Work · Tasks — drill-down</b>
         <span
-          >Three columns: task list → SupervisorEvent timeline → detail. Condensed ranges expand;
-          observed vs inferred text styles are distinct.</span
+          >Three columns: task list → SupervisorEvent timeline → event detail. Condensed ranges
+          carry an expand marker; the fidelity notice shows on D/E-tier sessions.</span
         ></a
       >
 
       <a href="fleet.html"
-        ><b>Fleet & Quota</b>
+        ><b>Work · Fleet — capacity</b>
         <span
-          >Per-provider utilization bars, reset countdowns, parked tasks with resume times, recent
-          routing decisions.</span
-        ></a
-      >
-
-      <a href="preferences.html"
-        ><b>Preferences</b>
-        <span
-          >Learned rules rendered readably with provenance; project-scoped entries carry amber tags;
-          inline edit/revoke.</span
+          >Per-provider quota bars and reset times, parked tasks, recent routing decisions — the
+          only screen where capacity lives.</span
         ></a
       >
 
       <a href="ideas.html"
-        ><b>Ideas ledger</b>
+        ><b>Work · Ideas — ledger</b>
         <span
-          >Open ideas with entry counts, plus the compiled-Brief approval gate (DEC-033) surfaced as
-          an inbox-style card.</span
+          >Open ledgers with entry counts and previews, plus the compiled-Brief approval gate
+          (DEC-033) surfaced as an inbox-style card.</span
+        ></a
+      >
+
+      <a href="history.html"
+        ><b>History — evidence</b>
+        <span
+          >Completed work and resolved decisions, plus journal search by text and date range.</span
+        ></a
+      >
+
+      <a href="preferences.html"
+        ><b>Settings — rules, memory, repos, desktop</b>
+        <span
+          >Routing rules and denies with provenance and scope chips, the memory/rules browse with
+          kind+scope filters, repo roots and discovered repos, and desktop/voice preferences local
+          to this device.</span
+        ></a
+      >
+
+      <a href="secretary.html"
+        ><b>Secretary — a lens inside Florina</b>
+        <span
+          >Her plan, in-flight research, pending memory writes, and context health. Not a nav item —
+          the app reaches it as a lens on the Florina view.</span
         ></a
       >
 
       <a href="hud.html"
         ><b>Push-to-Talk HUD — all states</b>
         <span
-          >Floating overlay: idle / listening / processing / responding / offline. The only shadowed
-          surface; the only surface allowed to interrupt.</span
+          >The header pill: idle / listening / processing / responding / offline. The only surface
+          allowed to interrupt.</span
         ></a
       >
 
@@ -75,13 +94,8 @@
         ><b>Voice-mode overlay — all states (#182)</b>
         <span
           >Full-window immersive takeover for active two-way voice turns — listening / processing /
-          responding. Distinct from the small PTT HUD above.</span
+          responding. Distinct from the small PTT HUD.</span
         ></a
-      >
-
-      <a href="secretary.html"
-        ><b>Secretary — plan, research, memory, context health</b>
-        <span>Her plan, in-flight research, pending memory writes, and context health.</span></a
       >
     </div>
   </body>
