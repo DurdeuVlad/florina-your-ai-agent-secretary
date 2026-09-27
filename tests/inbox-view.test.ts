@@ -279,16 +279,36 @@ describe('renderInboxItem', () => {
     expect(commands).toContain('approve:a');
     expect(commands).toContain('deny:a');
     expect(commands).toContain('inspect:a');
+    /* #261: Deny is journaled — carries the shared confirm prompt */
+    const deny = buttons.find((b) => b.props!['command'] === 'deny:a');
+    expect(deny!.props!['confirm']).toContain('Deny this request');
+    /* forward actions stay prompt-free — the card is the decision surface */
+    expect(
+      buttons.find((b) => b.props!['command'] === 'approve:a')!.props!['confirm'],
+    ).toBeUndefined();
   });
 
   it('uses kind-appropriate actions for Digest items', () => {
     const vm = new InboxViewModel();
     const view = vm.buildView(inboxOf([item('d', { kind: 'Digest' })]));
     const tree = renderInboxItem(view.groups[0]!.items[0]!);
-    const commands = findNodes(tree, 'Button').map((b) => b.props!['command']);
+    const buttons = findNodes(tree, 'Button');
+    const commands = buttons.map((b) => b.props!['command']);
     expect(commands).toContain('digest:d');
     expect(commands).toContain('diff:d');
     expect(commands).toContain('pr:d');
+    /* #261: Create PR creates an external artifact — prompt attached */
+    const pr = buttons.find((b) => b.props!['command'] === 'pr:d');
+    expect(pr!.props!['confirm']).toContain('pull request');
+  });
+
+  it('prompts before Prune on DirtyWorktree items (#261)', () => {
+    const vm = new InboxViewModel();
+    const view = vm.buildView(inboxOf([item('w', { kind: 'DirtyWorktree' })]));
+    const tree = renderInboxItem(view.groups[0]!.items[0]!);
+    const prune = findNodes(tree, 'Button').find((b) => b.props!['command'] === 'prune:w');
+    expect(prune).toBeDefined();
+    expect(prune!.props!['confirm']).toContain('Prune this worktree');
   });
 });
 

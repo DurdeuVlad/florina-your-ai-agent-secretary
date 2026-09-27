@@ -28,7 +28,10 @@ const promoteCmd: UpdatePreferenceCommand = {
   provider: 'codex',
 };
 
-function row(memItem: MemoryItem, opts: { withForget?: boolean; withPromote?: boolean } = {}): MemoryRowInput {
+function row(
+  memItem: MemoryItem,
+  opts: { withForget?: boolean; withPromote?: boolean } = {},
+): MemoryRowInput {
   return {
     item: memItem,
     ...(opts.withForget ? { forgetCommand: forgetCmd } : {}),
@@ -56,7 +59,9 @@ describe('renderMemorySettingsView', () => {
 
   it('offers a filter chip for every one of the 8 kinds plus "All kinds", even with zero live items', () => {
     const tree = renderMemorySettingsView([]);
-    const filterBar = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryFilterBar');
+    const filterBar = tree.children?.find(
+      (c) => typeof c !== 'string' && c.tag === 'MemoryFilterBar',
+    );
     const kindChips =
       typeof filterBar === 'string' || filterBar === undefined
         ? []
@@ -78,7 +83,14 @@ describe('renderMemorySettingsView', () => {
 
   it('renders provenance and confidence as chips on each row', () => {
     const tree = renderMemorySettingsView([
-      row(item({ id: 'm1', kind: 'preference', provenance: 'inferred-repeated', confidence: 'medium' })),
+      row(
+        item({
+          id: 'm1',
+          kind: 'preference',
+          provenance: 'inferred-repeated',
+          confidence: 'medium',
+        }),
+      ),
     ]);
     const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
     const meta =
@@ -130,7 +142,7 @@ describe('renderMemorySettingsView', () => {
     expect(actions).toBeUndefined();
   });
 
-  it('the Promote button carries confirmPromote so the renderer knows to confirm first', () => {
+  it('Promote and Forget carry the shared data-confirm prompt (#261)', () => {
     const tree = renderMemorySettingsView([
       row(item({ id: 'm1', kind: 'preference' }), { withForget: true, withPromote: true }),
     ]);
@@ -139,15 +151,29 @@ describe('renderMemorySettingsView', () => {
       typeof memRow === 'string' || memRow === undefined
         ? undefined
         : memRow.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryActions');
-    const buttons = typeof actions === 'string' || actions === undefined ? [] : (actions.children ?? []);
+    const buttons =
+      typeof actions === 'string' || actions === undefined ? [] : (actions.children ?? []);
     const promoteButton = buttons.find(
       (b) => typeof b !== 'string' && b.children?.[0] === 'Promote to global',
     );
-    expect(typeof promoteButton === 'string' ? undefined : promoteButton?.props?.['confirmPromote']).toBe(true);
+    const forgetButton = buttons.find((b) => typeof b !== 'string' && b.children?.[0] === 'Forget');
+    /* #224's confirmPromote migrated to the generic confirm prop (#261) —
+     * same prompt text preserved */
+    expect(typeof promoteButton === 'string' ? undefined : promoteButton?.props?.['confirm']).toBe(
+      'Promote this rule to global scope?',
+    );
+    expect(
+      typeof promoteButton === 'string' ? undefined : promoteButton?.props?.['confirmPromote'],
+    ).toBeUndefined();
+    expect(
+      typeof forgetButton === 'string' ? undefined : forgetButton?.props?.['confirm'],
+    ).toContain('Forget this memory');
   });
 
   it('a non-active status renders an extra status chip', () => {
-    const tree = renderMemorySettingsView([row(item({ id: 'm1', kind: 'preference', status: 'proposed' }))]);
+    const tree = renderMemorySettingsView([
+      row(item({ id: 'm1', kind: 'preference', status: 'proposed' })),
+    ]);
     const memRow = tree.children?.find((c) => typeof c !== 'string' && c.tag === 'MemoryRow');
     const meta =
       typeof memRow === 'string' || memRow === undefined

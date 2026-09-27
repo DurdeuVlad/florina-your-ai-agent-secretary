@@ -92,6 +92,8 @@ export function renderRoutingRule(view: RoutingRuleView): RenderTree {
       command: 'preference-remove-rule',
       args: { provider: view.provider, model: view.model ?? null },
       color: 'slate',
+      /* #261: shared confirm gate if this view is ever mounted */
+      confirm: 'Revoke this routing rule? The change is journaled.',
     }),
   ]);
 }
@@ -108,6 +110,7 @@ export function renderDenyRule(view: DenyRuleView): RenderTree {
       command: 'preference-remove-deny',
       args: { provider: view.provider, model: view.model ?? null },
       color: 'slate',
+      confirm: 'Remove this denied rule? Agents will be free to use it again.',
     }),
   ]);
 }

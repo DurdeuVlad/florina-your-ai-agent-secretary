@@ -83,7 +83,15 @@ function ruleCard(rule: RoutingRule): RenderTree {
         { variant: 'ghost', command: `prefedit:${encodeURIComponent(JSON.stringify(rule))}` },
         ['Edit'],
       ),
-      el('Button', { variant: 'danger', command: encodePrefCommand(remove) }, ['Revoke']),
+      el(
+        'Button',
+        {
+          variant: 'danger',
+          command: encodePrefCommand(remove),
+          confirm: 'Revoke this routing rule? The change is journaled.',
+        },
+        ['Revoke'],
+      ),
     ]),
   ]);
 }
@@ -107,7 +115,15 @@ function denyCard(deny: DenyRule): RenderTree {
     el('PrefNote', {}, [deny.note !== undefined ? `"${deny.note}"` : '(no note)']),
     el('PrefMeta', {}, [scopeMeta(deny.projectId)]),
     el('PrefActions', {}, [
-      el('Button', { variant: 'danger', command: encodePrefCommand(remove) }, ['Revoke deny']),
+      el(
+        'Button',
+        {
+          variant: 'danger',
+          command: encodePrefCommand(remove),
+          confirm: 'Remove this denied rule? Agents will be free to use it again.',
+        },
+        ['Revoke deny'],
+      ),
     ]),
   ]);
 }

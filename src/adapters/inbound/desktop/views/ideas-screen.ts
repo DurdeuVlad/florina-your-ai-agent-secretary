@@ -104,6 +104,8 @@ function briefCard(brief: Brief): RenderTree {
             briefId: brief.id,
             confirmedBy: 'desktop',
           }),
+          /* DEC-033 hard gate — approval delegates the plan to agents */
+          confirm: 'Approve this brief? Its tasks will be delegated to agents.',
         },
         ['Review & approve'],
       ),

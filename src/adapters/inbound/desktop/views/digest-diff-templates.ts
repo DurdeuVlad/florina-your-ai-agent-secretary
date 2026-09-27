@@ -111,6 +111,7 @@ function renderViewerToolbar(data: DigestDiffViewerData): RenderTree {
         variant: 'primary',
         size: 'md',
         icon: 'git-pull-request',
+        confirm: 'Create a pull request for this work? The PR is created on the remote.',
       },
       [text('Create PR')],
     ),
