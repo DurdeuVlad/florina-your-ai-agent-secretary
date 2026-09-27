@@ -149,4 +149,24 @@ describe('chat screen', () => {
     expect(String(row!.children?.[0])).toContain('cleared 2026-01-02');
     expect(findAll(tree, 'ChatMsg')).toHaveLength(1);
   });
+
+  it('renders a failed send as an inline row with the daemon error + Retry (issue #263)', () => {
+    const tree = renderChatScreen({
+      working: false,
+      messages: [msg({ id: 'm1' })],
+      sendError: { text: 'check the oauth migration', error: 'daemon unreachable' },
+    });
+    const row = findAll(tree, 'SendErrorRow')[0];
+    expect(row).toBeDefined();
+    const text = String(row!.children?.[0]);
+    expect(text).toContain('check the oauth migration');
+    expect(text).toContain('daemon unreachable');
+    const retry = findAll(row!, 'Button')[0];
+    expect(retry?.props?.['command']).toBe('chat-retry');
+  });
+
+  it('renders no error row on a healthy thread', () => {
+    const tree = renderChatScreen({ working: false, messages: [msg({ id: 'm1' })] });
+    expect(findAll(tree, 'SendErrorRow')).toHaveLength(0);
+  });
 });

@@ -32,7 +32,10 @@ import type {
   ChatAppendResponse,
   ReposResponse,
 } from '../src/daemon/command-api.js';
-import type { RepoRootsConfig, RepoRootsPort } from '../src/core/application/ports/outbound/repo-roots.js';
+import type {
+  RepoRootsConfig,
+  RepoRootsPort,
+} from '../src/core/application/ports/outbound/repo-roots.js';
 import type { RepoScannerPort } from '../src/core/application/use-cases/repos/discover-repos.js';
 import { EventBus } from '../src/daemon/event-stream.js';
 import { QuotaLedger } from '../src/core/application/use-cases/routing/quota-ledger.js';
@@ -1442,7 +1445,10 @@ describe('CommandApi', () => {
     });
 
     it('confirm-catchup returns an error when until is empty', async () => {
-      const res = (await fixture.api.execute({ kind: 'confirm-catchup', until: '' })) as ConfirmCatchUpResponse;
+      const res = (await fixture.api.execute({
+        kind: 'confirm-catchup',
+        until: '',
+      })) as ConfirmCatchUpResponse;
       expect(res.ok).toBe(false);
       expect(res.error).toContain('until is required');
     });
@@ -1773,6 +1779,87 @@ describe('chat turns (issue #158)', () => {
     expect(res.error).toContain('already in flight');
     expect(chatStore.listVisible()).toHaveLength(0);
   });
+
+  it('a retried send with the same clientId dedupes — never journals twice (issue #263)', async () => {
+    const { api, chatStore, chatMessageSink } = createFixture();
+    const startTurn = vi.fn();
+    api.setChatService({ startTurn, turnInFlight: () => false });
+
+    const first = (await api.execute({
+      kind: 'chat-send',
+      text: 'same draft',
+      clientId: 'draft-1',
+    })) as ChatSendResponse;
+    expect(first.ok).toBe(true);
+    expect(first.message?.id).toBe('draft-1');
+
+    // The retry path: the original response was lost (or the row's Retry
+    // fired) — same clientId must return the journaled row, not append.
+    const retry = (await api.execute({
+      kind: 'chat-send',
+      text: 'same draft',
+      clientId: 'draft-1',
+    })) as ChatSendResponse;
+    expect(retry.ok).toBe(true);
+    expect(retry.message?.id).toBe('draft-1');
+    expect(chatStore.listVisible()).toHaveLength(1);
+    // No second turn — the retry replays the journaled row only.
+    expect(startTurn).toHaveBeenCalledOnce();
+    // The sink re-fires so a client that missed the first push heals.
+    expect(chatMessageSink).toHaveBeenCalledTimes(2);
+  });
+
+  it('a deduped retry reports the in-flight turn it belongs to', async () => {
+    const { api } = createFixture();
+    let inFlight = false;
+    api.setChatService({ startTurn: vi.fn(), turnInFlight: () => inFlight });
+
+    await api.execute({ kind: 'chat-send', text: 'hi', clientId: 'draft-2' });
+    // The turn the first send kicked off is still running — the retry
+    // dedupes (no rejection) and reports that turn's state.
+    inFlight = true;
+    const res = (await api.execute({
+      kind: 'chat-send',
+      text: 'hi',
+      clientId: 'draft-2',
+    })) as ChatSendResponse;
+    expect(res.ok).toBe(true);
+    expect(res.turn).toBe('started');
+  });
+
+  it('sends without a clientId still journal with a generated id', async () => {
+    const { api, chatStore } = createFixture();
+    const res = (await api.execute({ kind: 'chat-send', text: 'hi' })) as ChatSendResponse;
+    expect(res.ok).toBe(true);
+    expect(res.message?.id).toMatch(/^msg_/);
+    expect(chatStore.listVisible()).toHaveLength(1);
+  });
+
+  it('a clientId colliding with different journaled content is rejected — never silently dropped', async () => {
+    const { api, chatStore } = createFixture();
+    await api.execute({ kind: 'chat-send', text: 'original', clientId: 'draft-9' });
+
+    const res = (await api.execute({
+      kind: 'chat-send',
+      text: 'edited draft',
+      clientId: 'draft-9',
+    })) as ChatSendResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('clientId');
+    // Only the original row exists — the collision didn't touch it.
+    expect(chatStore.listAll().map((m) => m.content)).toEqual(['original']);
+  });
+
+  it('a non-string clientId is rejected instead of throwing', async () => {
+    const { api } = createFixture();
+    const res = (await api.execute({
+      kind: 'chat-send',
+      text: 'hi',
+      clientId: 42 as unknown as string,
+    })) as ChatSendResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('clientId');
+  });
 });
 
 /* ================================================================== *
@@ -1966,7 +2053,10 @@ describe('repo roots (issue #253)', () => {
     await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
     await api.execute({ kind: 'add-repo-root', path: '/repos/b' });
 
-    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    const res = (await api.execute({
+      kind: 'remove-repo-root',
+      path: '/repos/a',
+    })) as ReposResponse;
     expect(res.ok).toBe(true);
     expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/b']);
 
@@ -1986,7 +2076,10 @@ describe('repo roots (issue #253)', () => {
     // Simulates a "Remove A" button rendered when roots=[A], clicked
     // after a concurrent action already added B -- must remove only A.
     await api.execute({ kind: 'add-repo-root', path: '/repos/b' });
-    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    const res = (await api.execute({
+      kind: 'remove-repo-root',
+      path: '/repos/a',
+    })) as ReposResponse;
     expect(res.ok).toBe(true);
     expect(res.roots?.roots.map((r) => r.path)).toEqual(['/repos/b']);
   });
@@ -2054,7 +2147,10 @@ describe('repo roots (issue #253)', () => {
 
   it('remove-repo-root fails cleanly when repo roots are not wired', async () => {
     const api = apiWith(undefined, new FakeRepoScanner({}));
-    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    const res = (await api.execute({
+      kind: 'remove-repo-root',
+      path: '/repos/a',
+    })) as ReposResponse;
     expect(res.ok).toBe(false);
     expect(res.error).toContain('not wired');
   });
@@ -2127,7 +2223,10 @@ describe('repo roots (issue #253)', () => {
     const api = apiWith(repoRoots, new FakeRepoScanner({}));
     await api.execute({ kind: 'add-repo-root', path: '/repos/a' });
     repoRoots.throwOnSave = true;
-    const res = (await api.execute({ kind: 'remove-repo-root', path: '/repos/a' })) as ReposResponse;
+    const res = (await api.execute({
+      kind: 'remove-repo-root',
+      path: '/repos/a',
+    })) as ReposResponse;
     expect(res.ok).toBe(false);
     expect(res.error).toContain('disk write failed');
   });

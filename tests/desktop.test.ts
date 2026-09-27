@@ -1199,6 +1199,235 @@ describe('catchup:opened', () => {
 });
 
 /* ================================================================== *
+ * chat send failure — inline error row + explicit retry (issue #263)
+ * ================================================================== */
+
+describe('chat send failure + retry', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(async () => {
+    server = new MockDaemonServer();
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  type Responder = (cmd: Record<string, unknown>, send: (r: unknown) => void) => void;
+
+  async function connectedApp(
+    transport: MockIpcTransport,
+    respond: Responder,
+  ): Promise<{ app: DesktopApp; cmds: Record<string, unknown>[]; socket: WebSocket }> {
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+    });
+    app.start();
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    const cmds: Record<string, unknown>[] = [];
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (typeof cmd['kind'] !== 'string') return; // subscribe frame
+      cmds.push(cmd);
+      respond(cmd, (r) => socket.send(JSON.stringify(r)));
+    });
+    return { app, cmds, socket };
+  }
+
+  function chatSendCmd(text: string, clientId: string): string {
+    return 'chatcmd:' + encodeURIComponent(JSON.stringify({ kind: 'chat-send', text, clientId }));
+  }
+
+  function lastChatTree(transport: MockIpcTransport): string {
+    const pushes = transport.toRenderer.filter((m) => m.channel === 'chat:update');
+    return JSON.stringify(pushes[pushes.length - 1]?.data);
+  }
+
+  it('a failed send renders an inline row; the draft is retryable with its original clientId', async () => {
+    const transport = new MockIpcTransport();
+    let sendAttempts = 0;
+    const { app, cmds } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'chat-send') {
+        sendAttempts += 1;
+        if (sendAttempts === 1) send({ ok: false, error: 'daemon unreachable' });
+        else
+          send({
+            ok: true,
+            message: {
+              id: String(cmd['clientId']),
+              role: 'user',
+              content: cmd['text'],
+              createdAt: '2026-09-27T11:00:00.000Z',
+            },
+            turn: 'unavailable',
+          });
+      } else send({ ok: true });
+    });
+
+    await app.handleRendererCommand({
+      id: 1,
+      cmd: chatSendCmd('check the oauth migration', 'cid-1'),
+    });
+
+    // The failure is an honest rejection AND a rendered row — the row
+    // carries the draft preview + daemon error text.
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 1,
+      res: { ok: false, error: 'daemon unreachable' },
+    });
+    const failedTree = lastChatTree(transport);
+    expect(failedTree).toContain('SendErrorRow');
+    expect(failedTree).toContain('daemon unreachable');
+    expect(failedTree).toContain('check the oauth migration');
+    expect(failedTree).toContain('chat-retry');
+
+    await app.handleRendererCommand({ id: 2, cmd: 'chat-retry' });
+
+    const sends = cmds.filter((c) => c['kind'] === 'chat-send');
+    expect(sends).toHaveLength(2);
+    // Same id + same text — the daemon dedupes on clientId, so a retry
+    // after a lost response can never double-journal the draft.
+    expect(sends[1]!['clientId']).toBe('cid-1');
+    expect(sends[1]!['text']).toBe('check the oauth migration');
+    expect(transport.toRenderer.filter((m) => m.channel === 'command:result')[1]?.data).toEqual({
+      id: 2,
+      res: expect.objectContaining({ ok: true }),
+    });
+    // Success clears the row — the journaled message arrives via push.
+    expect(lastChatTree(transport)).not.toContain('SendErrorRow');
+  });
+
+  it('chat-retry with nothing pending is a harmless no-op', async () => {
+    const transport = new MockIpcTransport();
+    const { app, cmds } = await connectedApp(transport, (_cmd, send) => send({ ok: true }));
+    await app.handleRendererCommand({ id: 3, cmd: 'chat-retry' });
+    expect(cmds.filter((c) => c['kind'] === 'chat-send')).toHaveLength(0);
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 3,
+      res: { ok: true },
+    });
+  });
+
+  it('chat-clear drops the pending error row', async () => {
+    const transport = new MockIpcTransport();
+    const { app } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'chat-send') send({ ok: false, error: 'daemon unreachable' });
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 4, cmd: chatSendCmd('draft', 'cid-2') });
+    expect(lastChatTree(transport)).toContain('SendErrorRow');
+    await app.handleRendererCommand({
+      id: 5,
+      cmd: 'chatcmd:' + encodeURIComponent(JSON.stringify({ kind: 'chat-clear' })),
+    });
+    const tree = lastChatTree(transport);
+    expect(tree).not.toContain('SendErrorRow');
+  });
+
+  it('a second send failure refreshes the row with the new error', async () => {
+    const transport = new MockIpcTransport();
+    const { app } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'chat-send') send({ ok: false, error: 'still down' });
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 6, cmd: chatSendCmd('a', 'cid-3') });
+    await app.handleRendererCommand({ id: 7, cmd: chatSendCmd('b', 'cid-4') });
+    const tree = lastChatTree(transport);
+    expect(tree).toContain('still down');
+    expect(tree).toContain('send \\"b\\"'); // serialized JSON escapes the quotes
+  });
+
+  it('a journaled chat:message matching the failed clientId heals the row', async () => {
+    const transport = new MockIpcTransport();
+    // The send "failed" from the client's view, but actually journaled —
+    // the late chat:message push must clear the row, not leave it lying
+    // next to the real bubble.
+    const { app, socket } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'chat-send') send({ ok: false, error: 'no response' });
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 8, cmd: chatSendCmd('check oauth', 'cid-5') });
+    expect(lastChatTree(transport)).toContain('SendErrorRow');
+
+    socket.send(
+      JSON.stringify({
+        type: 'chat:message',
+        message: {
+          id: 'cid-5',
+          role: 'user',
+          content: 'check oauth',
+          createdAt: '2026-09-27T11:00:00.000Z',
+        },
+      }),
+    );
+    await waitFor(() => !lastChatTree(transport).includes('SendErrorRow'));
+  });
+
+  it('a reconnecting chat-read heals the row when the send actually journaled', async () => {
+    const transport = new MockIpcTransport();
+    const { app } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'chat-send') send({ ok: false, error: 'connection lost' });
+      else if (cmd['kind'] === 'chat-read')
+        send({
+          ok: true,
+          messages: [
+            {
+              id: 'cid-6',
+              role: 'user',
+              content: 'check oauth',
+              createdAt: '2026-09-27T11:00:00.000Z',
+            },
+          ],
+          clearedAt: null,
+          turnInFlight: false,
+        });
+      else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 9, cmd: chatSendCmd('check oauth', 'cid-6') });
+    expect(lastChatTree(transport)).toContain('SendErrorRow');
+
+    await app.refreshNow();
+    const tree = lastChatTree(transport);
+    expect(tree).not.toContain('SendErrorRow');
+    expect(tree).toContain('check oauth');
+  });
+
+  it('a retry rejected in-flight updates the row and stays retryable', async () => {
+    const transport = new MockIpcTransport();
+    let rejectInFlight = true;
+    const { app } = await connectedApp(transport, (cmd, send) => {
+      if (cmd['kind'] === 'chat-send') {
+        if (rejectInFlight) send({ ok: false, error: 'a Secretary turn is already in flight' });
+        else
+          send({
+            ok: true,
+            message: {
+              id: String(cmd['clientId']),
+              role: 'user',
+              content: cmd['text'],
+              createdAt: '2026-09-27T11:00:00.000Z',
+            },
+            turn: 'unavailable',
+          });
+      } else send({ ok: true });
+    });
+    await app.handleRendererCommand({ id: 10, cmd: chatSendCmd('later', 'cid-7') });
+    expect(lastChatTree(transport)).toContain('already in flight');
+
+    await app.handleRendererCommand({ id: 11, cmd: 'chat-retry' });
+    expect(lastChatTree(transport)).toContain('already in flight');
+
+    rejectInFlight = false;
+    await app.handleRendererCommand({ id: 12, cmd: 'chat-retry' });
+    expect(lastChatTree(transport)).not.toContain('SendErrorRow');
+  });
+});
+
+/* ================================================================== *
  * Auto-reconnect / offline UX (issue #122)
  * ================================================================== */
 

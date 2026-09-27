@@ -601,6 +601,12 @@ export interface DelegateTaskCommand {
 export interface ChatSendCommand {
   readonly kind: 'chat-send';
   readonly text: string;
+  /**
+   * Client-generated send id (issue #263): a retried send carries the same
+   * id, and the journal dedupes on it — a send whose response was lost
+   * mid-flight can never append twice.
+   */
+  readonly clientId?: string;
 }
 
 /**
@@ -2689,15 +2695,45 @@ export class CommandApi {
     if (this.chatStore === undefined) {
       return { ok: false, error: 'chat store is not wired into this daemon' };
     }
-    if (this.chatService?.turnInFlight() === true) {
-      return { ok: false, error: 'a Secretary turn is already in flight' };
-    }
     const text = cmd.text.trim();
     if (text.length === 0) {
       return { ok: false, error: 'text is required' };
     }
+    if (cmd.clientId !== undefined && typeof cmd.clientId !== 'string') {
+      return { ok: false, error: 'clientId must be a string' };
+    }
+    const clientId = typeof cmd.clientId === 'string' ? cmd.clientId.trim() : undefined;
+    if (clientId !== undefined && clientId !== '') {
+      // Retry of an already-journaled send (issue #263): the first attempt
+      // may have journaled but lost its response mid-flight — return the
+      // existing row instead of appending a duplicate. Runs before the
+      // in-flight check: the same message dedupes even while its own
+      // turn is still running.
+      let existing: ConversationMessage | undefined;
+      try {
+        existing = this.chatStore.listAll().find((m) => m.id === clientId);
+      } catch (err) {
+        return { ok: false, error: `failed to check journal: ${errorMessage(err)}` };
+      }
+      if (existing !== undefined) {
+        // An id that matches a *different* journaled row is a collision,
+        // not a retry — refuse honestly rather than drop the new text.
+        if (existing.role !== 'user' || existing.content !== text) {
+          return { ok: false, error: 'clientId already used by a different message' };
+        }
+        this.chatMessageSink?.(existing);
+        return {
+          ok: true,
+          message: existing,
+          turn: this.chatService?.turnInFlight() === true ? 'started' : 'unavailable',
+        };
+      }
+    }
+    if (this.chatService?.turnInFlight() === true) {
+      return { ok: false, error: 'a Secretary turn is already in flight' };
+    }
     const message: ConversationMessage = {
-      id: generateId('msg'),
+      id: clientId !== undefined && clientId !== '' ? clientId : generateId('msg'),
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),

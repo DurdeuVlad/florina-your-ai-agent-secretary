@@ -585,17 +585,31 @@ function chatCmd(payload) {
 /**
  * Send the composer text — journaled by the daemon, echoed back as a
  * `chat:message` push (no optimistic bubble, DG-01 §3.9). The input
- * clears on accept; an in-flight turn or daemon error toasts honestly.
+ * clears on accept. A rejection renders as an inline error row pushed
+ * on `chat:update` (issue #263) — the draft stays put and the row's
+ * Retry resends it; no toast, the row IS the record.
  */
+let sendClientId = null;
+
 function sendChat() {
   const input = $('chatInput');
   const text = input.value.trim();
   if (!text || !bridge) return;
-  void bridge.command(chatCmd({ kind: 'chat-send', text })).then((res) => {
+  /* The draft keeps one client id until it succeeds (#263): a retry
+   * after a lost response re-sends the same id and the daemon dedupes
+   * on it, so a mid-flight failure can't journal the message twice. */
+  if (sendClientId === null) {
+    sendClientId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `send-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+  void bridge.command(chatCmd({ kind: 'chat-send', text, clientId: sendClientId })).then((res) => {
     if (res && res.ok === false) {
-      toast(res.error || 'send failed');
+      input.focus();
       return;
     }
+    sendClientId = null;
     input.value = '';
     input.focus();
   });
@@ -712,6 +726,9 @@ function insertDictated(text) {
   const end = input.selectionEnd ?? start;
   const needsSpace = start > 0 && !/\s$/.test(input.value.slice(0, start));
   input.setRangeText((needsSpace ? ' ' : '') + text + ' ', start, end, 'end');
+  /* Dictation edits the draft without firing `input` — a changed draft
+   * is a new send, so the retry id must rotate here too (#263). */
+  sendClientId = null;
   input.focus();
 }
 
@@ -758,6 +775,12 @@ $('chatInput').addEventListener('keydown', (e) => {
     e.preventDefault();
     sendChat();
   }
+});
+/* Editing the draft after a failed send mints a fresh client id (#263):
+ * the old id still refers to the failed text and is the Retry button's
+ * to reuse — a changed draft is a new send, never a deduped one. */
+$('chatInput').addEventListener('input', () => {
+  sendClientId = null;
 });
 $('chatClear').addEventListener('click', () => {
   if (!bridge) return;
