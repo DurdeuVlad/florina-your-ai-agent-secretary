@@ -695,6 +695,22 @@ button.danger:hover {
 .toolrow .ok {
   color: var(--green);
 }
+/* failed send (issue #263) — twin of renderer .chatlist .senderror */
+.chatlist .senderror {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  color: var(--red);
+  padding: 4px 14px;
+  border-left: 2px solid var(--red);
+}
+.chatlist .senderror button {
+  font-size: 11px;
+  padding: 1px 8px;
+}
 .workrow {
   align-self: flex-start;
   display: flex;

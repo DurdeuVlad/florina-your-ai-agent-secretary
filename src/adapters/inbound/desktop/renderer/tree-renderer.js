@@ -108,6 +108,8 @@ const TAG_CLASS = {
   ToolRow: 'toolrow',
   ToolStatus: null, // <span>
   ClearRow: 'clearrow',
+  /* failed send row (issue #263) — toolrow family, red accent */
+  SendErrorRow: 'senderror',
   WorkRow: 'workrow',
   WorkDot: 'dot wait',
   /* chat activity/diff drawer (issue #181) */

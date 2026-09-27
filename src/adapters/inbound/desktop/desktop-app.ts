@@ -298,6 +298,13 @@ export class DesktopApp {
   private chatClearedAt: string | undefined;
   private chatWorking = false;
   private chatTool: string | undefined;
+  /**
+   * A `chat-send` the daemon rejected or that never reached it (issue
+   * #263). Kept main-side so it survives reconnects — the row renders
+   * in the thread until a successful send or `chat-clear` resolves it.
+   * `clientId` lets the daemon dedupe the retry instead of re-journaling.
+   */
+  private chatSendError: { text: string; clientId?: string; error: string } | undefined;
   private readonly catchUpTrigger: CatchUpAutoTrigger;
   /** Guards against overlapping `catchup:opened` fetches (focus + nav can race). */
   private catchUpBusy = false;
@@ -821,6 +828,13 @@ export class DesktopApp {
         if (message !== undefined && !this.chatMessages.some((m) => m.id === message.id)) {
           this.chatMessages.push(message);
         }
+        // A journaled push matching a failed send's clientId means the
+        // original actually landed (its response was lost mid-flight) —
+        // the error row heals itself rather than lingering next to the
+        // real bubble (issue #263).
+        if (message !== undefined && message.id === this.chatSendError?.clientId) {
+          this.chatSendError = undefined;
+        }
         // An assistant row only journals when a turn ends (or fails) —
         // the loop emits no 'completed' event on the failure path.
         if (message?.role === 'assistant') {
@@ -918,6 +932,14 @@ export class DesktopApp {
       this.bridge.sendToRenderer('command:result', { id: m.id, res });
       return;
     }
+    if (m.cmd === 'chat-retry') {
+      const res = await this.retryChatSend().catch((e: unknown): Response => ({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      this.bridge.sendToRenderer('command:result', { id: m.id, res });
+      return;
+    }
     const cmd = this.resolveRendererCommand(m.cmd);
     if (cmd === null) {
       // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
@@ -940,15 +962,30 @@ export class DesktopApp {
     // Chat (issue #160): a started turn shows the working row right
     // away; a clear wipes the local mirror — the journaled rows stay
     // on the daemon side, the read window just moved.
-    if (res.ok && cmd.kind === 'chat-send') {
-      this.chatWorking = 'turn' in res && res.turn === 'started';
-      if (this.chatWorking) this.pushChat();
+    if (cmd.kind === 'chat-send') {
+      if (res.ok) {
+        // Success (or a deduped retry) clears any pending send error —
+        // the journaled message arrives via the chat:message push.
+        this.chatSendError = undefined;
+        this.chatWorking = 'turn' in res && res.turn === 'started';
+      } else {
+        // Issue #263: a failed send becomes an inline row in the thread,
+        // not just a toast. The draft itself stays in the renderer's
+        // composer — this mirror only tracks what to draw.
+        this.chatSendError = {
+          text: cmd.text,
+          ...(cmd.clientId !== undefined ? { clientId: cmd.clientId } : {}),
+          error: 'error' in res && res.error !== undefined ? res.error : 'send failed',
+        };
+      }
+      this.pushChat();
     }
     if (res.ok && cmd.kind === 'chat-clear') {
       this.chatMessages = [];
       this.chatClearedAt = new Date().toISOString();
       this.chatWorking = false;
       this.chatTool = undefined;
+      this.chatSendError = undefined;
       this.pushChat();
     }
     // History journal search (issue #222): results are pushed as a
@@ -1605,6 +1642,36 @@ export class DesktopApp {
     }
   }
 
+  /**
+   * Re-dispatch the last failed `chat-send` with its original `clientId`
+   * (issue #263). The daemon dedupes on the id, so a retry after a
+   * lost response can't double-journal the draft. The row's Retry
+   * button sends `chat-retry`; retries stay user-initiated (DEC-011).
+   */
+  private async retryChatSend(): Promise<Response> {
+    const failed = this.chatSendError;
+    if (failed === undefined) return { ok: true };
+    const res = await this.sendCommand({
+      kind: 'chat-send',
+      text: failed.text,
+      ...(failed.clientId !== undefined ? { clientId: failed.clientId } : {}),
+    }).catch((e: unknown): Response => ({
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    }));
+    if (res.ok) {
+      this.chatSendError = undefined;
+      this.chatWorking = 'turn' in res && res.turn === 'started';
+    } else {
+      this.chatSendError = {
+        ...failed,
+        error: 'error' in res && res.error !== undefined ? res.error : 'send failed',
+      };
+    }
+    this.pushChat();
+    return res;
+  }
+
   /** Render and push the chat message list on the `chat:update` channel. */
   private pushChat(): void {
     this.bridge.sendToRenderer(
@@ -1614,6 +1681,9 @@ export class DesktopApp {
         working: this.chatWorking,
         ...(this.chatTool !== undefined ? { workingTool: this.chatTool } : {}),
         ...(this.chatClearedAt !== undefined ? { clearedAt: this.chatClearedAt } : {}),
+        ...(this.chatSendError !== undefined
+          ? { sendError: { text: this.chatSendError.text, error: this.chatSendError.error } }
+          : {}),
       }),
     );
   }
@@ -1765,6 +1835,12 @@ export class DesktopApp {
       this.chatClearedAt = chatRes.clearedAt;
       this.chatWorking = chatRes.turnInFlight === true;
       if (!this.chatWorking) this.chatTool = undefined;
+      // Same heal as the chat:message path: a reconnecting chat-read that
+      // brings back the failed send's id proves it journaled — clear the
+      // row instead of retrying a message that already landed (#263).
+      if (this.chatMessages.some((m) => m.id === this.chatSendError?.clientId)) {
+        this.chatSendError = undefined;
+      }
       this.pushChat();
     }
   }

@@ -172,6 +172,29 @@ async function shotApp() {
   console.log('[visual-qa] captured Secretary lens');
   pressKey(win, 'Escape');
   await sleep(SETTLE_MS);
+
+  // Send-failure row (issue #263): a genuine daemon rejection through the
+  // real command path — a whitespace-only chat-send resolves {ok:false},
+  // main mirrors the failure, and chat:update renders the error row.
+  // (The offline case needs daemon teardown the harness doesn't own —
+  // the state matrix documents it; this proves the row end-to-end.)
+  pressKey(win, 'g');
+  await sleep(80);
+  pressKey(win, 'f');
+  await sleep(SETTLE_MS);
+  await win.webContents.executeJavaScript(
+    `window.florina.command('chatcmd:' + encodeURIComponent(JSON.stringify({kind:'chat-send', text:'   ', clientId:'qa-fail-1'})))`,
+  );
+  // chat:update is a daemon round trip — wait for the row in the DOM.
+  for (let i = 0; i < 20; i++) {
+    const rowVisible = await win.webContents.executeJavaScript(
+      `document.querySelector('.senderror') !== null`,
+    );
+    if (rowVisible) break;
+    await sleep(250);
+  }
+  await captureWindow(win, path.join(SHOTS, 'app-chat-senderror.png'));
+  console.log('[visual-qa] captured chat send-failure row');
 }
 
 app.whenReady().then(async () => {

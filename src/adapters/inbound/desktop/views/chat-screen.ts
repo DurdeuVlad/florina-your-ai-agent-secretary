@@ -14,6 +14,8 @@
  *  - a `workrow` trails the list while a turn is in flight, carrying the
  *    latest tool name when one is running
  *  - a cleared marker row when `chat-clear` moved the read window
+ *  - a `senderror` row after a rejected `chat-send` (issue #263) —
+ *    red toolrow-family line with the daemon error and a Retry affordance
  *
  * The message list is the only part of the screen that lives in the
  * RenderTree — the composer is static DOM in `index.html` so re-mounts
@@ -85,6 +87,12 @@ export interface ChatScreenState {
   readonly workingTool?: string;
   /** Latest clear mark — shown as a divider so clearing stays honest. */
   readonly clearedAt?: string;
+  /**
+   * A `chat-send` the daemon rejected or that never reached it (issue
+   * #263). Renders as an inline row in the thread so a lost send stays
+   * visible until a successful send or `chat-clear` resolves it.
+   */
+  readonly sendError?: { readonly text: string; readonly error: string };
 }
 
 /** Build the chat screen's message-list tree. */
@@ -110,6 +118,15 @@ export function renderChatScreen(state: ChatScreenState): RenderTree {
     for (const m of state.messages) {
       children.push(...messageNodes(m));
     }
+  }
+
+  if (state.sendError !== undefined) {
+    children.push(
+      el('SendErrorRow', {}, [
+        `✗ couldn't send "${preview(state.sendError.text)}" — ${state.sendError.error}`,
+        el('Button', { variant: 'ghost', command: 'chat-retry' }, ['Retry']),
+      ]),
+    );
   }
 
   if (state.working) {

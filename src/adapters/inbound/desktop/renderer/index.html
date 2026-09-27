@@ -370,6 +370,23 @@
       .chatlist .toolrow .err {
         color: var(--red);
       }
+      /* failed send (issue #263) — the toolrow family, red-accented,
+         with an inline Retry so a lost send stays recoverable */
+      .chatlist .senderror {
+        align-self: flex-start;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        font-family: ui-monospace, monospace;
+        color: var(--red);
+        padding: 4px 14px;
+        border-left: 2px solid var(--red);
+      }
+      .chatlist .senderror button {
+        font-size: 11px;
+        padding: 1px 8px;
+      }
       .chatlist .clearrow {
         align-self: center;
         font-size: 11px;
