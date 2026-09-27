@@ -40,7 +40,11 @@ import {
 } from '../attention/attention-item.js';
 import type { AttentionInbox, AttentionInboxFilter } from '../attention/attention-inbox.js';
 import type { CompletionDigest } from '../attention/completion-digest.js';
-import { computeCatchUpDigest, watermarkOrEpoch, advanceWatermark } from '../resumption/catchup-digest.js';
+import {
+  computeCatchUpDigest,
+  watermarkOrEpoch,
+  advanceWatermark,
+} from '../resumption/catchup-digest.js';
 import { searchJournalEvents } from '../journal/journal-search.js';
 import type { CatchUpDigest } from '../resumption/catchup-digest.js';
 import type { CatchUpWatermarkPort } from '../../ports/outbound/catchup-watermark.js';
@@ -1070,6 +1074,12 @@ export interface ChatReadResponse {
   readonly messages: readonly ConversationMessage[];
   /** ISO timestamp of the latest `chat-clear`, when one exists. */
   readonly clearedAt?: string;
+  /**
+   * Whether a Secretary turn is currently in flight (issue #260) — the
+   * daemon is the source of truth so view refreshes report real turn
+   * state instead of a client's stale guess.
+   */
+  readonly turnInFlight: boolean;
   readonly error?: string;
 }
 
@@ -2041,7 +2051,11 @@ export class CommandApi {
       const since = cmd.since ?? new Date(0).toISOString();
       const until = cmd.until ?? new Date().toISOString();
       const candidates = this.eventRepository.listByTimestampRange(since, until);
-      const events = searchJournalEvents(candidates, { text: cmd.text, since: cmd.since, until: cmd.until });
+      const events = searchJournalEvents(candidates, {
+        text: cmd.text,
+        since: cmd.since,
+        until: cmd.until,
+      });
       return { ok: true, events };
     } catch (err) {
       return { ok: false, events: [], error: `Failed to search journal: ${errorMessage(err)}` };
@@ -2553,7 +2567,11 @@ export class CommandApi {
       );
       return { ok: true, digest };
     } catch (err) {
-      return { ok: false, digest: null, error: `Failed to compute catch-up digest: ${errorMessage(err)}` };
+      return {
+        ok: false,
+        digest: null,
+        error: `Failed to compute catch-up digest: ${errorMessage(err)}`,
+      };
     }
   }
 
@@ -2703,12 +2721,18 @@ export class CommandApi {
   /** chat-read (issue #157): visible history + the latest clear mark. */
   private async handleChatRead(): Promise<ChatReadResponse> {
     if (this.chatStore === undefined) {
-      return { ok: false, messages: [], error: 'chat store is not wired into this daemon' };
+      return {
+        ok: false,
+        messages: [],
+        turnInFlight: false,
+        error: 'chat store is not wired into this daemon',
+      };
     }
     const clearedAt = this.chatStore.latestClear();
     return {
       ok: true,
       messages: this.chatStore.listVisible(),
+      turnInFlight: this.chatService?.turnInFlight() === true,
       ...(clearedAt !== null ? { clearedAt } : {}),
     };
   }

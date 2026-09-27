@@ -28,6 +28,11 @@ if (bridge) {
     const [cls, label] = STATUS_LABEL[d.status] || ['err', d.status];
     $('dot').className = 'dot ' + cls;
     $('statusText').textContent = d.error || label;
+    // Cold launch and every reconnect both report 'connected' — the
+    // window-focus listener can't cover a cold boot (the page loads
+    // into an already-focused window on some platforms), so this is the
+    // reliable first-open hook for the idle catch-up (#260).
+    if (d.status === 'connected') maybeCatchUp();
   });
 
   bridge.on('inbox:update', (tree) => {
@@ -754,6 +759,21 @@ $('chatClear').addEventListener('click', () => {
   });
 });
 
+/* ---------- idle catch-up digest (issue #260, DEC-042 §9) ---------- */
+
+/**
+ * Report the Florina view opening/focusing to main; the trigger and the
+ * `get-catchup`/`chat-append`/`confirm-catchup` sequence live in
+ * `desktop-app.ts`. Skipped while the composer holds a draft — the
+ * digest must never eat a half-typed reply.
+ */
+function maybeCatchUp() {
+  if (!bridge || currentView !== 'chat') return;
+  const input = $('chatInput');
+  if (input && input.value.trim() !== '') return;
+  void bridge.command('catchup:opened');
+}
+
 /* chat activity/diff drawer (#181): a per-viewer UI toggle, not a daemon
  * preference — persisted to localStorage only (best-effort; a private
  * window or blocked storage just falls back to closed). */
@@ -820,7 +840,10 @@ function showView(name) {
   $('viewSub').textContent = TITLES[name][1];
   $('chatClear').style.display = name === 'chat' ? '' : 'none';
   $('chatDrawerToggle').style.display = name === 'chat' ? '' : 'none';
-  if (name === 'chat') $('chatInput').focus();
+  if (name === 'chat') {
+    $('chatInput').focus();
+    maybeCatchUp();
+  }
   // Enumerate mics whenever prefs opens — covers g p as well as clicks.
   if (name === 'prefs') void listMicrophones();
   // Leaving Chat suspends an open capture (issue #162): voice talk turns
@@ -835,6 +858,10 @@ function showView(name) {
 document
   .querySelectorAll('.navitem')
   .forEach((n) => n.addEventListener('click', () => showView(n.dataset.view)));
+
+/* Refocus while on Florina = a "return" worth checking against the idle
+ * threshold (registered after currentView exists — see maybeCatchUp). */
+window.addEventListener('focus', maybeCatchUp);
 
 /* ---------- Work sub-tabs: Tasks/Fleet/Ideas (issue #220) ---------- */
 

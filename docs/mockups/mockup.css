@@ -663,6 +663,7 @@ button.danger:hover {
   border-radius: var(--radius-lg);
   font-size: 13.5px;
   line-height: 1.5;
+  white-space: pre-wrap; /* parity: real .chatlist .msg is pre-wrap */
 }
 .msg .who {
   font-size: 10.5px;

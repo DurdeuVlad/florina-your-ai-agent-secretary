@@ -61,11 +61,14 @@ export interface DesktopVoiceSession {
   /** Transcript stream — user and assistant speech, partials + finals. */
   onTranscript(cb: (text: string, partial: boolean) => void): () => void;
 }
-import type { SecretaryResponse } from '../../../core/application/use-cases/tasks/command-api.js';
 import type {
+  SecretaryResponse,
+  CatchUpResponse,
   BriefListResponse,
   IdeaListResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
+import { CatchUpAutoTrigger } from './catchup-auto-trigger.js';
+import { formatCatchUpMessage } from './catchup-message.js';
 import { IpcBridge } from './ipc-bridge.js';
 import type { IpcTransport } from './ipc-bridge.js';
 import { RendererState } from './renderer-state.js';
@@ -177,6 +180,13 @@ export interface DesktopAppOptions {
    * Absent → those verbs fail honestly.
    */
   readonly folderPicker?: FolderPickerPort;
+  /**
+   * Idle-threshold catch-up trigger (issue #260, DEC-042 §9): consulted
+   * whenever the renderer reports the Florina view opened/focused
+   * (`catchup:opened`). Injectable so tests can drive `now` and the
+   * threshold deterministically. Default: 30-minute threshold.
+   */
+  readonly catchUpTrigger?: CatchUpAutoTrigger;
 }
 
 /**
@@ -288,6 +298,9 @@ export class DesktopApp {
   private chatClearedAt: string | undefined;
   private chatWorking = false;
   private chatTool: string | undefined;
+  private readonly catchUpTrigger: CatchUpAutoTrigger;
+  /** Guards against overlapping `catchup:opened` fetches (focus + nav can race). */
+  private catchUpBusy = false;
 
   constructor(options: DesktopAppOptions) {
     this.window = options.window;
@@ -305,6 +318,7 @@ export class DesktopApp {
     this.voiceConfig = options.voiceConfig;
     this.desktopSettings = options.desktopSettings;
     this.folderPicker = options.folderPicker;
+    this.catchUpTrigger = options.catchUpTrigger ?? new CatchUpAutoTrigger();
     // Voice-mode state + live transcript captions reach the renderer on
     // voice:update (issue #162). Finals ALSO journal into the chat thread
     // via chat-append (wired in the composition root) — the preview is
@@ -894,6 +908,16 @@ export class DesktopApp {
       await this.handleAddRepoFolders(m.cmd, m.id);
       return;
     }
+    if (m.cmd === 'catchup:opened') {
+      // A caught rejection here still answers the renderer — otherwise
+      // its pending command promise leaks unresolved.
+      const res = await this.handleCatchUpOpened().catch((e: unknown): Response => ({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      this.bridge.sendToRenderer('command:result', { id: m.id, res });
+      return;
+    }
     const cmd = this.resolveRendererCommand(m.cmd);
     if (cmd === null) {
       // UI-only verbs (inspect / digest / diff / clear-filter …) are handled
@@ -1079,7 +1103,9 @@ export class DesktopApp {
     // (issue #222). Whitelisted to search-journal only.
     if (cmd.startsWith('historysearch:')) {
       try {
-        const parsed = JSON.parse(decodeURIComponent(cmd.slice('historysearch:'.length))) as unknown;
+        const parsed = JSON.parse(
+          decodeURIComponent(cmd.slice('historysearch:'.length)),
+        ) as unknown;
         if (
           typeof parsed === 'object' &&
           parsed !== null &&
@@ -1444,7 +1470,10 @@ export class DesktopApp {
    * first). `add-repo-root` is atomic and idempotent per call, so there
    * is no read-then-write gap left to race across.
    */
-  private async handleAddRepoFolders(cmd: 'pickfolders' | 'defaultfolder', id: unknown): Promise<void> {
+  private async handleAddRepoFolders(
+    cmd: 'pickfolders' | 'defaultfolder',
+    id: unknown,
+  ): Promise<void> {
     const ack = (res: { ok: boolean; error?: string }): void => {
       this.bridge.sendToRenderer('command:result', { id, res });
     };
@@ -1521,6 +1550,59 @@ export class DesktopApp {
         selectedEventIndex: this.inspectorEventIndex,
       }),
     );
+  }
+
+  /**
+   * `catchup:opened` — the renderer reports the Florina view opened or the
+   * window regained focus (issue #260). When the idle trigger fires, fetch
+   * the digest, journal it into the thread via `chat-append` (it renders
+   * like any assistant message — no optimistic bubble, and journaled means
+   * it survives a crash before paint: hydration replays it on next launch),
+   * then `confirm-catchup` so the watermark only advances after delivery.
+   * Skips silently — leaving the trigger unfired — while a turn is in
+   * flight, a fetch is already running, or the daemon is unreachable.
+   */
+  private async handleCatchUpOpened(): Promise<Response> {
+    if (
+      this.chatWorking ||
+      this.voiceActive ||
+      this.catchUpBusy ||
+      this.catchUpTrigger.msUntilNextFire() > 0
+    ) {
+      return { ok: true };
+    }
+    this.catchUpBusy = true;
+    try {
+      const res = await this.sendCommand({ kind: 'get-catchup' }).catch((): null => null);
+      if (res === null || !res.ok) return { ok: true }; // offline — retry on next open
+      const digest = (res as CatchUpResponse).digest;
+      if (digest == null) return { ok: true }; // malformed — stay armed
+      if (!digest.isEmpty) {
+        // A turn or voice session that began during the fetch takes
+        // precedence — stay armed; the next open recomputes the window.
+        if (this.chatWorking || this.voiceActive) return { ok: true };
+        const appended = await this.sendCommand({
+          kind: 'chat-append',
+          role: 'assistant',
+          text: formatCatchUpMessage(digest),
+        }).catch((): null => null);
+        // Journaling failed → nothing was delivered → stay armed, same
+        // retry-next-open semantics as a failed get-catchup.
+        if (appended === null || !appended.ok) return { ok: true };
+      }
+      // Delivered (journaled, so a crash before paint still replays on
+      // next launch — no optimistic bubble) or an intentionally empty
+      // window: consume the fire, then advance the watermark. A failed
+      // confirm is warn-only — the window recomputes on the next fire,
+      // possibly re-showing overlapping items (same caveat as the CLI).
+      this.catchUpTrigger.onViewOpened();
+      await this.sendCommand({ kind: 'confirm-catchup', until: digest.until }).catch(
+        (): null => null,
+      );
+      return { ok: true };
+    } finally {
+      this.catchUpBusy = false;
+    }
   }
 
   /** Render and push the chat message list on the `chat:update` channel. */
@@ -1663,7 +1745,10 @@ export class DesktopApp {
     // History screen (issue #221): completed tasks + resolved decisions,
     // pure read-composition over the same task/inbox data already
     // fetched above -- no new query, no new data model.
-    this.bridge.sendToRenderer('history:update', renderHistoryView({ tasks, resolvedItems: items as AttentionItem[] }));
+    this.bridge.sendToRenderer(
+      'history:update',
+      renderHistoryView({ tasks, resolvedItems: items as AttentionItem[] }),
+    );
     // Secretary screen (#130): plan, research, memory writes, health.
     if (secretaryRes !== null && secretaryRes.ok && 'plan' in secretaryRes) {
       this.bridge.sendToRenderer(
@@ -1672,13 +1757,14 @@ export class DesktopApp {
       );
     }
     // Chat screen (#160): rehydrate the single conversation — resume is
-    // automatic on every (re)connect. A daemon restart loses any
-    // in-flight turn, so the working row resets here.
+    // automatic on every (re)connect. Turn state comes from the daemon
+    // (issue #260): `chat-read` reports `turnInFlight`, so a refresh
+    // mid-turn keeps the working row live instead of squashing it.
     if (chatRes !== null && chatRes.ok && 'messages' in chatRes) {
       this.chatMessages = [...chatRes.messages];
       this.chatClearedAt = chatRes.clearedAt;
-      this.chatWorking = false;
-      this.chatTool = undefined;
+      this.chatWorking = chatRes.turnInFlight === true;
+      if (!this.chatWorking) this.chatTool = undefined;
       this.pushChat();
     }
   }
