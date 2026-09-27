@@ -134,11 +134,14 @@ export function renderBriefCard(view: BriefCardView): RenderTree {
             command: 'brief-confirm',
             args: { briefId: view.id },
             color: 'green',
+            /* DEC-033 hard gate — approval delegates the plan to agents */
+            confirm: 'Approve this brief? Its tasks will be delegated to agents.',
           }),
           el('Action', {
             command: 'brief-reject',
             args: { briefId: view.id },
             color: 'slate',
+            confirm: 'Reject this compiled brief? The decision is journaled.',
           }),
         ])
       : el('GateStatus', { status: view.status }, [view.status]),

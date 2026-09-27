@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
-import { renderReposView, encodeReposCommand } from '../src/adapters/inbound/desktop/views/repos-view.js';
+import {
+  renderReposView,
+  encodeReposCommand,
+} from '../src/adapters/inbound/desktop/views/repos-view.js';
 import type { RepoRootsConfig } from '../src/core/application/ports/outbound/repo-roots.js';
 import type { DiscoveredRepo } from '../src/core/application/use-cases/repos/discover-repos.js';
 import type { RenderTree } from '../src/adapters/inbound/desktop/views/view-types.js';
@@ -43,9 +46,7 @@ describe('renderReposView', () => {
     expect(flatten(tree)).toContain('EmptyState');
     const addRow = findByTag(tree, 'ReposAddRow');
     expect(addRow).toBeDefined();
-    const buttons = (addRow?.children ?? []).filter(
-      (c): c is RenderTree => typeof c !== 'string',
-    );
+    const buttons = (addRow?.children ?? []).filter((c): c is RenderTree => typeof c !== 'string');
     expect(buttons.map((b) => b.props?.['command'])).toEqual(['pickfolders', 'defaultfolder']);
   });
 
@@ -64,7 +65,9 @@ describe('renderReposView', () => {
     const tree = renderReposView({ roots, repos: [] });
     const rows = findAllByTag(tree, 'ReposRootRow');
     const buttonLabels = (row: RenderTree): string[] =>
-      findAllByTag(row, 'Button').map((b) => (typeof b.children?.[0] === 'string' ? b.children[0] : ''));
+      findAllByTag(row, 'Button').map((b) =>
+        typeof b.children?.[0] === 'string' ? b.children[0] : '',
+      );
     expect(buttonLabels(rows[0]!)).toEqual(['↓', 'Remove']);
     expect(buttonLabels(rows[1]!)).toEqual(['↑', '↓', 'Remove']);
     expect(buttonLabels(rows[2]!)).toEqual(['↑', 'Remove']);
@@ -74,9 +77,7 @@ describe('renderReposView', () => {
     const roots: RepoRootsConfig = { roots: [{ path: '/a' }, { path: '/b' }] };
     const tree = renderReposView({ roots, repos: [] });
     const [firstRow] = findAllByTag(tree, 'ReposRootRow');
-    const downButton = findAllByTag(firstRow!, 'Button').find(
-      (b) => b.children?.[0] === '↓',
-    );
+    const downButton = findAllByTag(firstRow!, 'Button').find((b) => b.children?.[0] === '↓');
     const raw = downButton?.props?.['command'] as string;
     expect(raw.startsWith('reposcmd:')).toBe(true);
     const decoded = JSON.parse(decodeURIComponent(raw.slice('reposcmd:'.length)));
@@ -101,6 +102,8 @@ describe('renderReposView', () => {
     const raw = removeButton?.props?.['command'] as string;
     const decoded = JSON.parse(decodeURIComponent(raw.slice('reposcmd:'.length)));
     expect(decoded).toEqual({ kind: 'remove-repo-root', path: '/b' });
+    /* #261: dropping a repo root from scope prompts before dispatch */
+    expect(removeButton?.props?.['confirm']).toContain('Remove this folder');
   });
 
   it('renders discovered repos when present', () => {

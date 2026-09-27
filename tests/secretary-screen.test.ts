@@ -133,6 +133,17 @@ describe('renderSecretaryScreen', () => {
     expect(health?.props?.['selectable']).toBeUndefined();
   });
 
+  it('Reject carries the shared confirm prompt; Confirm does not (#261)', () => {
+    const tree = renderSecretaryScreen(RESPONSE);
+    const buttons = findAll(tree, 'Button');
+    const reject = buttons.find((b) => b.props?.['command'] === 'memwrite:reject:mw-1');
+    const approve = buttons.find((b) => b.props?.['command'] === 'memwrite:confirm:mw-1');
+    /* rejecting silently discards a proposal — prompt; the Confirm button
+     * itself is the user's gate, so it stays single-click */
+    expect(reject?.props?.['confirm']).toContain('Reject this proposed memory write');
+    expect(approve?.props?.['confirm']).toBeUndefined();
+  });
+
   it('renders honest empty states when the surface is empty', () => {
     const tree = renderSecretaryScreen({
       ok: true,

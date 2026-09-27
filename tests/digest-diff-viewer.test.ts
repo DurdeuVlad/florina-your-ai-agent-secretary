@@ -346,6 +346,17 @@ describe('renderDigestDiffViewer', () => {
     expect(split).toHaveLength(1);
   });
 
+  it('the toolbar Create PR carries the shared confirm prompt (#261)', () => {
+    const data = viewerModel.buildView(makeDigest(), makeDiff());
+    const tree = renderDigestDiffViewer(data) as unknown as RenderTreeLike;
+    const prBtn = findNodes(
+      tree,
+      (n) => n.tag === 'Button' && n.props?.command === `create-pr:${data.taskId}`,
+    )[0];
+    expect(prBtn).toBeDefined();
+    expect(prBtn.props!.confirm).toContain('pull request');
+  });
+
   it('renders a DigestPane on the left and a DiffPane on the right', () => {
     const data = viewerModel.buildView(makeDigest(), makeDiff());
     const tree = renderDigestDiffViewer(data) as unknown as RenderTreeLike;

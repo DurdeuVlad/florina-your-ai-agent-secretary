@@ -109,6 +109,8 @@ describe('renderPrefsScreen', () => {
       action: 'remove-rule',
       provider: 'codex',
     });
+    /* #261: revoking a journaled rule prompts first */
+    expect(revoke!.props?.['confirm']).toContain('Revoke this routing rule');
   });
 
   it('encodes Revoke deny with provider/model/project scope', () => {
@@ -125,6 +127,8 @@ describe('renderPrefsScreen', () => {
       model: 'gemini-2.5-pro',
       projectId: 'payments-api',
     });
+    /* #261: removing a deny widens what agents may do — prompt first */
+    expect(revoke!.props?.['confirm']).toContain('denied rule');
   });
 
   it('carries the full rule payload on the Edit verb for the inline form', () => {

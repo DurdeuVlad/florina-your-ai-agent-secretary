@@ -224,9 +224,16 @@ function renderDigestActions(view: DigestViewData): RenderTree {
     el('Button', { command: `open-diff:${view.taskId}`, variant: 'ghost', size: 'sm' }, [
       text('Open diff'),
     ]),
-    el('Button', { command: `create-pr:${view.taskId}`, variant: 'primary', size: 'sm' }, [
-      text('Create PR'),
-    ]),
+    el(
+      'Button',
+      {
+        command: `create-pr:${view.taskId}`,
+        variant: 'primary',
+        size: 'sm',
+        confirm: 'Create a pull request for this work? The PR is created on the remote.',
+      },
+      [text('Create PR')],
+    ),
     el('Button', { command: `accept:${view.taskId}`, variant: 'ghost', size: 'sm' }, [
       text('Accept'),
     ]),

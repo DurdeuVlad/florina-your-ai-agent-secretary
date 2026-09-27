@@ -7,6 +7,7 @@
  * the socket and pushes trees/status; commands travel the other way.
  */
 import { mount } from './tree-renderer.js';
+import { confirmGate } from './command-gate.js';
 import { createMicCapture } from './audio-capture.js';
 import { createPlayback } from './audio-playback.js';
 
@@ -224,6 +225,12 @@ document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-command]');
   if (!btn || !bridge) return;
   const cmd = btn.dataset.command;
+  /* shared confirm gate (issue #261): data-confirm prompts before
+   * dispatch — cancel sends nothing, confirm sends exactly the encoded
+   * command. Placed first so it also guards any renderer-only verb that
+   * ever carries the attribute. Covers the former confirmPromote flag
+   * (#224). */
+  if (!confirmGate(btn)) return;
   /* renderer-only verbs: open the inline preference forms (#128) */
   if (cmd.startsWith('prefedit:')) {
     openPrefEditor(btn.closest('.card'), JSON.parse(decodeURIComponent(cmd.slice(9))));
@@ -240,10 +247,6 @@ document.addEventListener('click', (e) => {
   }
   if (cmd.startsWith('ideacompile:')) {
     openIdeaCompiler(btn.closest('.card'), cmd.slice('ideacompile:'.length));
-    return;
-  }
-  /* inline memory Promote (issue #224): widens scope to global, confirm first */
-  if (btn.dataset.confirmPromote && !confirm('Promote this rule to global scope?')) {
     return;
   }
   void bridge.command(cmd).then((res) => {
@@ -1027,6 +1030,8 @@ function inspMoveRow(d) {
 function inspActivate() {
   const row = inspRows()[inspSel];
   if (row && row.dataset.command && bridge) {
+    /* #261: the same confirm gate guards keyboard dispatch */
+    if (!confirmGate(row)) return;
     void bridge.command(row.dataset.command).then((res) => {
       if (res && res.ok === false) toast(res.error || 'command failed');
     });
@@ -1086,7 +1091,9 @@ document.addEventListener('keydown', (e) => {
       const primary = c && c.querySelector('button:not(.ghost):not(.danger)');
       if (primary) primary.click();
       else if (c && c.dataset.command && bridge) {
-        /* selectable rows (e.g. task rows) activate their command */
+        /* selectable rows (e.g. task rows) activate their command —
+         * through the same confirm gate (#261) */
+        if (!confirmGate(c)) break;
         void bridge.command(c.dataset.command);
       }
       break;

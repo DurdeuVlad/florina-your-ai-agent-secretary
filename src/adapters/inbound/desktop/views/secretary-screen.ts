@@ -108,7 +108,15 @@ function memoryCard(w: PendingMemoryWrite): RenderTree {
     ]),
     el('PrefActions', {}, [
       el('Button', { command: `memwrite:confirm:${w.id}` }, ['Confirm']),
-      el('Button', { variant: 'danger', command: `memwrite:reject:${w.id}` }, ['Reject']),
+      el(
+        'Button',
+        {
+          variant: 'danger',
+          command: `memwrite:reject:${w.id}`,
+          confirm: 'Reject this proposed memory write? The proposal is discarded.',
+        },
+        ['Reject'],
+      ),
     ]),
   ]);
 }

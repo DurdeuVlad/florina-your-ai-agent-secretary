@@ -71,15 +71,29 @@ function memoryRow(row: MemoryRowInput): RenderTree {
   const { item } = row;
   const actions: RenderTree[] = [];
   if (row.forgetCommand !== undefined) {
-    actions.push(el('Button', { variant: 'ghost', command: encodeMemoryCommand(row.forgetCommand) }, ['Forget']));
-  }
-  if (row.promoteCommand !== undefined) {
-    // Client confirms before sending (issue #224: "never silent") — the
-    // command carries `confirm: 'promote'` so app.js knows to prompt.
     actions.push(
       el(
         'Button',
-        { variant: 'ghost', command: encodeMemoryCommand(row.promoteCommand), confirmPromote: true },
+        {
+          variant: 'ghost',
+          command: encodeMemoryCommand(row.forgetCommand),
+          confirm: 'Forget this memory? It is removed from storage; the action is journaled.',
+        },
+        ['Forget'],
+      ),
+    );
+  }
+  if (row.promoteCommand !== undefined) {
+    // Client confirms before sending (issue #224: "never silent") — now
+    // via the shared data-confirm gate (#261).
+    actions.push(
+      el(
+        'Button',
+        {
+          variant: 'ghost',
+          command: encodeMemoryCommand(row.promoteCommand),
+          confirm: 'Promote this rule to global scope?',
+        },
         ['Promote to global'],
       ),
     );
@@ -92,10 +106,21 @@ function memoryRow(row: MemoryRowInput): RenderTree {
       el('MemoryMeta', {}, [
         el('Chip', { variant: 'slate' }, [item.kind]),
         el('Chip', { variant: 'slate' }, [scopeLabel(item.scope)]),
-        el('Chip', { variant: item.provenance === 'explicit' ? 'green' : 'amber' }, [item.provenance]),
-        el('Chip', { variant: item.confidence === 'high' ? 'green' : item.confidence === 'medium' ? 'amber' : 'slate' }, [
-          `confidence: ${item.confidence}`,
+        el('Chip', { variant: item.provenance === 'explicit' ? 'green' : 'amber' }, [
+          item.provenance,
         ]),
+        el(
+          'Chip',
+          {
+            variant:
+              item.confidence === 'high'
+                ? 'green'
+                : item.confidence === 'medium'
+                  ? 'amber'
+                  : 'slate',
+          },
+          [`confidence: ${item.confidence}`],
+        ),
         ...(item.status !== 'active' ? [el('Chip', { variant: 'amber' }, [item.status])] : []),
       ]),
       ...(actions.length > 0 ? [el('MemoryActions', {}, actions)] : []),
@@ -110,17 +135,13 @@ function memoryRow(row: MemoryRowInput): RenderTree {
  * with nothing under them, not an error.
  */
 export function renderMemorySettingsView(rows: readonly MemoryRowInput[]): RenderTree {
-  const filterBar = el(
-    'MemoryFilterBar',
-    {},
-    [
-      el('MemoryFilterChip', { filterKind: 'scope', value: '' }, ['All scopes']),
-      el('MemoryFilterChip', { filterKind: 'scope', value: 'global' }, ['Global']),
-      el('MemoryFilterChip', { filterKind: 'scope', value: 'project' }, ['Project']),
-      el('MemoryFilterChip', { filterKind: 'kind', value: '' }, ['All kinds']),
-      ...ALL_KINDS.map((k) => el('MemoryFilterChip', { filterKind: 'kind', value: k }, [k])),
-    ],
-  );
+  const filterBar = el('MemoryFilterBar', {}, [
+    el('MemoryFilterChip', { filterKind: 'scope', value: '' }, ['All scopes']),
+    el('MemoryFilterChip', { filterKind: 'scope', value: 'global' }, ['Global']),
+    el('MemoryFilterChip', { filterKind: 'scope', value: 'project' }, ['Project']),
+    el('MemoryFilterChip', { filterKind: 'kind', value: '' }, ['All kinds']),
+    ...ALL_KINDS.map((k) => el('MemoryFilterChip', { filterKind: 'kind', value: k }, [k])),
+  ]);
 
   if (rows.length === 0) {
     return el('MemorySettingsView', {}, [

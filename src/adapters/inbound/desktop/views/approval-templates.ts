@@ -146,7 +146,16 @@ export function renderApprovalActions(card: ApprovalCardData): RenderTree {
       },
       [text(card.oneClickAllowed ? 'Allow once' : 'Confirm visually')],
     ),
-    el('Button', { command: denyCommand, variant: 'danger', size: 'sm' }, [text('Deny')]),
+    el(
+      'Button',
+      {
+        command: denyCommand,
+        variant: 'danger',
+        size: 'sm',
+        confirm: 'Deny this request? The denial is journaled.',
+      },
+      [text('Deny')],
+    ),
     el('Button', { command: inspectCommand, variant: 'ghost', size: 'sm' }, [text('Inspect')]),
   ]);
 }

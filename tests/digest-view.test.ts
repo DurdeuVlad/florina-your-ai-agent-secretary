@@ -540,6 +540,8 @@ describe('digest template functions', () => {
     expect(serialized).toContain('open-diff:add-pagination');
     expect(serialized).toContain('create-pr:add-pagination');
     expect(serialized).toContain('accept:add-pagination');
+    /* #261: the create-pr button carries a confirm prompt */
+    expect(serialized).toContain('Create a pull request for this work');
   });
 });
 

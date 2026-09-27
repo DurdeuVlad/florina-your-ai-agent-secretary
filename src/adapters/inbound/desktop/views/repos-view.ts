@@ -24,7 +24,10 @@
  * Preferences/Memory sections already message "nothing configured yet".
  */
 import type { DiscoveredRepo } from '../../../../core/application/use-cases/repos/discover-repos.js';
-import type { RepoRoot, RepoRootsConfig } from '../../../../core/application/ports/outbound/repo-roots.js';
+import type {
+  RepoRoot,
+  RepoRootsConfig,
+} from '../../../../core/application/ports/outbound/repo-roots.js';
 import type {
   MoveRepoRootCommand,
   RemoveRepoRootCommand,
@@ -56,7 +59,15 @@ function rootRow(root: RepoRoot, index: number, total: number): RenderTree {
   }
   const removeCmd: RemoveRepoRootCommand = { kind: 'remove-repo-root', path: root.path };
   actions.push(
-    el('Button', { variant: 'ghost', command: encodeReposCommand(removeCmd) }, ['Remove']),
+    el(
+      'Button',
+      {
+        variant: 'ghost',
+        command: encodeReposCommand(removeCmd),
+        confirm: 'Remove this folder from Florina’s scope? It can be re-added later.',
+      },
+      ['Remove'],
+    ),
   );
   return el('ReposRootRow', { path: root.path, priority: index }, [
     el('ReposRootPriority', {}, [String(index + 1)]),
@@ -89,9 +100,7 @@ export function renderReposView(input: ReposViewInput): RenderTree {
   if (input.roots.roots.length === 0) {
     return el('ReposView', {}, [
       addRow,
-      el('EmptyState', {}, [
-        el('EmptyHint', {}, ['add a folder so Florina can find your repos']),
-      ]),
+      el('EmptyState', {}, [el('EmptyHint', {}, ['add a folder so Florina can find your repos'])]),
     ]);
   }
 

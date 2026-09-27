@@ -149,6 +149,11 @@ describe('renderIdeasScreen', () => {
       briefId: 'brief-1',
       confirmedBy: 'desktop',
     });
+    /* #261: the DEC-033 delegation commit prompts — approving spawns agent work */
+    const approveBtn = findAll(tree, 'Button').find((b) =>
+      String(b.props?.['command']).startsWith('ideacmd:'),
+    );
+    expect(approveBtn?.props?.['confirm']).toContain('Approve this brief');
   });
 
   it('hides the awaiting section when no draft briefs exist', () => {

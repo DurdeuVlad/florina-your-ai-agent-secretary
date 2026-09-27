@@ -178,7 +178,12 @@ function actionsFor(item: AttentionItemView): RenderTree[] {
     case 'ApprovalRequest':
       return [
         actionButton('Allow once', `approve:${item.id}`, 'primary'),
-        actionButton('Deny', `deny:${item.id}`, 'danger'),
+        actionButton(
+          'Deny',
+          `deny:${item.id}`,
+          'danger',
+          'Deny this request? The denial is journaled.',
+        ),
         actionButton('Inspect', `inspect:${item.id}`, 'ghost'),
       ];
     case 'FailedRun':
@@ -189,13 +194,23 @@ function actionsFor(item: AttentionItemView): RenderTree[] {
     case 'DirtyWorktree':
       return [
         actionButton('Inspect', `inspect:${item.id}`, 'ghost'),
-        actionButton('Prune', `prune:${item.id}`, 'danger'),
+        actionButton(
+          'Prune',
+          `prune:${item.id}`,
+          'danger',
+          'Prune this worktree? Only clean worktrees can be removed; the action is journaled.',
+        ),
       ];
     case 'Digest':
       return [
         actionButton('Read digest', `digest:${item.id}`, 'primary'),
         actionButton('Open diff', `diff:${item.id}`, 'ghost'),
-        actionButton('Create PR', `pr:${item.id}`, 'ghost'),
+        actionButton(
+          'Create PR',
+          `pr:${item.id}`,
+          'ghost',
+          'Create a pull request for this work? The PR is created on the remote.',
+        ),
       ];
     case 'IdleAgent':
     case 'StaleTask':
@@ -206,13 +221,19 @@ function actionsFor(item: AttentionItemView): RenderTree[] {
   }
 }
 
-/** Build an action button node with a serializable command identifier. */
+/** Build an action button node with a serializable command identifier.
+ * `confirm` attaches a data-confirm prompt the dispatcher gates on. */
 function actionButton(
   label: string,
   command: string,
   variant: 'primary' | 'danger' | 'ghost',
+  confirm?: string,
 ): RenderTree {
-  return el('Button', { command, variant, size: 'sm' }, [text(label)]);
+  return el(
+    'Button',
+    { command, variant, size: 'sm', ...(confirm !== undefined ? { confirm } : {}) },
+    [text(label)],
+  );
 }
 
 /** Build a filter chip node with a serializable clear command. */
