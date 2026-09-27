@@ -824,3 +824,205 @@ button.danger:hover {
 .activity-drawer .taskrow {
   margin-bottom: 8px;
 }
+
+/* ------------------------------------------------------------------ *
+ * Real-app parity: styles below twin rules that live in the shipped    *
+ * renderer (src/adapters/inbound/desktop/renderer/index.html +         *
+ * tokens.css) but were missing here. Keep twins in sync when the       *
+ * renderer changes.                                                    *
+ * ------------------------------------------------------------------ */
+
+/* Nav entries are anchors so mockups are clickable (DEC-043 five-item
+ * IA); the real nav uses .navitem[data-view] divs. */
+a.navitem,
+a.worksubtab {
+  text-decoration: none;
+}
+.navitem:focus-visible,
+.worksubtab:focus-visible,
+.gallery a:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Work sub-tabs — twin of .worksubnav/.worksubtab in tokens.css
+ * (issue #220; Tasks/Fleet/Ideas live under one Work nav item). */
+.worksubnav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.worksubtab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.worksubtab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* Empty state — twin of .empty/.empty-big/.empty-hint in index.html. */
+.empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--muted);
+}
+.empty .empty-big {
+  display: block;
+  font-size: 24px;
+  color: var(--border);
+  margin-bottom: 8px;
+}
+.empty .empty-hint {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* j/k selection outline — twin of .card.sel / .row.kbsel in index.html. */
+.card.sel {
+  outline: 1px solid var(--accent);
+}
+
+/* Condensed inspector rows, fidelity notice, done status word —
+ * twins of index.html rules (.col .row.cond, .fidelity, .stat.done,
+ * .icon). */
+.stat.done {
+  color: var(--muted);
+}
+.icon {
+  font-size: 13px;
+}
+.col .row.cond {
+  opacity: 0.62;
+}
+.fidelity {
+  margin: 10px 14px 0;
+  padding: 7px 10px;
+  border: 1px dashed var(--amber);
+  border-radius: var(--radius-sm);
+  color: var(--amber);
+  font-size: 11.5px;
+}
+.col .mono {
+  padding: 12px 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* Header PTT pill — twin of .hud.pill in index.html (the floating
+ * overlay was merged into the header: compact, no shadow). */
+.hud.pill {
+  width: auto;
+  padding: 6px 14px 6px 8px;
+  box-shadow: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.hud.pill .ring {
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
+}
+.hud.pill .hudtext {
+  max-width: 240px;
+}
+.hud.pill .hudtext span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Inline add-bars, journal/repo search row, desktop-settings card,
+ * memory filter chips — twins of index.html preferences/history rules. */
+.pref-addbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+.pref-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pref-addform {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pref-form input,
+.pref-addform input,
+.pref-addform textarea,
+.pref-addform select,
+.desk-row select,
+.desk-row input[type='text'] {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+}
+.pref-addform textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+.pref-form input:focus,
+.pref-addform input:focus,
+.pref-addform textarea:focus,
+.pref-addform select:focus {
+  border-color: var(--accent);
+}
+.historysearch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.historysearch input {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+}
+.historysearch input:focus {
+  border-color: var(--accent);
+}
+.historysearch input[type='text'] {
+  flex: 1;
+}
+.historysearch input[type='date'] {
+  color-scheme: dark;
+}
+.desk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.desk-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.desk-check input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: auto;
+}

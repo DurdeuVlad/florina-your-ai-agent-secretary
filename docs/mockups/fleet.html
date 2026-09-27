@@ -2,83 +2,92 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Florina — Fleet & Quota (mockup)</title>
+    <title>Florina — Work · Fleet (mockup)</title>
     <link rel="stylesheet" href="mockup.css" />
   </head>
   <body>
     <div class="shell">
       <nav>
         <div class="logo">Flor<em>ina</em></div>
-        <div class="navitem">✳ Chat</div>
-        <div class="navitem">◈ Inbox<span class="navbadge">3</span></div>
-        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-        <div class="navitem active">◔ Fleet</div>
-        <div class="navitem">◇ Ideas</div>
-        <div class="navitem">◍ Preferences</div>
-        <div class="navitem">☰ Secretary</div>
+        <a class="navitem" href="chat.html">✳ Florina</a>
+        <a class="navitem" href="inbox.html">◈ Attention<span class="navbadge">3</span></a>
+        <a class="navitem active" href="inspector.html" aria-current="page"
+          >◧ Work<span class="navbadge">5</span></a
+        >
+        <a class="navitem" href="history.html">▤ History</a>
+        <a class="navitem" href="preferences.html">◍ Settings</a>
         <div class="sidefoot">
           <div class="statusline"><span class="dot on"></span>daemon connected</div>
         </div>
       </nav>
       <main>
         <header>
-          <h1>Fleet & Quota</h1>
-          <span class="sub">provider capacity · routing decisions</span>
+          <h1>Work</h1>
+          <span class="sub">delegated work and its state</span>
+          <span class="spacer"></span>
+          <div class="hud pill" title="Push to talk">
+            <div class="ring">🎙</div>
+            <div class="hudtext">
+              <b>Ctrl+Space to talk</b><span>or click — daemon connected</span>
+            </div>
+          </div>
         </header>
         <div class="content">
           <div class="column">
+            <div class="worksubnav">
+              <a class="worksubtab" href="inspector.html">Tasks</a>
+              <button class="worksubtab active">Fleet</button>
+              <a class="worksubtab" href="ideas.html">Ideas</a>
+            </div>
+
             <div class="sect">Providers <span class="n">4</span></div>
 
             <div class="card">
               <div class="top">
-                <span class="kind">codex</span><span class="chip green">available</span
-                ><span class="chip">tier A</span>
+                <span class="kind">codex</span><span class="chip green">available</span>
               </div>
-              <div class="summary">62% of window used · resets 18:00 (3h 58m)</div>
-              <div class="bar" style="margin-top: 10px"><i style="width: 62%"></i></div>
-              <div class="meta">active: invoice-pagination · florina-branding</div>
+              <div class="summary">62% of window used · resets 18:00</div>
+              <div class="bar"><i style="width: 62%"></i></div>
             </div>
 
             <div class="card">
               <div class="top">
-                <span class="kind">claude-code</span><span class="chip green">available</span
-                ><span class="chip">tier B</span>
+                <span class="kind">claude-code</span><span class="chip green">available</span>
               </div>
               <div class="summary">31% of window used · resets 17:00</div>
-              <div class="bar" style="margin-top: 10px"><i style="width: 31%"></i></div>
-              <div class="meta">active: oauth-migration</div>
+              <div class="bar"><i style="width: 31%"></i></div>
             </div>
 
             <div class="card">
               <div class="top">
-                <span class="kind">gemini</span><span class="chip red">exhausted</span
-                ><span class="chip">tier C</span>
+                <span class="kind">gemini</span><span class="chip red">exhausted</span>
               </div>
-              <div class="summary">quota dry — resets <b>14:32</b> (28m)</div>
-              <div class="bar" style="margin-top: 10px"><i class="dry" style="width: 97%"></i></div>
-              <div class="meta">
-                parked: image-pipeline · auto-resume at reset · routed to codex meanwhile
-              </div>
+              <div class="summary">quota dry — resets 14:32</div>
+              <div class="bar"><i class="dry" style="width: 97%"></i></div>
             </div>
 
             <div class="card">
               <div class="top">
-                <span class="kind">devin</span><span class="chip green">available</span
-                ><span class="chip">tier C · acp</span>
+                <span class="kind">devin</span><span class="chip green">available</span>
               </div>
-              <div class="summary">subscription pooled · no window pressure</div>
-              <div class="bar" style="margin-top: 10px"><i style="width: 12%"></i></div>
-              <div class="meta">active: schema-cleanup (manager dispatch)</div>
+              <div class="summary">12% of window used</div>
+              <div class="bar"><i style="width: 12%"></i></div>
             </div>
 
-            <div class="sect">Recent routing decisions</div>
+            <div class="sect">Parked <span class="n">1</span></div>
             <div class="taskrow">
-              <span class="obj">image-pipeline → codex</span
-              ><span class="stat">gemini exhausted · failover, same worktree</span>
+              <b>image-pipeline</b>
+              <div class="t">resumes 14:32 · gemini quota dry</div>
+            </div>
+
+            <div class="sect">Recent routing decisions <span class="n">2</span></div>
+            <div class="taskrow">
+              <b>image-pipeline → codex — failover, same worktree</b>
+              <div class="t">14:22</div>
             </div>
             <div class="taskrow">
-              <span class="obj">schema-cleanup → devin</span
-              ><span class="stat">preference rule: devin for migrations</span>
+              <b>schema-cleanup → devin — preference rule: devin for migrations</b>
+              <div class="t">13:58</div>
             </div>
           </div>
         </div>

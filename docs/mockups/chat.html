@@ -2,33 +2,42 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Florina — Chat (mockup)</title>
+    <title>Florina — Home (mockup)</title>
     <link rel="stylesheet" href="mockup.css" />
   </head>
   <body>
     <div class="shell">
       <nav>
         <div class="logo">Flor<em>ina</em></div>
-        <div class="navitem active">✳ Chat</div>
-        <div class="navitem">◈ Inbox<span class="navbadge">2</span></div>
-        <div class="navitem">◧ Tasks<span class="navbadge zero">5</span></div>
-        <div class="navitem">◔ Fleet</div>
-        <div class="navitem">◇ Ideas</div>
-        <div class="navitem">◍ Preferences</div>
-        <div class="navitem">☰ Secretary</div>
+        <a class="navitem active" href="chat.html" aria-current="page">✳ Florina</a>
+        <a class="navitem" href="inbox.html">◈ Attention<span class="navbadge">3</span></a>
+        <a class="navitem" href="inspector.html">◧ Work<span class="navbadge">5</span></a>
+        <a class="navitem" href="history.html">▤ History</a>
+        <a class="navitem" href="preferences.html">◍ Settings</a>
         <div class="sidefoot">
           <div class="statusline"><span class="dot on"></span>daemon connected</div>
         </div>
       </nav>
       <main>
         <header>
-          <h1>Chat</h1>
+          <h1>Florina</h1>
           <span class="sub">one conversation with your Secretary</span>
           <span class="spacer"></span>
           <button class="ghost drawer-toggle open" title="Toggle live activity/diff panel">
             Activity
           </button>
-          <button class="ghost">Clear</button>
+          <button
+            class="ghost"
+            title="Clear the visible conversation? History stays in the journal."
+          >
+            Clear
+          </button>
+          <div class="hud pill" title="Push to talk">
+            <div class="ring">🎙</div>
+            <div class="hudtext">
+              <b>Ctrl+Space to talk</b><span>or click — daemon connected</span>
+            </div>
+          </div>
         </header>
         <div class="content chatwrap">
           <div class="chat-body">
@@ -38,9 +47,10 @@
                 Ship a login-rate-limit fix on checkout-refactor — codex if it’s free, claude
                 otherwise.
               </div>
-              <div class="toolrow">▸ list_tasks <span class="ok">ok</span> · 5 tasks</div>
+              <div class="toolrow">▸ list_tasks</div>
               <div class="toolrow">
-                ▸ query_fleet <span class="ok">ok</span> · codex window 12% used
+                ▸ query_fleet <span class="ok">ok</span> ·
+                {"ok":true,"providers":[{"provider":"codex","available":tru…
               </div>
               <div class="msg assistant">
                 <div class="who">Secretary</div>
@@ -53,7 +63,7 @@
                 Approve it — registry.npmjs.org only.
               </div>
               <div class="toolrow">
-                ▸ approve <span class="ok">grant</span> · network · this task only
+                ▸ approve <span class="ok">ok</span> · {"granted":true,"scope":"this-task"}
               </div>
               <div class="msg assistant">
                 <div class="who">Secretary</div>
@@ -69,12 +79,12 @@
                 <div class="taskrow">
                   <div class="obj">checkout-refactor</div>
                   <span class="chip">codex</span>
-                  <span class="stat">editing</span>
+                  <span class="stat">running</span>
                 </div>
                 <div class="taskrow">
                   <div class="obj">oauth-migration</div>
                   <span class="chip">claude-code</span>
-                  <span class="stat">tests running</span>
+                  <span class="stat">running</span>
                 </div>
               </div>
             </div>
@@ -82,18 +92,23 @@
           <div class="composer">
             <div class="dictation"><b>listening…</b> while you’re at it bump the</div>
             <div class="row">
-              <button class="mic listening" title="Dictate">🎙</button>
+              <button class="mic listening" title="Dictate — speech becomes editable text here">
+                🎙
+              </button>
               <textarea
                 rows="2"
                 placeholder="Message the Secretary — Enter to send, Shift+Enter for a newline"
               >
 While you're at it bump the</textarea>
-              <button class="voicemode" title="Voice mode">🔊 voice</button>
+              <button
+                class="voicemode"
+                title="Voice mode — two-way spoken turns with the Secretary"
+              >
+                🔊 voice
+              </button>
               <button class="send">Send</button>
             </div>
-            <div class="hint">
-              Ctrl+Space dictation · Enter sends · history persists across restarts
-            </div>
+            <div class="hint">Enter sends · history persists across restarts</div>
           </div>
         </div>
       </main>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Florina — History (mockup)</title>
+    <link rel="stylesheet" href="mockup.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="logo">Flor<em>ina</em></div>
+        <a class="navitem" href="chat.html">✳ Florina</a>
+        <a class="navitem" href="inbox.html">◈ Attention<span class="navbadge">3</span></a>
+        <a class="navitem" href="inspector.html">◧ Work<span class="navbadge">5</span></a>
+        <a class="navitem active" href="history.html" aria-current="page">▤ History</a>
+        <a class="navitem" href="preferences.html">◍ Settings</a>
+        <div class="sidefoot">
+          <div class="statusline"><span class="dot on"></span>daemon connected</div>
+        </div>
+      </nav>
+      <main>
+        <header>
+          <h1>History</h1>
+          <span class="sub">completed work, resolved decisions, and evidence trails</span>
+          <span class="spacer"></span>
+          <div class="hud pill" title="Push to talk">
+            <div class="ring">🎙</div>
+            <div class="hudtext">
+              <b>Ctrl+Space to talk</b><span>or click — daemon connected</span>
+            </div>
+          </div>
+        </header>
+        <div class="content">
+          <div class="column">
+            <div class="sect">Completed work</div>
+            <div class="taskrow">
+              <span class="obj">password-reset</span><span class="chip">codex</span
+              ><span class="stat">completed</span
+              ><span class="stat" style="color: var(--accent)">Prove it</span>
+            </div>
+            <div class="taskrow">
+              <span class="obj">docs-cleanup</span><span class="chip">gemini</span
+              ><span class="stat">reviewed</span
+              ><span class="stat" style="color: var(--accent)">Prove it</span>
+            </div>
+            <div class="taskrow">
+              <span class="obj">preference-profile</span><span class="chip">devin</span
+              ><span class="stat">accepted</span
+              ><span class="stat" style="color: var(--accent)">Prove it</span>
+            </div>
+
+            <div class="sect">Resolved decisions</div>
+            <div class="taskrow">
+              <span class="obj">ApprovalRequest</span><span class="stat">task task_41</span>
+            </div>
+            <div class="taskrow">
+              <span class="obj">Digest</span><span class="stat">task task_38</span>
+            </div>
+
+            <div class="sect">Search journal</div>
+            <div class="historysearch">
+              <input type="text" placeholder="text (e.g. task id, kind, error)" />
+              <input type="date" title="since" />
+              <input type="date" title="until" />
+              <button>Search</button>
+            </div>
+            <!-- Journal search results reuse the inspector's
+                 renderTimelineRow — .row + b + .t, unstyled outside a
+                 .col, same as the real renderer leaves them. -->
+            <div class="row">
+              <b>tool.test_run</b>
+              <div class="t">14:02:10 · vitest run</div>
+            </div>
+            <div class="row">
+              <b>task.completed</b>
+              <div class="t">14:24:55 · password-reset</div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
