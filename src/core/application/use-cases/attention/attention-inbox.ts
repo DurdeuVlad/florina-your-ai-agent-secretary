@@ -149,6 +149,22 @@ export class AttentionInbox {
   }
 
   /**
+   * Merge fields into an item's payload in place.
+   *
+   * Used when an open item accumulates new evidence — issue #264 folds
+   * each failed journal row in a burst into the card's retained
+   * `writes` list so collapsing the storm never drops a write.
+   *
+   * @returns `true` if the item was found and updated.
+   */
+  mergePayload(id: string, patch: Record<string, unknown>): boolean {
+    const item = this.items.get(id);
+    if (item === undefined) return false;
+    Object.assign(item.payload as Record<string, unknown>, patch);
+    return true;
+  }
+
+  /**
    * Remove an item from the inbox entirely.
    *
    * Unlike {@link resolve}, this deletes the item rather than marking it

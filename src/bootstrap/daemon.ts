@@ -64,7 +64,10 @@ import {
   type ApprovalGate,
 } from '../core/application/use-cases/attention/attention-aggregator.js';
 import { GrantService } from '../core/application/use-cases/capabilities/grant-service.js';
-import { EventJournalWriter } from '../core/application/use-cases/journal/event-journal-writer.js';
+import {
+  EventJournalWriter,
+  isPermanentJournalError,
+} from '../core/application/use-cases/journal/event-journal-writer.js';
 import { VerificationGate } from '../core/application/use-cases/verification/verification-gate.js';
 import { ContextHealthMonitor } from '../core/application/use-cases/context/context-health-monitor.js';
 import {
@@ -251,7 +254,8 @@ export class FlorinaDaemon extends EventEmitter {
       mcpPort: options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort,
       preferenceProfilePath:
         options.preferenceProfilePath ?? path.join(os.homedir(), '.florina', 'preferences.json'),
-      repoRootsPath: options.repoRootsPath ?? path.join(os.homedir(), '.florina', 'repo-roots.json'),
+      repoRootsPath:
+        options.repoRootsPath ?? path.join(os.homedir(), '.florina', 'repo-roots.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
       ...(options.ideasDir !== undefined ? { ideasDir: options.ideasDir } : {}),
       ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
@@ -422,7 +426,19 @@ export class FlorinaDaemon extends EventEmitter {
       // Wire the verification gate (DEC-032, issue #68): a claimed
       // completion surfaces as done only with journaled proof. The gate
       // reads evidence persisted by the journal writer.
-      this.verificationGate = new VerificationGate({ journal: repos.events });
+      this.verificationGate = new VerificationGate({
+        journal: repos.events,
+        // Lazy sink — the aggregator is constructed right after the
+        // gate, so resolve it at failure time, not construction time.
+        onJournalFailure: (err, row) => {
+          this.attentionAggregator?.reportJournalFailure({
+            source: 'verification-gate',
+            error: err instanceof Error ? err.message : String(err),
+            write: row,
+            retryable: !isPermanentJournalError(err),
+          });
+        },
+      });
       this.attentionAggregator = new AttentionAggregator(this.attentionInbox, this.bus, {
         approvalGate,
         verificationGate: this.verificationGate,
@@ -438,10 +454,28 @@ export class FlorinaDaemon extends EventEmitter {
         bus: this.bus,
         // Journaling is best-effort: events for unregistered
         // tasks/sessions can't satisfy the journal's foreign keys and
-        // must not break the publish pipeline. 'error' is only emitted
-        // when a listener exists (emitting it without one throws).
-        onError: (err) => {
-          if (this.listenerCount('error') > 0) this.emit('error', err);
+        // must not break the publish pipeline. But silent is not honest
+        // (issue #264): every failed write becomes a Needs-you item with
+        // the retained row, retryable when the failure is transient.
+        // 'error' is only emitted when a listener exists (emitting it
+        // without one throws). This sink runs inside the publish
+        // pipeline — it must never throw.
+        onError: (err, _event, row) => {
+          try {
+            this.attentionAggregator?.reportJournalFailure({
+              source: 'event-journal',
+              error: err instanceof Error ? err.message : String(err),
+              write: row,
+              retryable: !isPermanentJournalError(err),
+            });
+          } catch {
+            /* the failure sink itself must never break the pipeline */
+          }
+          try {
+            if (this.listenerCount('error') > 0) this.emit('error', err);
+          } catch {
+            /* a throwing 'error' listener is contained too */
+          }
         },
       });
       this.journalWriter.start();

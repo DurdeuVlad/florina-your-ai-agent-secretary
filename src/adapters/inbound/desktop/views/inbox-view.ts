@@ -82,6 +82,11 @@ export const KIND_METADATA: Readonly<Record<AttentionItemKind, DisplayMetadata>>
     color: 'orange',
     label: 'Degraded Context',
   },
+  JournalFailure: {
+    icon: 'alert',
+    color: 'red',
+    label: 'Journal gap',
+  },
   Custom: {
     icon: 'info',
     color: 'slate',
@@ -248,7 +253,9 @@ function matchesViewFilter(item: AttentionItem, filter?: ViewFilter): boolean {
  */
 function deriveTitle(item: AttentionItem): string {
   const kindLabel = KIND_METADATA[item.kind].label;
-  return `${kindLabel} · ${item.taskId}`;
+  // Task-less items (e.g. a journal gap on an event with no task) show
+  // the kind label alone — no dangling separator.
+  return item.taskId === '' ? kindLabel : `${kindLabel} · ${item.taskId}`;
 }
 
 /**

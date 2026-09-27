@@ -46,6 +46,7 @@ import {
   advanceWatermark,
 } from '../resumption/catchup-digest.js';
 import { searchJournalEvents } from '../journal/journal-search.js';
+import { isPermanentJournalError } from '../journal/event-journal-writer.js';
 import type { CatchUpDigest } from '../resumption/catchup-digest.js';
 import type { CatchUpWatermarkPort } from '../../ports/outbound/catchup-watermark.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
@@ -247,6 +248,16 @@ export interface ResolveItemCommand {
 /** Escalate an attention item (boost to Critical priority). */
 export interface EscalateItemCommand {
   readonly kind: 'escalate-item';
+  readonly itemId: string;
+}
+
+/**
+ * Re-attempt a failed journal write (issue #264). A `JournalFailure`
+ * item retains the exact row that failed to insert; this command
+ * re-runs the insert and resolves the item only when the write lands.
+ */
+export interface RetryJournalWriteCommand {
+  readonly kind: 'retry-journal-write';
   readonly itemId: string;
 }
 
@@ -653,6 +664,7 @@ export type Command =
   | AcknowledgeItemCommand
   | ResolveItemCommand
   | EscalateItemCommand
+  | RetryJournalWriteCommand
   | QueryMetricsCommand
   | QueryTaskCommand
   | QueryEventsCommand
@@ -700,6 +712,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'ack-item',
   'resolve-item',
   'escalate-item',
+  'retry-journal-write',
   'query-metrics',
   'query-task',
   'query-events',
@@ -1465,6 +1478,8 @@ export class CommandApi {
         return this.handleResolveItem(command);
       case 'escalate-item':
         return this.handleEscalateItem(command);
+      case 'retry-journal-write':
+        return this.handleRetryJournalWrite(command);
       case 'query-metrics':
         return this.handleQueryMetrics(command);
       case 'query-task':
@@ -1999,6 +2014,87 @@ export class CommandApi {
       return { ok: false, itemId: cmd.itemId, error: `Attention item not found: ${cmd.itemId}` };
     }
     return { ok: true, itemId: cmd.itemId };
+  }
+
+  /**
+   * retry-journal-write (issue #264): re-attempt the insert a
+   * `JournalFailure` item retained. Resolves the item only when the
+   * write actually lands — a permanent failure (or a missing row)
+   * returns a typed error and the item stays open.
+   */
+  private async handleRetryJournalWrite(
+    cmd: RetryJournalWriteCommand,
+  ): Promise<ItemMutationResponse> {
+    if (!cmd.itemId) {
+      return { ok: false, itemId: '', error: 'itemId is required' };
+    }
+    const item = this.attentionInbox.list().find((i) => i.id === cmd.itemId);
+    if (item === undefined) {
+      return { ok: false, itemId: cmd.itemId, error: `Attention item not found: ${cmd.itemId}` };
+    }
+    if (item.kind !== 'JournalFailure') {
+      return {
+        ok: false,
+        itemId: cmd.itemId,
+        error: `item is not a journal failure (kind: ${item.kind})`,
+      };
+    }
+    if (item.status === 'Resolved') {
+      return {
+        ok: false,
+        itemId: cmd.itemId,
+        error: 'item is already resolved — the gap was acknowledged',
+      };
+    }
+    const writes = item.payload['writes'];
+    if (!Array.isArray(writes) || writes.length === 0) {
+      return {
+        ok: false,
+        itemId: cmd.itemId,
+        error: 'item retains no journal row to retry — acknowledge the gap instead',
+      };
+    }
+    // Each retained row keeps its original id: a row that actually landed
+    // before the failure was reported (or landed on a previous retry) is
+    // detected via getById and skipped, never duplicated.
+    const survivors: unknown[] = [];
+    let lastError = '';
+    let anyTransient = false;
+    for (const w of writes) {
+      const row = w as Event;
+      if (typeof row?.id !== 'string') {
+        survivors.push(w);
+        lastError = 'malformed retained row';
+        continue;
+      }
+      try {
+        if (this.eventRepository.getById(row.id) === null) {
+          this.eventRepository.insert(row);
+        }
+      } catch (err) {
+        survivors.push(row);
+        lastError = errorMessage(err);
+        if (!isPermanentJournalError(err)) anyTransient = true;
+      }
+    }
+    if (survivors.length === 0) {
+      this.attentionInbox.resolve(cmd.itemId);
+      return { ok: true, itemId: cmd.itemId };
+    }
+    // Partial/whole failure: keep the card honest — it now represents
+    // exactly the writes still missing, and hides Retry when every
+    // surviving failure is permanent.
+    this.attentionInbox.mergePayload(cmd.itemId, {
+      writes: survivors,
+      reason: lastError,
+      retryable: anyTransient,
+      message: `${survivors.length} of ${writes.length} retained writes still fail: ${lastError}`,
+    });
+    return {
+      ok: false,
+      itemId: cmd.itemId,
+      error: `retry failed: ${survivors.length} of ${writes.length} retained writes did not land — ${lastError}`,
+    };
   }
 
   /** query-metrics: return the current metrics snapshot. */
@@ -2963,46 +3059,48 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
               ? ItemMutationResponse
               : C extends EscalateItemCommand
                 ? ItemMutationResponse
-                : C extends QueryMetricsCommand
-                  ? MetricsResponse
-                  : C extends QueryTaskCommand
-                    ? TaskResponse
-                    : C extends ListTasksCommand
-                      ? TaskListResponse
-                      : C extends PruneWorktreeCommand
-                        ? PruneResponse
-                        : C extends ShutdownCommand
-                          ? ShutdownResponse
-                          : C extends QueryContextHealthCommand
-                            ? ContextHealthResponse
-                            : C extends CreateIdeaCommand | AppendIdeaCommand | PromoteIdeaCommand
-                              ? IdeaResponse
-                              : C extends ListIdeasCommand
-                                ? IdeaListResponse
-                                : C extends ReadIdeaCommand
-                                  ? IdeaReadResponse
-                                  : C extends ListBriefsCommand
-                                    ? BriefListResponse
-                                    : C extends CompileBriefCommand
-                                      ? BriefResponse
-                                      : C extends ConfirmBriefCommand
-                                        ? BriefConfirmResponse
-                                        : C extends ReportVoiceStateCommand
-                                          ? VoiceStateResponse
-                                          : C extends
-                                                UpdatePreferenceCommand | QueryPreferencesCommand
-                                            ? PreferenceResponse
-                                            : C extends GetDigestCommand
-                                              ? DigestResponse
-                                              : C extends CreatePrCommand
-                                                ? CreatePrResponse
-                                                : C extends
-                                                      | AddRepoRootCommand
-                                                      | RemoveRepoRootCommand
-                                                      | MoveRepoRootCommand
-                                                      | QueryReposCommand
-                                                  ? ReposResponse
-                                                  : Response;
+                : C extends RetryJournalWriteCommand
+                  ? ItemMutationResponse
+                  : C extends QueryMetricsCommand
+                    ? MetricsResponse
+                    : C extends QueryTaskCommand
+                      ? TaskResponse
+                      : C extends ListTasksCommand
+                        ? TaskListResponse
+                        : C extends PruneWorktreeCommand
+                          ? PruneResponse
+                          : C extends ShutdownCommand
+                            ? ShutdownResponse
+                            : C extends QueryContextHealthCommand
+                              ? ContextHealthResponse
+                              : C extends CreateIdeaCommand | AppendIdeaCommand | PromoteIdeaCommand
+                                ? IdeaResponse
+                                : C extends ListIdeasCommand
+                                  ? IdeaListResponse
+                                  : C extends ReadIdeaCommand
+                                    ? IdeaReadResponse
+                                    : C extends ListBriefsCommand
+                                      ? BriefListResponse
+                                      : C extends CompileBriefCommand
+                                        ? BriefResponse
+                                        : C extends ConfirmBriefCommand
+                                          ? BriefConfirmResponse
+                                          : C extends ReportVoiceStateCommand
+                                            ? VoiceStateResponse
+                                            : C extends
+                                                  UpdatePreferenceCommand | QueryPreferencesCommand
+                                              ? PreferenceResponse
+                                              : C extends GetDigestCommand
+                                                ? DigestResponse
+                                                : C extends CreatePrCommand
+                                                  ? CreatePrResponse
+                                                  : C extends
+                                                        | AddRepoRootCommand
+                                                        | RemoveRepoRootCommand
+                                                        | MoveRepoRootCommand
+                                                        | QueryReposCommand
+                                                    ? ReposResponse
+                                                    : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the

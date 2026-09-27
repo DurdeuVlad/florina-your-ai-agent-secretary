@@ -32,6 +32,7 @@ import type {
   ApproveCommand,
   AcknowledgeItemCommand,
   ResolveItemCommand,
+  RetryJournalWriteCommand,
   EscalateItemCommand,
   GetDigestCommand,
   InboxFilter,
@@ -161,6 +162,7 @@ Commands:
                               Grant or deny a pending approval
   ack <itemId>               Acknowledge an attention item
   resolve <itemId>           Resolve an attention item
+  retry <itemId>             Re-attempt a journal failure's retained writes
   escalate <itemId>          Escalate an attention item to Critical
   tasks [--status <state>]    List tasks
   task <taskId>               Show task details
@@ -230,6 +232,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdAck(ctx);
     case 'resolve':
       return cmdResolve(ctx);
+    case 'retry':
+      return cmdRetry(ctx);
     case 'escalate':
       return cmdEscalate(ctx);
     case 'tasks':
@@ -370,6 +374,21 @@ async function cmdResolve(ctx: CommandContext): Promise<CommandResult> {
   }
   const r = response as ItemMutationResponse;
   return { exitCode: 0, message: `Item ${r.itemId} resolved.\n` };
+}
+
+/* --- retry (issue #264: re-attempt a journal failure's retained writes) --- */
+async function cmdRetry(ctx: CommandContext): Promise<CommandResult> {
+  const [itemId] = ctx.args.positionals;
+  if (!itemId) {
+    return { exitCode: 1, message: 'Usage: florina retry <itemId>\n' };
+  }
+  const command: RetryJournalWriteCommand = { kind: 'retry-journal-write', itemId };
+  const response = await sendCommand(ctx.deps.client, command);
+  if (!response.ok) {
+    return { exitCode: 1, message: `Retry failed: ${errorOf(response)}\n` };
+  }
+  const r = response as ItemMutationResponse;
+  return { exitCode: 0, message: `Item ${r.itemId} retried — the writes landed.\n` };
 }
 
 /* --- escalate --- */

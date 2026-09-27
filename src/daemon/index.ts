@@ -136,6 +136,7 @@ export type {
   AcknowledgeItemCommand,
   ResolveItemCommand,
   EscalateItemCommand,
+  RetryJournalWriteCommand,
   QueryMetricsCommand,
   QueryTaskCommand,
   ListTasksCommand,

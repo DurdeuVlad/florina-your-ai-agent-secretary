@@ -718,6 +718,27 @@ describe('subcommand dispatch (mocked transport)', () => {
     expect(code).toBe(1);
   });
 
+  it('retry <itemId> sends a retry-journal-write command and exits 0 (#264)', async () => {
+    const response: ItemMutationResponse = { ok: true, itemId: 'attn_j1' };
+    const transport: WebSocketTransport = vi.fn(
+      async () => response,
+    ) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['retry', 'attn_j1'], transport);
+    expect(code).toBe(0);
+    const sentCommand = (transport as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0];
+    expect(sentCommand).toEqual({ kind: 'retry-journal-write', itemId: 'attn_j1' });
+  });
+
+  it('retry exits 1 on a daemon error (e.g. non-JournalFailure item)', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: false,
+      itemId: 'attn_1',
+      error: 'item is not a journal failure',
+    })) as unknown as WebSocketTransport;
+    const code = await mainWithTransport(['retry', 'attn_1'], transport);
+    expect(code).toBe(1);
+  });
+
   it('escalate <itemId> sends an escalate-item command and exits 0', async () => {
     const response: ItemMutationResponse = { ok: true, itemId: 'attn_1' };
     const transport: WebSocketTransport = vi.fn(

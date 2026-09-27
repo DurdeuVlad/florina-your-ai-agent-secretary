@@ -26,6 +26,13 @@ export interface SecretsVaultServiceOptions {
   readonly eventJournal?: EventJournalPort;
   readonly eventBus?: EventPublisherPort;
   readonly now?: () => string;
+  /**
+   * Sink for audit-write failures (issue #264) — a dropped audit row is
+   * a provenance gap, not a soft fail. Receives the error and the exact
+   * journal row that failed to insert so the caller can retain it for
+   * inspection/retry. MUST NOT throw.
+   */
+  readonly onJournalFailure?: (err: unknown, row: Event) => void;
 }
 
 export interface CaptureSecretInput {
@@ -52,12 +59,14 @@ export class SecretsVaultService {
   private readonly vault: SecretsVaultPort;
   private readonly eventJournal?: EventJournalPort;
   private readonly eventBus?: EventPublisherPort;
+  private readonly onJournalFailure?: (err: unknown, row: Event) => void;
   private readonly now: () => string;
 
   constructor(options: SecretsVaultServiceOptions) {
     this.vault = options.vault;
     this.eventJournal = options.eventJournal;
     this.eventBus = options.eventBus;
+    this.onJournalFailure = options.onJournalFailure;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -274,8 +283,15 @@ export class SecretsVaultService {
     if (this.eventJournal) {
       try {
         this.eventJournal.insert(event);
-      } catch {
-        // Defensive: guard against SQLite foreign key or uncommitted context errors
+      } catch (err) {
+        // Defensive: guard against SQLite foreign key or uncommitted
+        // context errors — but surface the drop as an attention item
+        // (#264) rather than silently losing provenance.
+        try {
+          this.onJournalFailure?.(err, event);
+        } catch {
+          /* the sink itself must never break vault operations */
+        }
       }
     }
     if (this.eventBus) {

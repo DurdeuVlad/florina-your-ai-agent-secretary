@@ -38,6 +38,9 @@ const ATTENTION_ITEM_KINDS: readonly AttentionItemKind[] = [
   'IdleAgent',
   'StaleTask',
   'Digest',
+  'UnverifiedCompletion',
+  'DegradedContext',
+  'JournalFailure',
   'Custom',
 ];
 
@@ -309,6 +312,52 @@ describe('renderInboxItem', () => {
     const prune = findNodes(tree, 'Button').find((b) => b.props!['command'] === 'prune:w');
     expect(prune).toBeDefined();
     expect(prune!.props!['confirm']).toContain('Prune this worktree');
+  });
+
+  it('JournalFailure cards offer Retry write + Acknowledge gap + Inspect (#264)', () => {
+    const vm = new InboxViewModel();
+    const view = vm.buildView(
+      inboxOf([
+        item('j', {
+          kind: 'JournalFailure',
+          payload: {
+            reason: 'database is locked',
+            retryable: true,
+            writes: [{ id: 'ev_1', kind: 'AgentProgress' }],
+          },
+        }),
+      ]),
+    );
+    const tree = renderInboxItem(view.groups[0]!.items[0]!);
+    const buttons = findNodes(tree, 'Button');
+    const commands = buttons.map((b) => b.props!['command']);
+    expect(commands).toContain('retry:j');
+    expect(commands).toContain('resolve:j');
+    expect(commands).toContain('inspect:j');
+    /* both journaled-write actions carry confirm prompts (#261 gate) */
+    expect(buttons.find((b) => b.props!['command'] === 'retry:j')!.props!['confirm']).toContain(
+      'journal write',
+    );
+    expect(buttons.find((b) => b.props!['command'] === 'resolve:j')!.props!['confirm']).toContain(
+      'gap',
+    );
+  });
+
+  it('a non-retryable JournalFailure (permanent write error) hides Retry (#264)', () => {
+    const vm = new InboxViewModel();
+    const view = vm.buildView(
+      inboxOf([
+        item('j2', {
+          kind: 'JournalFailure',
+          payload: { reason: 'FOREIGN KEY constraint failed', retryable: false },
+        }),
+      ]),
+    );
+    const buttons = findNodes(renderInboxItem(view.groups[0]!.items[0]!), 'Button');
+    const commands = buttons.map((b) => b.props!['command']);
+    expect(commands).not.toContain('retry:j2');
+    expect(commands).toContain('resolve:j2');
+    expect(commands).toContain('inspect:j2');
   });
 });
 
