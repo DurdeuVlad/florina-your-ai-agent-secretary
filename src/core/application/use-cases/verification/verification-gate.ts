@@ -63,13 +63,21 @@ const EVIDENCE_KINDS: readonly string[] = ['test', 'build', 'lint', 'typecheck',
 
 export interface VerificationGateDeps {
   readonly journal: EventJournalPort;
+  /**
+   * Sink for claim-record insert failures (issue #264) — a dropped
+   * accountability record is a provenance gap, not a soft fail.
+   * Receives the error and the converted journal row. MUST NOT throw.
+   */
+  readonly onJournalFailure?: (err: unknown, row: Event) => void;
 }
 
 export class VerificationGate {
   private readonly journal: EventJournalPort;
+  private readonly onJournalFailure?: (err: unknown, row: Event) => void;
 
   constructor(deps: VerificationGateDeps) {
     this.journal = deps.journal;
+    this.onJournalFailure = deps.onJournalFailure;
   }
 
   /**
@@ -140,12 +148,19 @@ export class VerificationGate {
       summary: UNVERIFIED_CLAIM_SUMMARY,
       evidence: { taskId, sessionId, agentId },
     };
+    const row = supervisorEventToJournalRow(event);
     try {
-      this.journal.insert(supervisorEventToJournalRow(event));
-    } catch {
+      this.journal.insert(row);
+    } catch (err) {
       // Best-effort record: an unregistered session/task cannot satisfy
       // the journal's foreign keys — the assessment and inbox item
-      // still stand without it.
+      // still stand without it. The drop is surfaced as a journal-gap
+      // attention item (#264) rather than silently lost.
+      try {
+        this.onJournalFailure?.(err, row);
+      } catch {
+        /* the sink itself must never break gating */
+      }
       return assessment;
     }
 

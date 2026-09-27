@@ -1005,6 +1005,12 @@ export class DesktopApp {
             : events.map((e, i) => renderTimelineRow(e, i, false)),
       });
     }
+    // Journal-failure actions (issue #264): retry/acknowledge mutate the
+    // inbox without emitting a bus event, so nothing else would refresh
+    // the Needs-you list — pull it now.
+    if (res.ok && (cmd.kind === 'retry-journal-write' || cmd.kind === 'resolve-item')) {
+      this.scheduleRefresh();
+    }
     // Repos search (issue #253): re-render the same Settings > Repos view
     // in place with the narrowed results -- unlike History's search (a
     // separate results list layered over static content), Repos search
@@ -1164,6 +1170,28 @@ export class DesktopApp {
       return { kind: 'memory-reject', writeId: cmd.slice('memwrite:reject:'.length) };
     }
     const [verb, itemId] = cmd.split(':', 2);
+    // `retry:<itemId>` (issue #264): JournalFailure cards retain the
+    // failed journal row in the item payload — translate into the typed
+    // retry command. Other kinds carrying `retry:` (FailedRun) have no
+    // retained write and stay acknowledged no-ops, as before.
+    if (verb === 'retry') {
+      const item = this.state.snapshot().inboxItems.find((i) => i.id === itemId);
+      const writes = item?.payload['writes'];
+      if (item?.kind === 'JournalFailure' && Array.isArray(writes) && writes.length > 0) {
+        return { kind: 'retry-journal-write', itemId: item.id };
+      }
+      return null;
+    }
+    // `resolve:<itemId>` — the acknowledge-the-gap path on JournalFailure
+    // cards (issue #264). Scoped to that kind so other items' lifecycle
+    // stays exactly as before.
+    if (verb === 'resolve') {
+      const item = this.state.snapshot().inboxItems.find((i) => i.id === itemId);
+      if (item?.kind === 'JournalFailure') {
+        return { kind: 'resolve-item', itemId: item.id };
+      }
+      return null;
+    }
     if (verb === 'approve' || verb === 'deny') {
       const item = this.state.snapshot().inboxItems.find((i) => i.id === itemId);
       const approvalId = item?.payload['approvalId'];
@@ -1225,6 +1253,20 @@ export class DesktopApp {
       } else {
         ack({ ok: false, error: `No event at index ${raw.slice(14)}` });
       }
+      return true;
+    }
+    /* Generic attention-card Inspect (`inspect:<itemId>`) — opens the
+     * inspector on the item's task so the journaled evidence around the
+     * item is visible (for a JournalFailure, what did land around the
+     * gap). Resolved items stay inspectable — their task still exists. */
+    if (raw.startsWith('inspect:')) {
+      const itemId = raw.slice('inspect:'.length);
+      const item = this.state.snapshot().inboxItems.find((i) => i.id === itemId);
+      if (item === undefined) {
+        ack({ ok: false, error: `Attention item ${itemId || '?'} not found` });
+        return true;
+      }
+      ack(await this.openInspector(item.taskId));
       return true;
     }
     return false;

@@ -599,5 +599,43 @@ describe('Secrets Vault (issue #172)', () => {
         db.close();
       }
     });
+
+    it('reports the dropped audit row to onJournalFailure instead of swallowing it (#264)', async () => {
+      const { StorageDatabase } =
+        await import('../src/adapters/outbound/persistence/sqlite/database.js');
+      const { EventRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/event.js');
+
+      const db = new StorageDatabase({ path: ':memory:' });
+      await db.open();
+
+      try {
+        const eventRepo = new EventRepository(db.connection);
+        const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+        const failures: { err: unknown; row: unknown }[] = [];
+        const service = new SecretsVaultService({
+          vault,
+          eventJournal: eventRepo,
+          onJournalFailure: (err, row) => {
+            failures.push({ err, row });
+          },
+        });
+
+        await service.captureSecret({
+          name: 'uncommitted-secret',
+          value: 'uncommitted-val',
+          scope: {},
+          context: { taskId: 'non-existent-task', sessionId: 'non-existent-session' },
+        });
+
+        // The write failed silently before; now the sink gets the exact
+        // error + the row that never landed — retained for inspection.
+        expect(failures.length).toBeGreaterThan(0);
+        expect(failures[0]!.err).toBeInstanceOf(Error);
+        expect((failures[0]!.row as { id?: string }).id).toBeTruthy();
+      } finally {
+        db.close();
+      }
+    });
   });
 });

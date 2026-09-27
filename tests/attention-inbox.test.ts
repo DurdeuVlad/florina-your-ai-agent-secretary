@@ -588,6 +588,130 @@ describe('AttentionAggregator', () => {
       expect(items[0].kind).toBe('StaleTask');
       expect(items[0].priority).toBe('Medium');
     });
+
+    it('reportJournalFailure creates a High JournalFailure item retaining the write (issue #264)', () => {
+      const row = {
+        id: 'ev_1',
+        sessionId: 'sess-7',
+        taskId: 'task-42',
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress',
+        payload: { message: 'checking' },
+      };
+      aggregator.reportJournalFailure({
+        source: 'event-journal',
+        error: 'database is locked',
+        write: row,
+        retryable: true,
+      });
+      const items = inbox.list();
+      expect(items).toHaveLength(1);
+      expect(items[0]!.kind).toBe('JournalFailure');
+      expect(items[0]!.priority).toBe('High');
+      expect(items[0]!.taskId).toBe('task-42');
+      expect(items[0]!.payload['reason']).toBe('database is locked');
+      expect(items[0]!.payload['retryable']).toBe(true);
+      // The exact failed row is retained for Inspect + Retry.
+      expect(items[0]!.payload['writes']).toEqual([row]);
+    });
+
+    it('reportJournalFailure tolerates task-less and unretained failures', () => {
+      aggregator.reportJournalFailure({
+        source: 'secrets-vault',
+        error: 'FOREIGN KEY constraint failed',
+        retryable: false,
+      });
+      const items = inbox.list();
+      expect(items).toHaveLength(1);
+      expect(items[0]!.taskId).toBe('');
+      expect(items[0]!.payload['retryable']).toBe(false);
+      expect(items[0]!.payload['writes']).toEqual([]);
+    });
+
+    it('a journal-failure burst folds every failed row into one card', () => {
+      const row = (id: string) => ({
+        id,
+        sessionId: 'sess-7',
+        taskId: 'task-42',
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress' as const,
+        payload: {},
+      });
+      aggregator.reportJournalFailure({
+        source: 'event-journal',
+        error: 'busy',
+        write: row('ev_a'),
+        retryable: true,
+      });
+      aggregator.reportJournalFailure({
+        source: 'event-journal',
+        error: 'still busy',
+        write: row('ev_b'),
+        retryable: true,
+      });
+      const items = inbox.list().filter((i) => i.kind === 'JournalFailure');
+      // One card — but collapsing the storm must not drop writes:
+      // both retained rows stay retryable (#264's whole point).
+      expect(items).toHaveLength(1);
+      expect((items[0]!.payload['writes'] as { id: string }[]).map((w) => w.id)).toEqual([
+        'ev_a',
+        'ev_b',
+      ]);
+      expect(items[0]!.payload['reason']).toBe('still busy');
+      expect(items[0]!.payload['message']).toContain('2 writes failed');
+    });
+
+    it('an acknowledged JournalFailure card still absorbs burst rows', () => {
+      const row = (id: string) => ({
+        id,
+        sessionId: 'sess-7',
+        taskId: 'task-42',
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress' as const,
+        payload: {},
+      });
+      aggregator.reportJournalFailure({
+        source: 'event-journal',
+        error: 'busy',
+        write: row('ev_a'),
+        retryable: true,
+      });
+      const card = inbox.list().find((i) => i.kind === 'JournalFailure')!;
+      inbox.acknowledge(card.id);
+      aggregator.reportJournalFailure({
+        source: 'event-journal',
+        error: 'busy again',
+        write: row('ev_b'),
+        retryable: true,
+      });
+      // The acknowledged card folds rather than spawning a new card —
+      // and critically, ev_b is retained, not dropped by the dedup hit.
+      const items = inbox.list().filter((i) => i.kind === 'JournalFailure');
+      expect(items).toHaveLength(1);
+      expect(items[0]!.status).toBe('Acknowledged');
+      expect((items[0]!.payload['writes'] as { id: string }[]).map((w) => w.id)).toEqual([
+        'ev_a',
+        'ev_b',
+      ]);
+    });
+
+    it('a resolved JournalFailure card starts a new card on the next failure', () => {
+      aggregator.reportJournalFailure({
+        source: 'event-journal',
+        error: 'busy',
+        retryable: true,
+      });
+      const card = inbox.list().find((i) => i.kind === 'JournalFailure')!;
+      inbox.resolve(card.id);
+      aggregator.reportJournalFailure({
+        source: 'event-journal',
+        error: 'busy again',
+        retryable: true,
+      });
+      const items = inbox.list().filter((i) => i.kind === 'JournalFailure');
+      expect(items).toHaveLength(2);
+      expect(items.map((i) => i.status).sort()).toEqual(['Pending', 'Resolved']);
+    });
   });
 
   describe('deduplication', () => {

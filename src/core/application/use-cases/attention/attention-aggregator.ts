@@ -22,6 +22,7 @@ import type {
   SupervisorEvent,
 } from '../../../domain/events.js';
 import type { CapabilityRiskLevel } from '../../../domain/capabilities.js';
+import type { Event } from '../../../domain/types.js';
 import type { VerificationGate } from '../verification/verification-gate.js';
 import {
   type AttentionItem,
@@ -78,6 +79,14 @@ export interface AttentionAggregatorConfig {
 
 /** Default deduplication window: 30 seconds. */
 export const DEFAULT_DEDUP_WINDOW_MS = 30_000;
+
+/**
+ * Maximum failed journal rows a single JournalFailure card retains
+ * (issue #264) — bounds the payload serialized into every inbox push
+ * during a sustained write outage; excess rows are counted in
+ * `droppedCount` rather than silently dropped.
+ */
+export const MAX_RETAINED_JOURNAL_WRITES = 50;
 
 /* ------------------------------------------------------------------ *
  * AttentionAggregator
@@ -205,6 +214,91 @@ export class AttentionAggregator {
       kind: 'StaleTask',
       priority: 'Medium',
       payload: { staleForMs },
+    });
+  }
+
+  /**
+   * Report a journaled-write failure (issue #264). `write` is the
+   * converted journal row retained for the card's Inspect + Retry path;
+   * `retryable` distinguishes transient failures (busy/IO) from
+   * permanent ones (constraint violations a retry can never satisfy).
+   *
+   * The 30s dedup window collapses a burst (e.g. repeated SQLITE_BUSY)
+   * into one card rather than a storm — but collapsing must not lose
+   * writes: each additional failed row folds into the open card's
+   * `writes` list so Retry can still land every retained row.
+   *
+   * Known limit (issue #272): the inbox is in-memory — a daemon restart
+   * loses the card and its retained rows. Persistence is a separate
+   * follow-up; until then "retained for retry" means retained *while
+   * the daemon runs*.
+   */
+  reportJournalFailure(failure: {
+    readonly source: string;
+    readonly error: string;
+    readonly write?: Event;
+    readonly retryable: boolean;
+  }): void {
+    const taskId = failure.write?.taskId ?? '';
+    const key = dedupKey(taskId, 'JournalFailure');
+    const nowMs = this.now();
+    const last = this.lastCreated.get(key);
+    // Any unresolved card for the same task absorbs the burst — not just
+    // Pending ones: an acknowledged/escalated card must still collect
+    // every failed row, or those rows vanish silently while the card
+    // stays open.
+    const open = this.inbox
+      .list({ kind: 'JournalFailure', taskId })
+      .filter((i) => i.status !== 'Resolved')
+      .at(-1);
+    if (open !== undefined && last !== undefined && nowMs - last < this.dedupWindowMs) {
+      const prev = Array.isArray(open.payload['writes']) ? (open.payload['writes'] as Event[]) : [];
+      const dropped =
+        typeof open.payload['droppedCount'] === 'number'
+          ? (open.payload['droppedCount'] as number)
+          : 0;
+      const failures =
+        typeof open.payload['failures'] === 'number' ? (open.payload['failures'] as number) : 1;
+      // Cap retention: a sustained outage must not serialize an
+      // unbounded row array into every inbox push — excess rows are
+      // counted and surfaced, not silently lost.
+      const overflow = failure.write !== undefined && prev.length >= MAX_RETAINED_JOURNAL_WRITES;
+      const writes = failure.write !== undefined && !overflow ? [...prev, failure.write] : prev;
+      const droppedCount = overflow ? dropped + 1 : dropped;
+      const total = failures + 1;
+      this.inbox.mergePayload(open.id, {
+        writes,
+        failures: total,
+        droppedCount,
+        reason: failure.error,
+        message:
+          `${failure.source}: ${total} writes failed (latest: ${failure.error})` +
+          `; ${writes.length} retained for retry` +
+          (droppedCount > 0 ? `, ${droppedCount} dropped past the retention cap` : ''),
+        retryable: open.payload['retryable'] === true || failure.retryable,
+      });
+      this.lastCreated.set(key, nowMs); // sliding window for a continuous storm
+      return;
+    }
+    // No open card to fold into (first failure, card resolved, or the
+    // window expired) — a fresh card must always be creatable here, so
+    // the stale window timestamp from a previous card cannot suppress it.
+    this.lastCreated.delete(key);
+    this.maybeAddItem({
+      taskId,
+      kind: 'JournalFailure',
+      priority: 'High',
+      payload: {
+        source: failure.source,
+        reason: failure.error,
+        message: failure.write
+          ? `${failure.source} write failed — ${failure.error}; the row is retained for retry`
+          : `${failure.source} write failed — ${failure.error}; no row was retained for retry`,
+        retryable: failure.retryable,
+        writes: failure.write !== undefined ? [failure.write] : [],
+        failures: 1,
+        droppedCount: 0,
+      },
     });
   }
 

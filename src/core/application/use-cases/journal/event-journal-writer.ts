@@ -38,9 +38,14 @@ export interface EventJournalWriterDeps {
    * Optional error sink. Journal insert failures (e.g. an event
    * referencing a task/session that was never persisted) are reported
    * here and otherwise swallowed — a bad event must not break the
-   * publish pipeline for downstream subscribers.
+   * publish pipeline for downstream subscribers. `row` is the converted
+   * journal record that failed to insert — retained so the caller can
+   * surface a retryable attention item (issue #264). `row` is absent
+   * when the failure happened during conversion, before a row existed.
+   * A throwing sink is contained: it runs inside the publish pipeline's
+   * synchronous emit.
    */
-  readonly onError?: (err: unknown, event: SupervisorEvent) => void;
+  readonly onError?: (err: unknown, event: SupervisorEvent, row?: Event) => void;
 }
 
 /**
@@ -50,7 +55,7 @@ export interface EventJournalWriterDeps {
 export class EventJournalWriter {
   private readonly journal: EventJournalPort;
   private readonly bus: EventSubscriberPort;
-  private readonly onError?: (err: unknown, event: SupervisorEvent) => void;
+  private readonly onError?: (err: unknown, event: SupervisorEvent, row?: Event) => void;
   private unsubscribe?: () => void;
 
   constructor(deps: EventJournalWriterDeps) {
@@ -81,12 +86,34 @@ export class EventJournalWriter {
     if (SELF_JOURNALED_KINDS.has(event.type)) {
       return;
     }
+    let row: Event | undefined;
     try {
-      this.journal.insert(supervisorEventToJournalRow(event));
+      row = supervisorEventToJournalRow(event);
+      this.journal.insert(row);
     } catch (err) {
-      this.onError?.(err, event);
+      // The sink runs inside the publish pipeline — it must never throw,
+      // so enforce that here rather than trusting every caller (#264).
+      try {
+        this.onError?.(err, event, row);
+      } catch {
+        /* a broken sink must not break the pipeline either */
+      }
     }
   }
+}
+
+/**
+ * Whether a journal-insert failure could succeed on retry (issue #264).
+ * Constraint violations (better-sqlite3 `SQLITE_CONSTRAINT*`) are
+ * permanent — the row references entities that were never persisted, so
+ * a retry can never satisfy it. Busy/locked/IO/full are transient.
+ */
+export function isPermanentJournalError(err: unknown): boolean {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code: unknown }).code)
+      : '';
+  return code.startsWith('SQLITE_CONSTRAINT');
 }
 
 /**

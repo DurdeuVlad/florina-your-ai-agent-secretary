@@ -58,7 +58,7 @@ import {
   buildApproval,
   buildAgent,
 } from '../src/domain/index.js';
-import type { Task, Approval } from '../src/domain/types.js';
+import type { Task, Approval, Event } from '../src/domain/types.js';
 import { DirtyWorktreeError } from '../src/daemon/worktree.js';
 import { createAttentionItem } from '../src/attention/attention-item.js';
 import type { CompletionDigest } from '../src/attention/completion-digest.js';
@@ -933,6 +933,209 @@ describe('CommandApi', () => {
       const r = res as ItemMutationResponse;
       expect(r.ok).toBe(false);
       expect(r.error).toContain('not found');
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * retry-journal-write (issue #264)
+   * ---------------------------------------------------------------- */
+  describe('retry-journal-write', () => {
+    it('re-inserts the retained row and resolves the item on success', async () => {
+      const { task, sessionId } = createTaskWithSession(fixture);
+      const row: Event = {
+        id: 'ev_retry_1',
+        sessionId,
+        taskId: task.id,
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress',
+        payload: { message: 'checking' },
+      };
+      const item = createAttentionItem({
+        taskId: task.id,
+        kind: 'JournalFailure',
+        priority: 'High',
+        payload: {
+          source: 'event-journal',
+          reason: 'database is locked',
+          retryable: true,
+          writes: [row],
+        },
+      });
+      fixture.attentionInbox.add(item);
+
+      const res = await fixture.api.execute({ kind: 'retry-journal-write', itemId: item.id });
+
+      expect((res as ItemMutationResponse).ok).toBe(true);
+      // The row landed for real — the journal contains it.
+      expect(fixture.eventRepository.listByTask(task.id).some((e) => e.id === 'ev_retry_1')).toBe(
+        true,
+      );
+      // And the item resolved — it leaves Needs-you.
+      expect(fixture.attentionInbox.list()[0]!.status).toBe('Resolved');
+    });
+
+    it('a still-failing write keeps the item open with the new error', async () => {
+      // Row references a task/session that never persisted — the FK
+      // failure is permanent, and the item stays Pending for the user.
+      const row: Event = {
+        id: 'ev_retry_2',
+        sessionId: 'sess_ghost',
+        taskId: 'task_ghost',
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress',
+        payload: {},
+      };
+      const item = createAttentionItem({
+        taskId: 'task_ghost',
+        kind: 'JournalFailure',
+        priority: 'High',
+        payload: {
+          source: 'event-journal',
+          reason: 'constraint failed',
+          retryable: false,
+          writes: [row],
+        },
+      });
+      fixture.attentionInbox.add(item);
+
+      const res = await fixture.api.execute({ kind: 'retry-journal-write', itemId: item.id });
+
+      const r = res as ItemMutationResponse;
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('retry failed');
+      expect(fixture.attentionInbox.list()[0]!.status).toBe('Pending');
+    });
+
+    it('rejects items that are not journal failures', async () => {
+      const item = createAttentionItem({ taskId: 't1', kind: 'Custom', priority: 'Low' });
+      fixture.attentionInbox.add(item);
+      const res = await fixture.api.execute({ kind: 'retry-journal-write', itemId: item.id });
+      expect((res as ItemMutationResponse).ok).toBe(false);
+      expect((res as ItemMutationResponse).error).toContain('not a journal failure');
+    });
+
+    it('rejects a journal failure that retains no row', async () => {
+      const item = createAttentionItem({
+        taskId: '',
+        kind: 'JournalFailure',
+        priority: 'High',
+        payload: { source: 'secrets-vault', reason: 'audit row dropped', retryable: false },
+      });
+      fixture.attentionInbox.add(item);
+      const res = await fixture.api.execute({ kind: 'retry-journal-write', itemId: item.id });
+      expect((res as ItemMutationResponse).ok).toBe(false);
+      expect((res as ItemMutationResponse).error).toContain('no journal row');
+    });
+
+    it('a retry whose row already landed resolves without duplicating', async () => {
+      // The original insert committed but the failure was still reported
+      // (or a previous retry landed): getById detects it, no second row.
+      const { task, sessionId } = createTaskWithSession(fixture);
+      const row: Event = {
+        id: 'ev_retry_landed',
+        sessionId,
+        taskId: task.id,
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress',
+        payload: { message: 'already there' },
+      };
+      fixture.eventRepository.insert(row);
+      const item = createAttentionItem({
+        taskId: task.id,
+        kind: 'JournalFailure',
+        priority: 'High',
+        payload: {
+          source: 'event-journal',
+          reason: 'lost ack',
+          retryable: true,
+          writes: [row],
+        },
+      });
+      fixture.attentionInbox.add(item);
+
+      const res = await fixture.api.execute({ kind: 'retry-journal-write', itemId: item.id });
+
+      expect((res as ItemMutationResponse).ok).toBe(true);
+      expect(
+        fixture.eventRepository.listByTask(task.id).filter((e) => e.id === 'ev_retry_landed'),
+      ).toHaveLength(1);
+      expect(fixture.attentionInbox.list()[0]!.status).toBe('Resolved');
+    });
+
+    it('rejects a retry on a resolved item — the gap stays acknowledged', async () => {
+      const { task, sessionId } = createTaskWithSession(fixture);
+      const row: Event = {
+        id: 'ev_retry_resolved',
+        sessionId,
+        taskId: task.id,
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress',
+        payload: {},
+      };
+      const item = createAttentionItem({
+        taskId: task.id,
+        kind: 'JournalFailure',
+        priority: 'High',
+        payload: { source: 'event-journal', reason: 'busy', retryable: true, writes: [row] },
+      });
+      fixture.attentionInbox.add(item);
+      fixture.attentionInbox.resolve(item.id);
+
+      const res = await fixture.api.execute({ kind: 'retry-journal-write', itemId: item.id });
+
+      const r = res as ItemMutationResponse;
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('already resolved');
+      expect(
+        fixture.eventRepository.listByTask(task.id).some((e) => e.id === 'ev_retry_resolved'),
+      ).toBe(false);
+    });
+
+    it('a partial retry keeps only the still-failing rows on the card', async () => {
+      const { task, sessionId } = createTaskWithSession(fixture);
+      const lands: Event = {
+        id: 'ev_retry_ok',
+        sessionId,
+        taskId: task.id,
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress',
+        payload: {},
+      };
+      const fails: Event = {
+        id: 'ev_retry_fk',
+        sessionId: 'sess_ghost',
+        taskId: 'task_ghost',
+        timestamp: '2026-09-27T11:00:00.000Z',
+        kind: 'AgentProgress',
+        payload: {},
+      };
+      const item = createAttentionItem({
+        taskId: task.id,
+        kind: 'JournalFailure',
+        priority: 'High',
+        payload: {
+          source: 'event-journal',
+          reason: 'busy',
+          retryable: true,
+          writes: [lands, fails],
+        },
+      });
+      fixture.attentionInbox.add(item);
+
+      const res = await fixture.api.execute({ kind: 'retry-journal-write', itemId: item.id });
+
+      const r = res as ItemMutationResponse;
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('1 of 2');
+      expect(fixture.eventRepository.listByTask(task.id).some((e) => e.id === 'ev_retry_ok')).toBe(
+        true,
+      );
+      const open = fixture.attentionInbox.list().find((i) => i.id === item.id)!;
+      expect(open.status).toBe('Pending');
+      expect(open.payload['writes']).toHaveLength(1);
+      expect((open.payload['writes'] as Event[])[0]!.id).toBe('ev_retry_fk');
+      // The surviving failure is a permanent FK violation — Retry hides.
+      expect(open.payload['retryable']).toBe(false);
     });
   });
 

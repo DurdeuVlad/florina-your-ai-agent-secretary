@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   EventJournalWriter,
+  isPermanentJournalError,
   supervisorEventToJournalRow,
 } from '../src/core/application/use-cases/journal/event-journal-writer.js';
 import { VerificationGate } from '../src/core/application/use-cases/verification/verification-gate.js';
@@ -208,6 +209,117 @@ describe('EventJournalWriter', () => {
     expect(row.timestamp).toBe(event.timestamp);
     expect(row.kind).toBe('VerificationObserved');
     expect(row.sessionId).toBe(fx.sessionId);
+  });
+
+  it('a failed insert reports (err, event, retained row) to onError without breaking the pipeline', () => {
+    const calls: { err: unknown; event: SupervisorEvent; row: unknown }[] = [];
+    const bus = new EventBus();
+    const writer = new EventJournalWriter({
+      journal: fx.eventRepo,
+      bus,
+      onError: (err, event, row) => calls.push({ err, event, row }),
+    });
+    writer.start();
+    let downstream = false;
+    bus.onEvent(() => {
+      downstream = true;
+    });
+    // Ghost session/task ids violate the journal's foreign keys — a
+    // real, permanent insert failure through real SQLite.
+    const ghost = verifyEvent(fx, { taskId: 'task_ghost', sessionId: 'sess_ghost' });
+    expect(() => bus.publish(ghost)).not.toThrow();
+    expect(downstream).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.event).toBe(ghost);
+    const row = calls[0]!.row as { kind: string; sessionId: string; taskId: string };
+    expect(row.kind).toBe('VerificationObserved');
+    expect(row.sessionId).toBe('sess_ghost');
+    expect(isPermanentJournalError(calls[0]!.err)).toBe(true);
+    expect(fx.eventRepo.listBySession('sess_ghost')).toHaveLength(0);
+  });
+
+  it('a throwing onError sink is contained — the publish pipeline survives', () => {
+    const bus = new EventBus();
+    const writer = new EventJournalWriter({
+      journal: fx.eventRepo,
+      bus,
+      onError: () => {
+        throw new Error('sink exploded');
+      },
+    });
+    writer.start();
+    const ghost = verifyEvent(fx, { taskId: 'task_ghost', sessionId: 'sess_ghost' });
+    expect(() => bus.publish(ghost)).not.toThrow();
+  });
+
+  it('isPermanentJournalError classifies constraint violations as permanent, busy as transient', () => {
+    expect(
+      isPermanentJournalError(
+        Object.assign(new Error('fk'), { code: 'SQLITE_CONSTRAINT_FOREIGNKEY' }),
+      ),
+    ).toBe(true);
+    expect(isPermanentJournalError(Object.assign(new Error('busy'), { code: 'SQLITE_BUSY' }))).toBe(
+      false,
+    );
+    expect(isPermanentJournalError(new Error('no code'))).toBe(false);
+    expect(isPermanentJournalError('string error')).toBe(false);
+    expect(isPermanentJournalError(null)).toBe(false);
+  });
+
+  /* The production wiring (daemon.ts): a failed insert reports
+   * (err, event, row) into reportJournalFailure — one JournalFailure
+   * card per task, retryable iff the failure is transient (#264). */
+  function wiredFixture(journalErr: { code: string }): {
+    inbox: AttentionInbox;
+    bus: EventBus;
+  } {
+    const inbox = new AttentionInbox();
+    const bus = new EventBus();
+    const aggregator = new AttentionAggregator(inbox, bus);
+    const failingJournal = {
+      insert: (): void => {
+        throw Object.assign(new Error('write failed'), journalErr);
+      },
+      getById: () => null,
+      listByTask: () => [],
+      listBySession: () => [],
+      listByTimestampRange: () => [],
+    };
+    const writer = new EventJournalWriter({
+      journal: failingJournal,
+      bus,
+      onError: (err, _event, row) => {
+        aggregator.reportJournalFailure({
+          source: 'event-journal',
+          error: err instanceof Error ? err.message : String(err),
+          write: row,
+          retryable: !isPermanentJournalError(err),
+        });
+      },
+    });
+    writer.start();
+    return { inbox, bus };
+  }
+
+  it('wiring end-to-end: a transient insert failure lands a retryable JournalFailure card', () => {
+    const { inbox, bus } = wiredFixture({ code: 'SQLITE_BUSY' });
+    bus.publish(verifyEvent(fx));
+    const items = inbox.list().filter((i) => i.kind === 'JournalFailure');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.taskId).toBe(fx.taskId);
+    expect(items[0]!.payload['retryable']).toBe(true);
+    expect(items[0]!.payload['source']).toBe('event-journal');
+    const writes = items[0]!.payload['writes'] as { kind: string }[];
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.kind).toBe('VerificationObserved');
+  });
+
+  it('wiring end-to-end: a permanent (constraint) failure lands non-retryable', () => {
+    const { inbox, bus } = wiredFixture({ code: 'SQLITE_CONSTRAINT_FOREIGNKEY' });
+    bus.publish(verifyEvent(fx));
+    const item = inbox.list().find((i) => i.kind === 'JournalFailure')!;
+    expect(item.payload['retryable']).toBe(false);
+    expect((item.payload['writes'] as unknown[]).length).toBe(1);
   });
 });
 

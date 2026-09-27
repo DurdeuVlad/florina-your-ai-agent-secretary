@@ -918,7 +918,170 @@ describe('handleRendererCommand', () => {
     expect((result?.data as { res: { ok: boolean } }).res.ok).toBe(false);
   });
 
-  it('acknowledges UI-only verbs without hitting the daemon', async () => {
+  it('retry:<itemId> on a JournalFailure resolves to retry-journal-write (#264)', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_j1',
+            taskId: 'task_9',
+            kind: 'JournalFailure',
+            priority: 'High',
+            status: 'Pending',
+            createdAt: '2026-09-16T10:00:00Z',
+            payload: {
+              reason: 'database is locked',
+              retryable: true,
+              writes: [{ id: 'ev_1', kind: 'AgentProgress' }],
+            },
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'retry-journal-write') {
+        expect(cmd['itemId']).toBe('attn_j1');
+        socket.send(JSON.stringify({ ok: true, itemId: 'attn_j1' }));
+      } else if (typeof cmd['kind'] === 'string') {
+        // the post-retry refresh issues query commands — answer them
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    await app.handleRendererCommand({ id: 4, cmd: 'retry:attn_j1' });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 4,
+      res: { ok: true, itemId: 'attn_j1' },
+    });
+  });
+
+  it('retry:<itemId> on other kinds stays an acknowledged no-op (#264 scope)', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_f1',
+            taskId: 'task_1',
+            kind: 'FailedRun',
+            priority: 'High',
+            status: 'Pending',
+            createdAt: '2026-09-16T10:00:00Z',
+            payload: {},
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+    const sent: string[] = [];
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (typeof cmd['kind'] === 'string') sent.push(cmd['kind']);
+    });
+    await app.handleRendererCommand({ id: 5, cmd: 'retry:attn_f1' });
+    // No daemon command — UI-only ack, same as before #264.
+    expect(sent).toEqual([]);
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 5,
+      res: { ok: true },
+    });
+  });
+
+  it('resolve:<itemId> on a JournalFailure maps to resolve-item (#264)', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_j2',
+            taskId: '',
+            kind: 'JournalFailure',
+            priority: 'High',
+            status: 'Pending',
+            createdAt: '2026-09-16T10:00:00Z',
+            payload: { reason: 'constraint failed', retryable: false },
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'resolve-item') {
+        expect(cmd['itemId']).toBe('attn_j2');
+        socket.send(JSON.stringify({ ok: true, itemId: 'attn_j2' }));
+      } else if (typeof cmd['kind'] === 'string') {
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    await app.handleRendererCommand({ id: 6, cmd: 'resolve:attn_j2' });
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 6,
+      res: { ok: true, itemId: 'attn_j2' },
+    });
+  });
+
+  it('inspect:<itemId> opens the inspector on the item task (#264)', async () => {
+    const transport = new MockIpcTransport();
+    const app = seededApp(transport);
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    const socket = await conn;
+    socket.send(
+      JSON.stringify({
+        type: 'inbox:update',
+        items: [
+          {
+            id: 'attn_1',
+            taskId: 'task_9',
+            kind: 'JournalFailure',
+            priority: 'High',
+            status: 'Pending',
+            createdAt: '2026-09-16T10:00:00Z',
+            payload: { reason: 'SQLITE_BUSY' },
+          },
+        ],
+      }),
+    );
+    await waitForState(app, (s) => s.inboxItems.length === 1);
+    let sawQuery = false;
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-events') {
+        sawQuery = true;
+        expect(cmd['taskId']).toBe('task_9');
+        socket.send(JSON.stringify({ ok: true, taskId: cmd['taskId'], events: [] }));
+      }
+    });
+    await app.handleRendererCommand({ id: 4, cmd: 'inspect:attn_1' });
+    expect(sawQuery).toBe(true);
+    expect(transport.toRenderer.some((m) => m.channel === 'view:show' && m.data === 'tasks')).toBe(
+      true,
+    );
+    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
+      id: 4,
+      res: { ok: true },
+    });
+  });
+
+  it('inspect:<itemId> on an unknown item errors without hitting the daemon', async () => {
     const transport = new MockIpcTransport();
     const app = seededApp(transport);
     const conn = server.waitForConnection();
@@ -928,11 +1091,12 @@ describe('handleRendererCommand', () => {
     socket.on('message', () => {
       sawCommand = true;
     });
-    await app.handleRendererCommand({ id: 4, cmd: 'inspect:attn_1' });
-    expect(transport.toRenderer.find((m) => m.channel === 'command:result')?.data).toEqual({
-      id: 4,
-      res: { ok: true },
-    });
+    await app.handleRendererCommand({ id: 4, cmd: 'inspect:attn_missing' });
+    const res = transport.toRenderer.find((m) => m.channel === 'command:result')?.data as {
+      res: { ok: boolean; error?: string };
+    };
+    expect(res.res.ok).toBe(false);
+    expect(res.res.error).toContain('attn_missing');
     expect(sawCommand).toBe(false);
   });
 });

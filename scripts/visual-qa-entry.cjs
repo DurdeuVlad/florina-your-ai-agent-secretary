@@ -54,6 +54,13 @@ const WORK_SUBTABS = ['fleet', 'ideas'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function captureWindow(win, file) {
+  /* capturePage returns the LAST presented frame — a DOM state read can
+   * confirm a view switch while the compositor still holds the previous
+   * view's paint (esp. when the window is even briefly occluded). Wait
+   * two animation frames so the frame we grab reflects current DOM. */
+  await win.webContents.executeJavaScript(
+    `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`,
+  );
   const img = await win.webContents.capturePage();
   fs.writeFileSync(file, img.toPNG());
   console.log(`[visual-qa] wrote ${path.relative(ROOT, file)}`);
@@ -195,6 +202,120 @@ async function shotApp() {
   }
   await captureWindow(win, path.join(SHOTS, 'app-chat-senderror.png'));
   console.log('[visual-qa] captured chat send-failure row');
+
+  // Journal-gap card (issue #264): a second WS client sends the real
+  // raise-attention command (itemKind 'JournalFailure') to the running
+  // daemon; the next inbox refresh pulls it and the real card renders.
+  // A Retry-bearing card needs a retained row, which only real insert
+  // failures produce — the shot proves the card + acknowledge path;
+  // retry wiring is covered by tests/desktop.test.ts.
+  const WebSocket = require('ws');
+  const os = require('node:os');
+  const daemonUrl = process.env.FLORINA_DAEMON_URL ?? 'ws://127.0.0.1:17419';
+  const ws = new WebSocket(daemonUrl);
+  const raised = await new Promise((resolvePromise) => {
+    const timer = setTimeout(() => resolvePromise(null), 5000);
+    const sendRaise = () => {
+      ws.send(
+        JSON.stringify({
+          kind: 'raise-attention',
+          taskId: 'qa-journal-gap',
+          summary: 'visual-qa journal gap probe',
+          itemKind: 'JournalFailure',
+          priority: 'High',
+          source: 'visual-qa',
+        }),
+      );
+    };
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(String(data));
+        // Auth handshake ack — send the command only after it.
+        if (msg !== null && msg.type === 'auth') {
+          if (msg.ok === true) sendRaise();
+          else resolvePromise(null);
+          return;
+        }
+        // Command responses carry `ok`; pushes carry `type` — skip those.
+        if (msg !== null && typeof msg === 'object' && 'ok' in msg) {
+          clearTimeout(timer);
+          resolvePromise(msg);
+        }
+      } catch {
+        /* non-JSON frame — ignore */
+      }
+    });
+    ws.once('open', () => {
+      // Same credential the desktop uses (~/.florina/auth-token); absent
+      // file = unauthenticated daemon, commands work straight away.
+      let token = process.env.FLORINA_DAEMON_TOKEN;
+      if (!token) {
+        try {
+          token = fs.readFileSync(path.join(os.homedir(), '.florina', 'auth-token'), 'utf8').trim();
+        } catch {
+          token = undefined;
+        }
+      }
+      if (token) ws.send(JSON.stringify({ type: 'auth', token }));
+      else sendRaise();
+    });
+    ws.once('error', () => resolvePromise(null));
+  });
+  const raisedId = raised && raised.ok ? raised.itemId : null;
+  if (raisedId === null) {
+    console.log('[visual-qa] raise-attention did not land — journal-fail shot may be empty');
+  }
+  // Attention items surface on the next refresh (add publishes no bus
+  // event — same as every other kind). `ideaclose` is the real desktop
+  // round-trip that re-pulls the inbox tree without mutating anything.
+  await win.webContents.executeJavaScript(`window.florina.command('ideaclose')`);
+  await sleep(SETTLE_MS);
+  // The senderror probe above left focus in the composer — synthesized
+  // keypresses land on the input and hit the renderer's focus guard, so
+  // navigate via the nav item's real click listener (the same showView
+  // call g a reaches, immune to focus quirks). Poll the ACTIVE view:
+  // the card DOM lives in a hidden #v-inbox even when another view shows.
+  const navState = await win.webContents.executeJavaScript(
+    `(() => {
+      const el = document.querySelector('.navitem[data-view="inbox"]');
+      if (!el) return 'nav element missing';
+      el.click();
+      return document.querySelector('.view.active')?.id ?? 'no active view';
+    })()`,
+  );
+  console.log(`[visual-qa] nav click → ${navState}`);
+  for (let i = 0; i < 20; i++) {
+    const state = await win.webContents.executeJavaScript(
+      `({ id: document.querySelector('.view.active')?.id, hasCard: document.querySelector('.view.active')?.textContent.includes('Journal gap') })`,
+    );
+    if (state && state.id === 'v-inbox' && state.hasCard) break;
+    if (i === 19) console.log(`[visual-qa] WARN inbox state: ${JSON.stringify(state)}`);
+    await sleep(250);
+  }
+  await captureWindow(win, path.join(SHOTS, 'app-inbox-journalfail.png'));
+  console.log('[visual-qa] captured journal-failure inbox card');
+  // Prove the acknowledge path end-to-end: the renderer's resolve:<id>
+  // verb → real resolve-item → post-mutation refresh → card gone.
+  if (raisedId !== null) {
+    await win.webContents.executeJavaScript(`window.florina.command('resolve:${raisedId}')`);
+    let gone = false;
+    for (let i = 0; i < 20; i++) {
+      const stillVisible = await win.webContents.executeJavaScript(
+        `document.querySelector('.view.active')?.textContent.includes('Journal gap')`,
+      );
+      if (!stillVisible) {
+        gone = true;
+        break;
+      }
+      await sleep(250);
+    }
+    console.log(
+      gone
+        ? '[visual-qa] journal-failure card resolved via real resolve: verb'
+        : '[visual-qa] WARN: card still visible after resolve',
+    );
+  }
+  ws.close();
 }
 
 app.whenReady().then(async () => {
@@ -208,5 +329,8 @@ app.whenReady().then(async () => {
     process.exitCode = 1;
   } finally {
     app.quit();
+    /* close-to-tray can veto window close and leave the app running —
+     * hard-exit if quit doesn't take within a few seconds. */
+    setTimeout(() => app.exit(process.exitCode ?? 0), 5000).unref();
   }
 });

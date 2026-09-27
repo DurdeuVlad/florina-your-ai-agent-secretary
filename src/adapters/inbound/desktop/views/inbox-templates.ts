@@ -212,6 +212,39 @@ function actionsFor(item: AttentionItemView): RenderTree[] {
           'Create a pull request for this work? The PR is created on the remote.',
         ),
       ];
+    case 'JournalFailure': {
+      /* Issue #264: the retained row can be re-inserted when the failure
+       * was transient; a permanent (constraint) failure only has the
+       * honest gap-acknowledge path — both resolve the item. */
+      const actions = [actionButton('Inspect', `inspect:${item.id}`, 'ghost')];
+      // Match the desktop resolver's gate (`desktop-app.ts`): a dead
+      // Retry button must never render — retry needs both the transient
+      // flag and a retained row.
+      const writes = (item.payload as { writes?: unknown }).writes;
+      if (
+        (item.payload as { retryable?: unknown }).retryable === true &&
+        Array.isArray(writes) &&
+        writes.length > 0
+      ) {
+        actions.unshift(
+          actionButton(
+            'Retry write',
+            `retry:${item.id}`,
+            'primary',
+            'Re-attempt the journal write? The retained row is inserted as-is.',
+          ),
+        );
+      }
+      actions.push(
+        actionButton(
+          'Acknowledge gap',
+          `resolve:${item.id}`,
+          'danger',
+          'Acknowledge the gap without retrying? The write stays missing from the journal.',
+        ),
+      );
+      return actions;
+    }
     case 'IdleAgent':
     case 'StaleTask':
       return [actionButton('Inspect', `inspect:${item.id}`, 'ghost')];
