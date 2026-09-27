@@ -35,8 +35,8 @@ const APP_SETTLE_MS = 3500;
  * Top-level view name -> keys after 'g' (renderer keymap, DG-01 §4,
  * remapped to the 5-item IA by issue #219: docs/UX_GUIDELINES.md §4).
  * fleet/ideas/secretary have no top-level nav entry as of #219/#220 —
- * fleet/ideas are captured below as Work sub-tabs instead; secretary has
- * no capture until a future issue merges it into Florina.
+ * fleet/ideas are captured below as Work sub-tabs; secretary is
+ * captured as the Florina lens via the `g e` chord (issue #262).
  */
 const APP_VIEWS = {
   chat: null, // default launch view (#160) — no keys needed
@@ -157,6 +157,21 @@ async function shotApp() {
   await sleep(SETTLE_MS);
   await captureWindow(win, path.join(SHOTS, 'app-settings-repos.png'));
   console.log('[visual-qa] captured Settings > Repos');
+
+  // Secretary lens (issue #262): reachable via the g e chord inside
+  // Florina. Waits for the lens view to be active, captures, then Esc
+  // pops back to the thread — the same path a user takes.
+  pressKey(win, 'g');
+  await sleep(80);
+  pressKey(win, 'e');
+  await sleep(SETTLE_MS);
+  // .content is the shared scroller — the repos scroll above leaves it
+  // deep in prefs; reset so the lens captures top-anchored.
+  await win.webContents.executeJavaScript(`document.querySelector('.content').scrollTop = 0`);
+  await captureWindow(win, path.join(SHOTS, 'app-secretary.png'));
+  console.log('[visual-qa] captured Secretary lens');
+  pressKey(win, 'Escape');
+  await sleep(SETTLE_MS);
 }
 
 app.whenReady().then(async () => {

@@ -316,7 +316,8 @@
         overflow-y: auto;
         padding: 10px 12px;
       }
-      #chatDrawerToggle.open {
+      #chatDrawerToggle.open,
+      #secLensToggle.open {
         border-color: var(--accent);
         color: var(--accent);
       }
@@ -530,15 +531,19 @@
           <h1 id="viewTitle">Florina</h1>
           <span class="sub" id="viewSub">one conversation with your Secretary</span>
           <span class="spacer"></span>
+          <!-- The launch view is chat, so the chat header controls start
+               visible — showView manages them from the first navigation. -->
           <button
             class="ghost"
-            id="chatDrawerToggle"
-            style="display: none"
-            title="Toggle live activity/diff panel"
+            id="secLensToggle"
+            title="Secretary lens — her plan, research, and memory (g e)"
           >
+            Secretary
+          </button>
+          <button class="ghost" id="chatDrawerToggle" title="Toggle live activity/diff panel">
             Activity
           </button>
-          <button class="ghost" id="chatClear" style="display: none">Clear</button>
+          <button class="ghost" id="chatClear">Clear</button>
           <div class="hud pill" id="hud" data-command="ptt:toggle" title="Push to talk">
             <div class="ring" id="ring">🎙</div>
             <div class="hudtext"><b id="hudTitle">Push to talk</b><span id="hudSub"></span></div>
@@ -619,7 +624,11 @@
               -->
               <div class="sect">Search journal</div>
               <div class="historysearch">
-                <input type="text" id="historySearchText" placeholder="text (e.g. task id, kind, error)" />
+                <input
+                  type="text"
+                  id="historySearchText"
+                  placeholder="text (e.g. task id, kind, error)"
+                />
                 <input type="date" id="historySearchSince" title="since" />
                 <input type="date" id="historySearchUntil" title="until" />
                 <button id="historySearchGo">Search</button>

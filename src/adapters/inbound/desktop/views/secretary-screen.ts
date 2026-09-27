@@ -91,7 +91,9 @@ function researchCard(r: SecretaryResearchItem): RenderTree {
 }
 
 function memoryCard(w: PendingMemoryWrite): RenderTree {
-  return el('PrefCard', {}, [
+  /* selectable: j/k reaches the card and Enter activates the Confirm
+   * button (the delegated click handles memwrite:confirm/reject). */
+  return el('PrefCard', { selectable: true }, [
     el('PrefTop', {}, [
       el('PrefKind', {}, [
         w.scope === 'project'

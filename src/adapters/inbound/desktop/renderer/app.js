@@ -74,8 +74,13 @@ if (bridge) {
   /* Settings > Repos (issue #253) */
   bridge.on('repos:update', (tree) => mount(tree, $('reposView')));
 
-  /* secretary screen (issue #130) */
-  bridge.on('secretary:update', (tree) => mount(tree, $('secretary')));
+  /* secretary screen (issue #130); re-mount drops .sel classes, so reset
+   * the selection index too — Enter must never act on an invisible
+   * selection (memory writes gate Confirm/Reject). */
+  bridge.on('secretary:update', (tree) => {
+    mount(tree, $('secretary'));
+    sel = -1;
+  });
 
   /* chat screen (issue #160): the message list is a RenderTree; the
      composer is static DOM so re-mounts never drop a draft. */
@@ -812,9 +817,8 @@ function toast(msg) {
 // View ids (map keys) are unchanged from before the relabel to avoid
 // touching the routing/focus/mic-listing logic keyed off them elsewhere
 // in this file — only the displayed title/subtitle text changed.
-// fleet/ideas/secretary keep their entries (still reachable via
-// bridge.command / showView programmatically) even though they no
-// longer have a top-level nav button, pending issue #220's merge.
+// fleet/ideas are reached as Work sub-tabs and secretary as the
+// Florina lens (#262) — none has a top-level nav button.
 const TITLES = {
   chat: ['Florina', 'one conversation with your Secretary'],
   inbox: ['Attention', 'what needs you right now'],
@@ -830,9 +834,12 @@ let currentView = 'chat';
 
 function showView(name) {
   currentView = name;
+  // The Secretary lens lives inside Florina (issue #262): while it is
+  // open the nav stays on Florina — it is not a sixth destination.
+  const navKey = name === 'secretary' ? 'chat' : name;
   document
     .querySelectorAll('.navitem')
-    .forEach((x) => x.classList.toggle('active', x.dataset.view === name));
+    .forEach((x) => x.classList.toggle('active', x.dataset.view === navKey));
   document
     .querySelectorAll('.view')
     .forEach((x) => x.classList.toggle('active', x.id === 'v-' + name));
@@ -840,6 +847,13 @@ function showView(name) {
   $('viewSub').textContent = TITLES[name][1];
   $('chatClear').style.display = name === 'chat' ? '' : 'none';
   $('chatDrawerToggle').style.display = name === 'chat' ? '' : 'none';
+  $('secLensToggle').style.display = name === 'chat' || name === 'secretary' ? '' : 'none';
+  $('secLensToggle').classList.toggle('open', name === 'secretary');
+  /* A view switch drops card selection — a stale index could otherwise
+   * Enter-activate an unhighlighted card in the new view (#262). Clear
+   * every view's paint too, not just the one we're entering. */
+  sel = -1;
+  document.querySelectorAll('.sel').forEach((c) => c.classList.remove('sel'));
   if (name === 'chat') {
     $('chatInput').focus();
     maybeCatchUp();
@@ -858,6 +872,12 @@ function showView(name) {
 document
   .querySelectorAll('.navitem')
   .forEach((n) => n.addEventListener('click', () => showView(n.dataset.view)));
+
+/* Secretary lens (issue #262): the header toggle opens/closes it from
+ * the Florina thread — same affordance as the g e chord and Esc. */
+$('secLensToggle').addEventListener('click', () => {
+  showView(currentView === 'secretary' ? 'chat' : 'secretary');
+});
 
 /* Refocus while on Florina = a "return" worth checking against the idle
  * threshold (registered after currentView exists — see maybeCatchUp). */
@@ -1023,7 +1043,8 @@ document.addEventListener('keydown', (e) => {
   if (gPending) {
     gPending = false;
     // Remapped to the 5-item IA (docs/UX_GUIDELINES.md §4, issue #219):
-    // g f Florina, g a Attention, g w Work, g h History, g s Settings.
+    // g f Florina, g a Attention, g w Work, g h History, g s Settings;
+    // g e opens the Secretary lens inside Florina (#262).
     // This breaks some old single-letter muscle memory (g c/i/t/p) in
     // exchange for each letter matching its new, clearer name (the same
     // tradeoff the IA doc makes for the nav labels themselves) — fleet
@@ -1035,6 +1056,8 @@ document.addEventListener('keydown', (e) => {
       w: 'tasks',
       h: 'history',
       s: 'prefs',
+      /* #262: the Secretary lens — inside Florina, reachable from anywhere */
+      e: 'secretary',
     };
     if (map[e.key]) showView(map[e.key]);
     return;
@@ -1069,6 +1092,11 @@ document.addEventListener('keydown', (e) => {
       break;
     }
     case 'Escape':
+      /* #262: Esc pops the Secretary lens back to the Florina thread. */
+      if (currentView === 'secretary') {
+        showView('chat');
+        break;
+      }
       if (currentView === 'tasks') {
         /* inspector → back to inbox (DG-01 §4) */
         showView('inbox');
