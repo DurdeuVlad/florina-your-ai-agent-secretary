@@ -8,6 +8,7 @@
  */
 import { mount } from './tree-renderer.js';
 import { confirmGate } from './command-gate.js';
+import { escPopAction } from './inspector-pop.js';
 import { createMicCapture } from './audio-capture.js';
 import { createPlayback } from './audio-playback.js';
 
@@ -1128,8 +1129,27 @@ document.addEventListener('keydown', (e) => {
         break;
       }
       if (currentView === 'tasks') {
-        /* inspector → back to inbox (DG-01 §4) */
-        showView('inbox');
+        /* #266: Esc pops the inspector drill-down one level — row
+         * selection, then column focus, then back to Attention. A
+         * single press never leaps; on Fleet/Ideas (inspector hidden)
+         * it leaves directly rather than clearing unseen state. */
+        switch (
+          escPopAction({
+            sel: inspSel,
+            col: inspCol,
+            inspectorActive: $('inspector')?.classList.contains('active') === true,
+          })
+        ) {
+          case 'clear-row':
+            inspSel = -1;
+            markInspSel();
+            break;
+          case 'back-col':
+            inspMoveCol(-1);
+            break;
+          default:
+            showView('inbox');
+        }
         break;
       }
       sel = -1;
