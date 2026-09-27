@@ -340,6 +340,57 @@ async function shotApp() {
     );
   }
   ws.close();
+
+  // Esc pop order on Work (issue #266): select a task row, then Esc
+  // clears the selection but stays in Work; Esc again (fully collapsed)
+  // lands on Attention. Real keypresses through sendInputEvent — the
+  // same path a user's keyboard takes.
+  await win.webContents.executeJavaScript(
+    `document.querySelector('.navitem[data-view="tasks"]')?.click(); document.activeElement?.blur()`,
+  );
+  await sleep(SETTLE_MS);
+  /* The Work sub-tab captures above leave Ideas active — re-select the
+   * Tasks panel or Esc pops straight out (the drill state is hidden). */
+  await win.webContents.executeJavaScript(
+    `document.querySelector('.worksubtab[data-worksub="inspector"]')?.click()`,
+  );
+  await sleep(SETTLE_MS);
+  /* A zero-task daemon has no selectable rows — skip rather than hard-fail
+   * on ambient state; only divergent pop order fails the run. */
+  const rowCount = await win.webContents.executeJavaScript(
+    `document.querySelectorAll('#inspector .col .row[data-selectable]').length`,
+  );
+  if (rowCount === 0) {
+    console.log('[visual-qa] no task rows — Esc pop sequence skipped (empty daemon)');
+  } else {
+    pressKey(win, 'j');
+    await sleep(SETTLE_MS);
+    const selBefore = await win.webContents.executeJavaScript(
+      `document.querySelector('#inspector .kbsel') !== null`,
+    );
+    pressKey(win, 'Escape');
+    await sleep(SETTLE_MS);
+    const midState = await win.webContents.executeJavaScript(
+      `({ view: document.querySelector('.view.active')?.id, sel: document.querySelector('#inspector .kbsel') !== null })`,
+    );
+    pressKey(win, 'Escape');
+    await sleep(SETTLE_MS);
+    const finalView = await win.webContents.executeJavaScript(
+      `document.querySelector('.view.active')?.id`,
+    );
+    const popOk =
+      selBefore === true &&
+      midState &&
+      midState.view === 'v-tasks' &&
+      midState.sel === false &&
+      finalView === 'v-inbox';
+    console.log(
+      popOk
+        ? '[visual-qa] Esc pops one level per press (select → stay → Attention)'
+        : `[visual-qa] WARN: Esc pop sequence diverged — sel=${selBefore} mid=${JSON.stringify(midState)} final=${finalView}`,
+    );
+    if (!popOk) process.exitCode = 1;
+  }
 }
 
 app.whenReady().then(async () => {
