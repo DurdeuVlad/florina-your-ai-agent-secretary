@@ -359,6 +359,28 @@ describe('renderInboxItem', () => {
     expect(commands).toContain('resolve:j2');
     expect(commands).toContain('inspect:j2');
   });
+
+  it('omits Inspect for a task-less JournalFailure', () => {
+    const vm = new InboxViewModel();
+    const view = vm.buildView(
+      inboxOf([
+        item('j3', {
+          taskId: '',
+          kind: 'JournalFailure',
+          payload: {
+            reason: 'could not convert event',
+            retryable: false,
+            writes: [],
+          },
+        }),
+      ]),
+    );
+    const commands = findNodes(renderInboxItem(view.groups[0]!.items[0]!), 'Button').map(
+      (button) => button.props!['command'],
+    );
+    expect(commands).not.toContain('inspect:j3');
+    expect(commands).toContain('resolve:j3');
+  });
 });
 
 describe('renderInboxGroup', () => {

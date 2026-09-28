@@ -399,13 +399,24 @@ describe('AttentionInbox', () => {
 
   describe('snapshot / restore', () => {
     it('snapshot is serializable and a deep copy', () => {
-      inbox.add(item('1', 'High', '2026-01-01T00:00:00.000Z'));
+      inbox.add(
+        item('1', 'High', '2026-01-01T00:00:00.000Z', {
+          payload: { details: { labels: ['before'] } },
+        }),
+      );
       const snap: AttentionInboxSnapshot = inbox.snapshot();
       expect(JSON.parse(JSON.stringify(snap))).toEqual(JSON.parse(JSON.stringify(snap)));
       expect(snap.items.length).toBe(1);
       // Mutating the inbox after snapshot does not affect the snapshot.
       inbox.add(item('2', 'Low', '2026-01-01T00:00:00.000Z'));
+      inbox.mergePayload('1', { extra: true });
       expect(snap.items.length).toBe(1);
+      expect(snap.items[0]!.payload['extra']).toBeUndefined();
+      const details = snap.items[0]!.payload['details'] as { labels: string[] };
+      details.labels[0] = 'snapshot';
+      expect((inbox.list()[0]!.payload['details'] as { labels: string[] }).labels).toEqual([
+        'before',
+      ]);
     });
 
     it('restore produces an inbox with the same items', () => {
@@ -418,13 +429,23 @@ describe('AttentionInbox', () => {
     });
 
     it('restored inbox is independent of the snapshot', () => {
-      inbox.add(item('1', 'High', '2026-01-01T00:00:00.000Z'));
+      inbox.add(
+        item('1', 'High', '2026-01-01T00:00:00.000Z', {
+          payload: { details: { labels: ['before'] } },
+        }),
+      );
       const snap = inbox.snapshot();
       const restored = AttentionInbox.restore(snap);
-      restored.take();
+      restored.mergePayload('1', { extra: true });
+      const details = snap.items[0]!.payload['details'] as { labels: string[] };
+      details.labels[0] = 'snapshot';
       // Snapshot and original inbox are unaffected.
       expect(snap.items.length).toBe(1);
+      expect(snap.items[0]!.payload['extra']).toBeUndefined();
       expect(inbox.size).toBe(1);
+      expect((restored.list()[0]!.payload['details'] as { labels: string[] }).labels).toEqual([
+        'before',
+      ]);
     });
 
     it('round-trips through snapshot → restore → snapshot', () => {

@@ -198,7 +198,7 @@ export class AttentionInbox {
    */
   snapshot(): AttentionInboxSnapshot {
     return {
-      items: [...this.items.values()].map((item) => ({ ...item })),
+      items: [...this.items.values()].map(cloneAttentionItem),
     };
   }
 
@@ -214,7 +214,7 @@ export class AttentionInbox {
   static restore(snapshot: AttentionInboxSnapshot): AttentionInbox {
     const inbox = new AttentionInbox();
     for (const item of snapshot.items) {
-      inbox.items.set(item.id, { ...item });
+      inbox.items.set(item.id, cloneAttentionItem(item));
     }
     return inbox;
   }
@@ -248,6 +248,13 @@ export class AttentionInbox {
 /* ------------------------------------------------------------------ *
  * Internal helpers
  * ------------------------------------------------------------------ */
+
+function cloneAttentionItem(item: AttentionItem): AttentionItem {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(item);
+  }
+  return JSON.parse(JSON.stringify(item)) as AttentionItem;
+}
 
 /** Whether an item matches the (optional) filter criteria. */
 function matchesFilter(item: AttentionItem, filter?: AttentionInboxFilter): boolean {

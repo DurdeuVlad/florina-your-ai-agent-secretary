@@ -218,7 +218,8 @@ function actionsFor(item: AttentionItemView): RenderTree[] {
       /* Issue #264: the retained row can be re-inserted when the failure
        * was transient; a permanent (constraint) failure only has the
        * honest gap-acknowledge path — both resolve the item. */
-      const actions = [actionButton('Inspect', `inspect:${item.id}`, 'ghost')];
+      const actions =
+        item.taskId === '' ? [] : [actionButton('Inspect', `inspect:${item.id}`, 'ghost')];
       // Match the desktop resolver's gate (`desktop-app.ts`): a dead
       // Retry button must never render — retry needs both the transient
       // flag and a retained row.
