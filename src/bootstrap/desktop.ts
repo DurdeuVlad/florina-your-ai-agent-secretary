@@ -323,6 +323,10 @@ async function main(): Promise<void> {
     },
     // Settings > Repos "+ Add folder"/"Use default folder" (issue #253).
     folderPicker: new ElectronFolderPicker(),
+    // First-run setup chooser (issue #277): the packaged/source default
+    // comes from the real runtime — the user can still flip it in the
+    // welcome step.
+    packaged: app.isPackaged,
     onTrayAction: (action: TrayAction) => {
       switch (action) {
         case 'show-window':
@@ -358,6 +362,7 @@ async function main(): Promise<void> {
       hud.refresh();
       desktopApp.replayDaemonStatus();
       desktopApp.replayVoiceConfig();
+      desktopApp.replaySetup();
       void desktopApp.refreshNow();
     });
   }

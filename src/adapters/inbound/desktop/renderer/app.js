@@ -76,6 +76,9 @@ if (bridge) {
   /* Settings > Repos (issue #253) */
   bridge.on('repos:update', (tree) => mount(tree, $('reposView')));
 
+  /* First-run setup panel (issue #277) — guided card inside Florina home */
+  bridge.on('setup:update', (tree) => mount(tree, $('setupPanel')));
+
   /* secretary screen (issue #130); re-mount drops .sel classes, so reset
    * the selection index too — Enter must never act on an invisible
    * selection (memory writes gate Confirm/Reject). */

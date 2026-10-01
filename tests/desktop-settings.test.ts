@@ -105,4 +105,38 @@ describe('desktop settings (issue #132)', () => {
     writeFileSync(desktopSettingsPath(dir), JSON.stringify({ dictationLanguage: '' }));
     expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
   });
+
+  it('round-trips the onboarding state (issue #277)', () => {
+    const dir = tmpDir();
+    writeDesktopSettings(
+      {
+        stopDaemonOnQuit: false,
+        voiceModeDefault: false,
+        onboardingState: 'skipped',
+      },
+      dir,
+    );
+    expect(readDesktopSettings(dir)).toEqual({
+      stopDaemonOnQuit: false,
+      voiceModeDefault: false,
+      onboardingState: 'skipped',
+    });
+  });
+
+  it('drops an unrecognized onboardingState — a typo never traps the user', () => {
+    const dir = tmpDir();
+    writeFileSync(
+      desktopSettingsPath(dir),
+      JSON.stringify({ onboardingState: 'banana', stopDaemonOnQuit: true }),
+    );
+    // Unknown value → the field drops; known-good fields still parse.
+    expect(readDesktopSettings(dir)).toEqual({
+      stopDaemonOnQuit: true,
+      voiceModeDefault: false,
+    });
+  });
+
+  it('defaults onboardingState absent — a fresh install shows setup', () => {
+    expect(DEFAULT_DESKTOP_SETTINGS.onboardingState).toBeUndefined();
+  });
 });
