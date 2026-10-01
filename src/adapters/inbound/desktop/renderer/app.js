@@ -235,6 +235,14 @@ document.addEventListener('click', (e) => {
    * ever carries the attribute. Covers the former confirmPromote flag
    * (#224). */
   if (!confirmGate(btn)) return;
+  /* first-run example fill (issue #278): puts the sample task in the
+   * composer as editable text — renderer-local, never auto-sends. */
+  if (cmd.startsWith('firsttask:fill:')) {
+    const input = $('chatInput');
+    input.value = decodeURIComponent(cmd.slice('firsttask:fill:'.length));
+    input.focus();
+    return;
+  }
   /* renderer-only verbs: open the inline preference forms (#128) */
   if (cmd.startsWith('prefedit:')) {
     openPrefEditor(btn.closest('.card'), JSON.parse(decodeURIComponent(cmd.slice(9))));

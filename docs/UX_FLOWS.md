@@ -260,3 +260,20 @@ This is a proposed experience, not a claim about shipped behavior. The
 repository evidence, current-state findings, state inventory, open decisions,
 and milestone issues are recorded in `docs/UX_ONBOARDING_AUDIT.md` and
 `docs/UX_ONBOARDING_CAMPAIGN.md`.
+
+### Shipped so far (M1 #277, M2 #278)
+
+The guided setup card lives at the top of the Florina home view (no sixth
+nav destination). It walks welcome (install-mode chooser: packaged vs.
+source) -> coding apps -> project folder -> done, persists open/skipped/done
+in desktop settings, and renders "couldn't check" distinctly from "none
+found" so a failed query never masquerades as an empty machine. Missing
+providers name the honest recovery (restart the helper via tray -> Stop
+daemon) rather than promising a re-probe the daemon does not perform.
+
+The empty conversation explains Florina's job in plain language ("watches
+your coding apps, brings anything that needs you into one place"), names the
+chosen project folder and detected coding app only when actually checked,
+and offers `firsttask:fill` — a renderer-local verb that puts an editable
+sample request into the composer and never sends it. Progress copy points at
+the conversation itself and Attention for decisions.

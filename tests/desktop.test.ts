@@ -3930,20 +3930,23 @@ describe('setup: first-run setup panel (issue #277)', () => {
     await app.disconnect();
   });
 
-  it('done state stops daemon queries — hidden setup costs nothing', async () => {
+  it('done state hides the panel while facts still refresh for the chat context', async () => {
     const transport = new MockIpcTransport();
     const { store } = memStore({ onboardingState: 'done' });
     const app = setupApp(transport, { settings: store });
     const socket = await connect(transport, app);
-    const kinds: string[] = [];
     socket.on('message', (data) => {
       const cmd = JSON.parse(String(data)) as Record<string, unknown>;
-      if (typeof cmd['kind'] === 'string') kinds.push(cmd['kind']);
-      socket.send(JSON.stringify({ ok: true }));
+      if (cmd['kind'] === 'query-providers') {
+        socket.send(JSON.stringify({ ok: true, providers: [] }));
+      } else {
+        socket.send(JSON.stringify({ ok: true }));
+      }
     });
     app.replaySetup();
     await new Promise((r) => setTimeout(r, 50));
-    expect(kinds).not.toContain('query-providers');
+    // Hidden renders empty; facts still refresh so the empty-chat
+    // context line can't go silently stale after setup completes.
     expect(lastSetupTree(transport)).toEqual({ tag: 'SetupPanel', props: {}, children: [] });
     await app.disconnect();
   });
