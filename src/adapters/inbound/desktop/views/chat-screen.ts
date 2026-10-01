@@ -93,22 +93,70 @@ export interface ChatScreenState {
    * visible until a successful send or `chat-clear` resolves it.
    */
   readonly sendError?: { readonly text: string; readonly error: string };
+  /**
+   * First-run context line for the empty conversation (issue #278):
+   * the chosen project folder and detected coding app, when known.
+   * `undefined` fields mean "couldn't check" — the line omits them
+   * rather than claiming they don't exist.
+   */
+  readonly context?: {
+    readonly project?: string;
+    readonly provider?: string;
+  };
 }
+
+/**
+ * Editable example task (issue #278). Filling it is a renderer-local
+ * verb (`firsttask:fill:`) — it lands in the composer as editable text
+ * and never dispatches on its own (Non-goal: no auto-sent sample task).
+ * Read-only by design: summarizing a project is a safe first ask.
+ */
+const EXAMPLE_TASK = 'Look at my project folder and summarize what it does.';
 
 /** Build the chat screen's message-list tree. */
 export function renderChatScreen(state: ChatScreenState): RenderTree {
   const children: RenderTree[] = [];
 
   if (state.messages.length === 0) {
-    children.push(
-      el('EmptyState', {}, [
-        el('EmptyHint', {}, [
-          state.clearedAt !== undefined
-            ? 'history cleared — earlier messages stay in the journal'
-            : 'say something — the Secretary can see your fleet, inbox, and ledgers',
+    if (state.clearedAt !== undefined) {
+      children.push(
+        el('EmptyState', {}, [
+          el('EmptyHint', {}, ['history cleared — earlier messages stay in the journal']),
         ]),
-      ]),
-    );
+      );
+    } else {
+      // First-use guidance (issue #278): plain language, one concept per
+      // line, one clear next action — and nothing internal named that a
+      // new user couldn't already know.
+      const hints: (RenderTree | string)[] = [
+        el('EmptyHint', {}, [
+          'Florina watches your coding apps and brings anything that needs you into one place.',
+        ]),
+        el('EmptyHint', {}, [
+          'Type a request below — or fill in this example and edit it before it ever sends:',
+        ]),
+        el(
+          'Button',
+          { variant: 'ghost', command: `firsttask:fill:${encodeURIComponent(EXAMPLE_TASK)}` },
+          ['Use an example'],
+        ),
+      ];
+      // Honest capability context: only state what was actually checked.
+      if (state.context !== undefined) {
+        const parts: string[] = [];
+        if (state.context.project !== undefined) parts.push(`Project: ${state.context.project}`);
+        if (state.context.provider !== undefined)
+          parts.push(`Coding app: ${state.context.provider}`);
+        if (parts.length > 0) hints.push(el('EmptyHint', {}, [parts.join('  ·  ')]));
+      }
+      hints.push(
+        el('EmptyHint', {}, [
+          'You’ll see progress right here. If anything needs your permission, it lands ' +
+            'in Attention — you decide.',
+        ]),
+      );
+      children.push(el('EmptyState', {}, hints));
+    }
   } else {
     if (state.clearedAt !== undefined) {
       children.push(

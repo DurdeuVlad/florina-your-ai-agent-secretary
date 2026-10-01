@@ -76,7 +76,8 @@ const PROVIDER_LABELS: Record<string, string> = {
 /** Display order for known ids; unknown ids append in probe order. */
 const PROVIDER_ORDER = ['claude-code', 'codex', 'devin', 'gemini', 'agy'];
 
-function providerLabel(id: string): string {
+/** Plain display name for a provider id — shared with the chat context line. */
+export function providerLabel(id: string): string {
   return PROVIDER_LABELS[id] ?? id;
 }
 

@@ -29,12 +29,46 @@ const msg = (over: Partial<ConversationMessage>): ConversationMessage => ({
 });
 
 describe('chat screen', () => {
-  it('renders the empty state with the what-it-can-see hint', () => {
+  it('renders first-use guidance in plain language with an editable example (issue #278)', () => {
     const tree = renderChatScreen({ messages: [], working: false });
     expect(tree.tag).toBe('ChatView');
-    const hint = findAll(tree, 'EmptyHint');
-    expect(hint).toHaveLength(1);
-    expect(hint[0]!.children?.[0]).toContain('fleet, inbox, and ledgers');
+    const hints = findAll(tree, 'EmptyHint').map((h) => h.children?.join(' '));
+    // Plain language — no unexplained internal vocabulary.
+    expect(hints[0]).toContain('Florina watches your coding apps');
+    const joined = hints.join(' ');
+    for (const jargon of ['fleet', 'ledger', 'Brief']) {
+      expect(joined).not.toContain(jargon);
+    }
+    // One clear next action: an editable example that never auto-sends —
+    // the verb is renderer-local (`firsttask:fill:` fills the composer).
+    const fill = findAll(tree, 'Button').find((b) =>
+      String(b.props?.['command']).startsWith('firsttask:fill:'),
+    );
+    expect(fill).toBeDefined();
+    expect(String(fill!.props?.['command'])).toContain('summarize');
+    // Where work + decisions surface, stated honestly.
+    expect(joined).toContain('progress right here');
+    expect(joined).toContain('Attention');
+  });
+
+  it('names the project and coding app only when actually checked', () => {
+    const withCtx = renderChatScreen({
+      messages: [],
+      working: false,
+      context: { project: 'C:\\code\\app', provider: 'Claude Code' },
+    });
+    const ctxText = findAll(withCtx, 'EmptyHint')
+      .map((h) => h.children?.join(' '))
+      .join(' ');
+    expect(ctxText).toContain('Project: C:\\code\\app');
+    expect(ctxText).toContain('Coding app: Claude Code');
+    // Unchecked → the context line is omitted entirely, not fabricated.
+    const unchecked = renderChatScreen({ messages: [], working: false, context: {} });
+    const uncheckedText = findAll(unchecked, 'EmptyHint')
+      .map((h) => h.children?.join(' '))
+      .join(' ');
+    expect(uncheckedText).not.toContain('Project:');
+    expect(uncheckedText).not.toContain('Coding app:');
   });
 
   it('renders the cleared hint when the read window moved', () => {

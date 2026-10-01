@@ -38,7 +38,12 @@ import type { DiscoveredRepo } from '../../../core/application/use-cases/repos/d
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
 import { renderChatActivityDrawer } from './views/chat-activity-drawer.js';
-import { renderSetupHidden, renderSetupResumeRow, renderSetupView } from './views/setup-view.js';
+import {
+  providerLabel,
+  renderSetupHidden,
+  renderSetupResumeRow,
+  renderSetupView,
+} from './views/setup-view.js';
 import type { SetupProvider, SetupStep } from './views/setup-view.js';
 import type { ProviderStatusView } from '../../../core/application/use-cases/tasks/command-api.js';
 import { renderSecretaryScreen } from './views/secretary-screen.js';
@@ -1711,11 +1716,12 @@ export class DesktopApp {
    * honest "can't check right now" note instead of blanking.
    */
   private async refreshSetup(prefetchedRepos?: Response | null): Promise<void> {
-    if (this.onboardingState() !== 'open') {
-      this.pushSetup();
-      return;
-    }
     try {
+      // Facts refresh regardless of onboarding state: while setup is open
+      // they feed the panel; after done/skipped they keep the empty-chat
+      // context line honest (issue #278). Both queries are cheap —
+      // providerAttachment is an in-memory read and repos comes prefetched
+      // from the caller's refresh cycle when available.
       const [provRes, reposRes] = await Promise.all([
         this.sendCommand({ kind: 'query-providers' }).catch((): null => null),
         // refreshViews hands in the query-repos response it already made —
@@ -1796,7 +1802,7 @@ export class DesktopApp {
    */
   replaySetup(): void {
     this.pushSetup();
-    if (this.isConnected && this.onboardingState() === 'open') {
+    if (this.isConnected) {
       void this.refreshSetup().catch(() => undefined);
     }
   }
@@ -1979,11 +1985,35 @@ export class DesktopApp {
 
   /** Render and push the chat message list on the `chat:update` channel. */
   private pushChat(): void {
+    // First-run context for the empty conversation (issue #278): name
+    // the chosen folder and a detected coding app — but only what was
+    // actually checked; "couldn't check" omits the field entirely.
+    const foundProvider = this.setupProviders.find((p) => p.found);
     this.bridge.sendToRenderer(
       'chat:update',
       renderChatScreen({
         messages: this.chatMessages,
         working: this.chatWorking,
+        context: {
+          ...(this.reposChecked
+            ? {
+                project:
+                  this.setupRoots.length === 0
+                    ? 'none yet — pick one in setup or Settings'
+                    : this.setupRoots.length === 1
+                      ? this.setupRoots[0]!
+                      : `${this.setupRoots[0]!} (+${this.setupRoots.length - 1} more)`,
+              }
+            : {}),
+          ...(this.providersChecked
+            ? {
+                provider:
+                  foundProvider !== undefined
+                    ? providerLabel(foundProvider.id)
+                    : 'none detected yet — setup can help',
+              }
+            : {}),
+        },
         ...(this.chatTool !== undefined ? { workingTool: this.chatTool } : {}),
         ...(this.chatClearedAt !== undefined ? { clearedAt: this.chatClearedAt } : {}),
         ...(this.chatSendError !== undefined
