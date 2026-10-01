@@ -239,8 +239,14 @@ document.addEventListener('click', (e) => {
    * composer as editable text — renderer-local, never auto-sends. */
   if (cmd.startsWith('firsttask:fill:')) {
     const input = $('chatInput');
-    input.value = decodeURIComponent(cmd.slice('firsttask:fill:'.length));
-    input.focus();
+    if (input.value.trim() !== '') {
+      // never eat a half-typed reply (same doctrine as maybeCatchUp)
+      toast('finish or clear your draft first');
+    } else {
+      input.value = decodeURIComponent(cmd.slice('firsttask:fill:'.length));
+      sendClientId = null; // a changed draft is a new send (matches insertDictated)
+      input.focus();
+    }
     return;
   }
   /* renderer-only verbs: open the inline preference forms (#128) */

@@ -1019,6 +1019,11 @@ export interface ProviderStatusView {
 export interface ProvidersResponse {
   readonly ok: boolean;
   readonly providers: readonly ProviderStatusView[];
+  /** false when no provider probe ran at all (no attachment wired /
+   * none configured) — an empty `providers` list is then "not probed",
+   * not "none found". Omitted/falsey on daemons that predate the field.
+   */
+  readonly probed?: boolean;
   readonly error?: string;
 }
 
@@ -1381,7 +1386,7 @@ export interface CommandApiDeps {
    * reports an empty list rather than fabricating readiness.
    */
   readonly providerAttachment?: () => {
-    readonly attached: readonly { id: string }[];
+    readonly attached: readonly { id: string; detail?: string }[];
     readonly skipped: readonly { id: string; reason: string }[];
   } | null;
   /**
@@ -2299,13 +2304,13 @@ export class CommandApi {
   private handleQueryProviders(): ProvidersResponse {
     const attachment = this.providerAttachment?.();
     if (attachment == null) {
-      return { ok: true, providers: [] };
+      return { ok: true, providers: [], probed: false };
     }
     const providers: ProviderStatusView[] = [
-      ...attachment.attached.map((p) => ({ id: p.id, found: true })),
+      ...attachment.attached.map((p) => ({ id: p.id, found: true, detail: p.detail })),
       ...attachment.skipped.map((p) => ({ id: p.id, found: false, detail: p.reason })),
     ];
-    return { ok: true, providers };
+    return { ok: true, providers, probed: true };
   }
 
   /** list-tasks: list all tasks, optionally filtered by status. */

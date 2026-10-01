@@ -33,11 +33,12 @@ describe('chat screen', () => {
     const tree = renderChatScreen({ messages: [], working: false });
     expect(tree.tag).toBe('ChatView');
     const hints = findAll(tree, 'EmptyHint').map((h) => h.children?.join(' '));
-    // Plain language — no unexplained internal vocabulary.
+    // Plain language — no unexplained internal vocabulary, any casing.
     expect(hints[0]).toContain('Florina watches your coding apps');
     const joined = hints.join(' ');
-    for (const jargon of ['fleet', 'ledger', 'Brief']) {
-      expect(joined).not.toContain(jargon);
+    const lowered = joined.toLowerCase();
+    for (const jargon of ['fleet', 'ledger', 'brief']) {
+      expect(lowered).not.toContain(jargon);
     }
     // One clear next action: an editable example that never auto-sends —
     // the verb is renderer-local (`firsttask:fill:` fills the composer).
@@ -69,6 +70,35 @@ describe('chat screen', () => {
       .join(' ');
     expect(uncheckedText).not.toContain('Project:');
     expect(uncheckedText).not.toContain('Coding app:');
+  });
+
+  it('labels a bare watch root as Watching — a container is not a project (issue #278 follow-up)', () => {
+    const tree = renderChatScreen({
+      messages: [],
+      working: false,
+      context: { watching: 'C:\\code' },
+    });
+    const text = findAll(tree, 'EmptyHint')
+      .map((h) => h.children?.join(' '))
+      .join(' ');
+    expect(text).toContain('Watching: C:\\code');
+    expect(text).not.toContain('Project:');
+  });
+
+  it('honors a caller-supplied example so the first task never contradicts setup facts', () => {
+    const tree = renderChatScreen({
+      messages: [],
+      working: false,
+      context: { example: 'Look around and tell me what you can see on this machine.' },
+    });
+    const fill = findAll(tree, 'Button').find((b) =>
+      String(b.props?.['command']).startsWith('firsttask:fill:'),
+    );
+    const cmd = String(fill!.props?.['command']);
+    expect(decodeURIComponent(cmd.slice('firsttask:fill:'.length))).toBe(
+      'Look around and tell me what you can see on this machine.',
+    );
+    expect(cmd).not.toContain('project');
   });
 
   it('renders the cleared hint when the read window moved', () => {

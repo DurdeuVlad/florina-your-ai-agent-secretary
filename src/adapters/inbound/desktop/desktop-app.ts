@@ -36,7 +36,7 @@ import { renderReposView } from './views/repos-view.js';
 import type { RepoRootsConfig } from '../../../core/application/ports/outbound/repo-roots.js';
 import type { DiscoveredRepo } from '../../../core/application/use-cases/repos/discover-repos.js';
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
-import { renderChatScreen } from './views/chat-screen.js';
+import { GENERIC_EXAMPLE_TASK, renderChatScreen } from './views/chat-screen.js';
 import { renderChatActivityDrawer } from './views/chat-activity-drawer.js';
 import {
   providerLabel,
@@ -717,6 +717,24 @@ export class DesktopApp {
   private updateDaemonStatus(status: DaemonStatus, extra?: Partial<RendererStateData>): void {
     this.state.update({ daemonStatus: status, ...extra });
     this.bridge.sendToRenderer('daemon:status', { status, error: extra?.error });
+    // Stale facts must not survive a disconnect: the next context line
+    // or setup step would otherwise assert what a *previous* daemon
+    // observed. Re-verified on the next connected refresh. Only repaint
+    // chat when claims were actually dropped — a 'connecting' transition
+    // with nothing cached must not emit a gratuitous chat:update (tests
+    // and the renderer both treat those pushes as event boundaries).
+    if (status !== 'connected' && (this.providersChecked || this.reposChecked)) {
+      this.setupProviders = [];
+      this.setupRoots = [];
+      this.setupRepos = [];
+      this.providersChecked = false;
+      this.reposChecked = false;
+      try {
+        this.pushChat();
+      } catch {
+        // bridge mid-teardown — a vanished renderer needs no repaint
+      }
+    }
     // The setup panel's offline note reacts to connectivity instantly —
     // it renders from cached facts, so this is safe pre-first-refresh.
     this.pushSetup();
@@ -1710,10 +1728,11 @@ export class DesktopApp {
 
   /**
    * Pull the observable setup facts (provider attach results + repo
-   * roots/discovered projects) and re-render the panel. Queries only run
-   * while setup is open — done/skipped states don't hit the daemon.
-   * Failed queries keep the last-known facts; the panel renders an
-   * honest "can't check right now" note instead of blanking.
+   * roots/discovered projects) and re-render the panel. Called from the
+   * connected-state refresh paths — while setup is open the facts feed
+   * the panel; after done/skipped they keep the empty-chat context line
+   * honest. Failed queries keep the last-known facts; the panel renders
+   * an honest "can't check right now" note instead of blanking.
    */
   private async refreshSetup(prefetchedRepos?: Response | null): Promise<void> {
     try {
@@ -1740,7 +1759,10 @@ export class DesktopApp {
             found: p.found,
             ...(typeof p.detail === 'string' ? { detail: p.detail } : {}),
           }));
-          this.providersChecked = true;
+          // `probed` distinguishes "probe ran, nothing found" from
+          // "no probe ran at all" — the latter must not render as
+          // "none detected" (issue #278 follow-up).
+          this.providersChecked = provRes.probed !== false;
         }
       }
       if (reposRes !== null && reposRes.ok && 'roots' in reposRes && 'repos' in reposRes) {
@@ -1989,29 +2011,47 @@ export class DesktopApp {
     // the chosen folder and a detected coding app — but only what was
     // actually checked; "couldn't check" omits the field entirely.
     const foundProvider = this.setupProviders.find((p) => p.found);
+    // Where can the user still act? 'done' hides the setup surface, so
+    // its pointers must not send the user there (issue #278 follow-up).
+    const setupReachable = this.onboardingState() !== 'done';
     this.bridge.sendToRenderer(
       'chat:update',
       renderChatScreen({
         messages: this.chatMessages,
         working: this.chatWorking,
         context: {
+          // A discovered repo is a "Project"; a bare watch-root is only
+          // the folder Florina looks inside — labeled honestly.
           ...(this.reposChecked
-            ? {
-                project:
-                  this.setupRoots.length === 0
-                    ? 'none yet — pick one in setup or Settings'
-                    : this.setupRoots.length === 1
-                      ? this.setupRoots[0]!
-                      : `${this.setupRoots[0]!} (+${this.setupRoots.length - 1} more)`,
-              }
+            ? this.setupRepos.length > 0
+              ? {
+                  project:
+                    this.setupRepos.length === 1
+                      ? this.setupRepos[0]!.name
+                      : `${this.setupRepos[0]!.name} (+${this.setupRepos.length - 1} more)`,
+                }
+              : {
+                  watching:
+                    this.setupRoots.length === 0
+                      ? `none yet — pick a folder in ${setupReachable ? 'setup or Settings' : 'Settings'}`
+                      : this.setupRoots.length === 1
+                        ? this.setupRoots[0]!
+                        : `${this.setupRoots[0]!} (+${this.setupRoots.length - 1} more)`,
+                }
             : {}),
           ...(this.providersChecked
             ? {
                 provider:
                   foundProvider !== undefined
                     ? providerLabel(foundProvider.id)
-                    : 'none detected yet — setup can help',
+                    : setupReachable
+                      ? 'none detected yet — setup can help'
+                      : 'none detected — install a coding app, then restart Florina',
               }
+            : {}),
+          // The example must not promise a project that isn't there.
+          ...(this.reposChecked && this.setupRepos.length === 0
+            ? { example: GENERIC_EXAMPLE_TASK }
             : {}),
         },
         ...(this.chatTool !== undefined ? { workingTool: this.chatTool } : {}),

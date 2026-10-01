@@ -100,8 +100,16 @@ export interface ChatScreenState {
    * rather than claiming they don't exist.
    */
   readonly context?: {
+    /** A discovered project — renders as "Project: <name>". */
     readonly project?: string;
+    /** A watched folder (or its absence) — renders as "Watching: <path>".
+     *  Roots are containers that hold projects, not projects themselves. */
+    readonly watching?: string;
     readonly provider?: string;
+    /** First-task example matching what is actually set up — the caller
+     *  swaps in {@link GENERIC_EXAMPLE_TASK} when no project exists to
+     *  summarize. Falls back to {@link EXAMPLE_TASK}. */
+    readonly example?: string;
   };
 }
 
@@ -112,6 +120,13 @@ export interface ChatScreenState {
  * Read-only by design: summarizing a project is a safe first ask.
  */
 const EXAMPLE_TASK = 'Look at my project folder and summarize what it does.';
+
+/**
+ * Fallback example when no project folder is set up yet (issue #278
+ * follow-up) — asking Florina to summarize a project that doesn't exist
+ * would be a first task designed to fail.
+ */
+export const GENERIC_EXAMPLE_TASK = 'Look around and tell me what you can see on this machine.';
 
 /** Build the chat screen's message-list tree. */
 export function renderChatScreen(state: ChatScreenState): RenderTree {
@@ -137,7 +152,10 @@ export function renderChatScreen(state: ChatScreenState): RenderTree {
         ]),
         el(
           'Button',
-          { variant: 'ghost', command: `firsttask:fill:${encodeURIComponent(EXAMPLE_TASK)}` },
+          {
+            variant: 'ghost',
+            command: `firsttask:fill:${encodeURIComponent(state.context?.example ?? EXAMPLE_TASK)}`,
+          },
           ['Use an example'],
         ),
       ];
@@ -145,6 +163,7 @@ export function renderChatScreen(state: ChatScreenState): RenderTree {
       if (state.context !== undefined) {
         const parts: string[] = [];
         if (state.context.project !== undefined) parts.push(`Project: ${state.context.project}`);
+        if (state.context.watching !== undefined) parts.push(`Watching: ${state.context.watching}`);
         if (state.context.provider !== undefined)
           parts.push(`Coding app: ${state.context.provider}`);
         if (parts.length > 0) hints.push(el('EmptyHint', {}, [parts.join('  ·  ')]));

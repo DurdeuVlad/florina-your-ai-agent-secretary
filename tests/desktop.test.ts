@@ -22,6 +22,7 @@ import type {
   WindowOptions,
 } from '../src/desktop/index.js';
 import { DictationService } from '../src/core/application/use-cases/voice/dictation-service.js';
+import { GENERIC_EXAMPLE_TASK } from '../src/adapters/inbound/desktop/views/chat-screen.js';
 import { CatchUpAutoTrigger } from '../src/adapters/inbound/desktop/catchup-auto-trigger.js';
 
 /* ------------------------------------------------------------------ *
@@ -3793,6 +3794,7 @@ describe('setup: first-run setup panel (issue #277)', () => {
         socket.send(
           JSON.stringify({
             ok: true,
+            probed: true,
             providers: [
               { id: 'claude-code', found: true },
               { id: 'codex', found: false, detail: 'codex not found on PATH' },
@@ -3801,6 +3803,10 @@ describe('setup: first-run setup panel (issue #277)', () => {
         );
       } else if (cmd['kind'] === 'query-repos') {
         socket.send(JSON.stringify({ ok: true, roots: { roots: [] }, repos: [] }));
+      } else if (cmd['kind'] === 'chat-read') {
+        // pushChat only fires on a chat-read carrying `messages` — the
+        // context line is unreachable without it.
+        socket.send(JSON.stringify({ ok: true, messages: [], turnInFlight: false }));
       } else {
         socket.send(JSON.stringify({ ok: true }));
       }
@@ -3935,19 +3941,159 @@ describe('setup: first-run setup panel (issue #277)', () => {
     const { store } = memStore({ onboardingState: 'done' });
     const app = setupApp(transport, { settings: store });
     const socket = await connect(transport, app);
+    const kinds = respondSetupFacts(socket);
+    app.replaySetup();
+    // Pin the actual behavior: the facts query must be issued even when
+    // the panel stays hidden (earlier version only asserted the empty
+    // tree, which a skipped refresh would also satisfy).
+    await waitFor(() => kinds.includes('query-providers'));
+    expect(lastSetupTree(transport)).toEqual({ tag: 'SetupPanel', props: {}, children: [] });
+    await app.disconnect();
+  });
+
+  /** Latest chat tree pushed to the renderer (undefined until first push). */
+  function lastChatUpdate(transport: MockIpcTransport): unknown {
+    const pushes = transport.toRenderer.filter((m) => m.channel === 'chat:update');
+    return pushes.length === 0 ? undefined : pushes[pushes.length - 1]!.data;
+  }
+
+  /** Daemon responder with a found provider, a watch root, and a repo. */
+  function respondSetupFactsWithRepo(socket: WebSocket): string[] {
+    const kinds: string[] = [];
     socket.on('message', (data) => {
       const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (typeof cmd['kind'] !== 'string') return;
+      kinds.push(cmd['kind']);
       if (cmd['kind'] === 'query-providers') {
-        socket.send(JSON.stringify({ ok: true, providers: [] }));
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            probed: true,
+            providers: [{ id: 'claude-code', found: true }],
+          }),
+        );
+      } else if (cmd['kind'] === 'query-repos') {
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            roots: { roots: [{ path: 'C:\\code' }] },
+            repos: [{ name: 'demo-app', path: 'C:\\code\\demo-app' }],
+          }),
+        );
+      } else if (cmd['kind'] === 'chat-read') {
+        socket.send(JSON.stringify({ ok: true, messages: [], turnInFlight: false }));
       } else {
         socket.send(JSON.stringify({ ok: true }));
       }
     });
-    app.replaySetup();
+    return kinds;
+  }
+
+  it('the empty chat names the checked provider and discovered project (issue #278)', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    respondSetupFactsWithRepo(socket);
+    await app.refreshNow();
+    // Facts land in refreshSetup (after pushChat) — a second refresh is
+    // the first paint that can carry the populated context line.
+    await app.refreshNow();
+    const text = treeText(lastChatUpdate(transport));
+    expect(text).toContain('Coding app: Claude Code');
+    expect(text).toContain('Project: demo-app');
+    expect(text).not.toContain('Watching:');
+    await app.disconnect();
+  });
+
+  it('a watch root with no discovered repo renders as Watching, never Project', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-providers') {
+        socket.send(JSON.stringify({ ok: true, probed: true, providers: [] }));
+      } else if (cmd['kind'] === 'query-repos') {
+        socket.send(
+          JSON.stringify({ ok: true, roots: { roots: [{ path: 'C:\\code' }] }, repos: [] }),
+        );
+      } else if (cmd['kind'] === 'chat-read') {
+        socket.send(JSON.stringify({ ok: true, messages: [], turnInFlight: false }));
+      } else {
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    await app.refreshNow();
+    await app.refreshNow();
+    const tree = lastChatUpdate(transport);
+    const text = treeText(tree);
+    expect(text).toContain('Watching: C:\\code');
+    expect(text).not.toContain('Project:');
+    // And the example must not ask Florina to summarize a project that
+    // doesn't exist — the generic fallback rides the fill command.
+    const fill = treeCommands(tree).find((c) => c.startsWith('firsttask:fill:'));
+    expect(fill).toBeDefined();
+    expect(decodeURIComponent(fill!.slice('firsttask:fill:'.length))).toBe(GENERIC_EXAMPLE_TASK);
+    await app.disconnect();
+  });
+
+  it('an unprobed providers answer never renders as "none detected"', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-providers') {
+        // No probe ran — the empty list is "not probed", not "none found".
+        socket.send(JSON.stringify({ ok: true, probed: false, providers: [] }));
+      } else if (cmd['kind'] === 'chat-read') {
+        socket.send(JSON.stringify({ ok: true, messages: [], turnInFlight: false }));
+      } else {
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    await app.refreshNow();
+    await app.refreshNow();
+    const text = treeText(lastChatUpdate(transport));
+    expect(text).not.toContain('Coding app:');
+    expect(text).not.toContain('none detected');
+    await app.disconnect();
+  });
+
+  it('a disconnect drops stale provider claims from the context line', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    respondSetupFactsWithRepo(socket);
+    await app.refreshNow();
+    await app.refreshNow();
+    expect(treeText(lastChatUpdate(transport))).toContain('Coding app: Claude Code');
+    const before = transport.toRenderer.filter((m) => m.channel === 'chat:update').length;
+    socket.close();
+    // updateDaemonStatus clears the cached facts and repaints — the
+    // last-known provider must not keep presenting as current while the
+    // status dot says disconnected.
+    await waitFor(
+      () => transport.toRenderer.filter((m) => m.channel === 'chat:update').length > before,
+    );
+    expect(treeText(lastChatUpdate(transport))).not.toContain('Coding app:');
+    await app.disconnect();
+  });
+
+  it('firsttask:fill is renderer-local — the main process acks without daemon traffic', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    const kinds = respondSetupFacts(socket);
+    await app.handleRendererCommand({ id: 'ft1', cmd: 'firsttask:fill:hello' });
+    expect(resultFor(transport, 'ft1')?.ok).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
-    // Hidden renders empty; facts still refresh so the empty-chat
-    // context line can't go silently stale after setup completes.
-    expect(lastSetupTree(transport)).toEqual({ tag: 'SetupPanel', props: {}, children: [] });
+    expect(kinds).not.toContain('firsttask');
     await app.disconnect();
   });
 
