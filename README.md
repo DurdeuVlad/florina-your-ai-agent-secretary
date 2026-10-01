@@ -34,6 +34,11 @@ tasks, deliverables, decisions, and attention requests.
 
 ## Quick Start
 
+> **Just want to use Florina?** Download the packaged desktop app instead —
+> [`docs/INSTALL.md`](docs/INSTALL.md) has the Windows/Linux installers and a
+> plain-language walkthrough that assumes no prior knowledge. The steps below
+> are for running Florina from source.
+
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 22 (required by `better-sqlite3`)
@@ -156,7 +161,10 @@ ladder, resumption/catch-up), [`PROVIDER_TOPOLOGY.md`](docs/PROVIDER_TOPOLOGY.md
 (nav redesign, terminology audit), [`UX_FLOWS.md`](docs/UX_FLOWS.md) +
 [`SYSTEM_FLOWS.md`](docs/SYSTEM_FLOWS.md) (user and agent/system flows), and
 [`GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) (current vs. target, mapped to the
-`Florina — Persistent AI Supervisor` milestone).
+`Florina — Persistent AI Supervisor` milestone). The one-user first-run UX
+audit and its proposed issue campaign are in
+[`UX_ONBOARDING_AUDIT.md`](docs/UX_ONBOARDING_AUDIT.md) and
+[`UX_ONBOARDING_CAMPAIGN.md`](docs/UX_ONBOARDING_CAMPAIGN.md).
 
 ## Status
 

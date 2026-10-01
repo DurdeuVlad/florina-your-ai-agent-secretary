@@ -6,7 +6,10 @@ concepts (described experientially, not pixel specs — pixel specs live in
 `docs/UX_GUIDELINES.md`). Cross-links: `docs/UX_INFORMATION_ARCHITECTURE.md`
 (where each flow lands in the nav), `docs/RULES_MEMORY_AND_SUPERVISION.md`
 (mechanisms behind catch-up, evidence, rules), `docs/SYSTEM_FLOWS.md`
-(machine-side sequence diagrams for the same flows).
+(machine-side sequence diagrams for the same flows), and
+`docs/UX_ONBOARDING_AUDIT.md` (one user's setup and first-task journey; the
+separate implementation campaign is in
+`docs/UX_ONBOARDING_CAMPAIGN.md`).
 
 ## A. Delegate a simple task
 
@@ -36,7 +39,7 @@ The flagship flow — full mechanism in `docs/RULES_MEMORY_AND_SUPERVISION.md`
 digest as the next message in the Florina thread: N completed / M running /
 K need-decision, one line each for notable items, explicit "nothing else
 needs you" close. Every line is a live link into Work/Attention/History —
-the digest is a summary *with* drill-down, never a dead end.
+the digest is a summary _with_ drill-down, never a dead end.
 
 ## D. Work needs human judgment
 
@@ -165,26 +168,26 @@ worktree, don't merge, inspect). Never auto-resolved, never batched.
 Applied to the surfaces that matter most — Attention, Work item, Florina
 home, Settings/Providers:
 
-| State | Attention (item) | Work (task) | Florina home | Settings/Providers |
-|---|---|---|---|---|
-| Empty | "Nothing needs you" (explicit, calm) | "No active work" | Composer only, no strip | "No providers configured" + setup CTA |
-| Working | n/a (not attention-worthy by itself) | Live status word (`editing`, `tests running`) | Ambient strip count | n/a |
-| Needs attention | The card itself | Badge on the task row | Strip count > 0 | Provider degraded badge |
-| Ready for review | Completion digest card | "Ready for review" status | Surfaces via strip/digest | n/a |
-| Partially complete | n/a | "3/5 workstreams done" rollup | n/a | n/a |
-| Failed | Failure card, evidence attached | "Failed" + retry/inspect actions | n/a | Provider auth failed |
-| Recovering | n/a (handled silently unless escalated) | "Retrying (2/3)" | n/a | n/a |
-| Paused | n/a | "Parked until 14:32" + countdown | n/a | n/a |
-| Provider unavailable | Elevated if it blocks active work | Task shows blocked reason | n/a | Tier badge greys out, reason shown |
-| Degraded observability | n/a | Inspector shows "Tier D — verified output only, no permission UI" | n/a | Tier badge (not an error — a fidelity fact) |
-| Offline (daemon) | Stale-but-readable, amber indicator | Same | Amber "reconnecting," content stays | Same |
-| Returned after inactivity | n/a | n/a | Catch-up digest renders first | n/a |
-| Conflicting learned rule | n/a | n/a | n/a | Conflict badge on the rule row, resolves via Decision |
-| Insufficient confidence | n/a | n/a | Florina asks rather than assumes (last resort, DEC-025/031) | Candidate rule shown greyed, "not yet applied" |
-| Waiting for worker | n/a | "waiting" status word | n/a | n/a |
-| Waiting for human | The card, with explicit deadline/blocking-impact field | "blocked — needs your decision" | n/a | n/a |
-| Verification failed | Routed back to worker, not shown as human-facing failure unless retries exhaust | "verification failed, retrying" | n/a | n/a |
-| Verification passed | Feeds the completion digest headline | "verified" | n/a | n/a |
+| State                     | Attention (item)                                                                | Work (task)                                                       | Florina home                                                | Settings/Providers                                    |
+| ------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------- |
+| Empty                     | "Nothing needs you" (explicit, calm)                                            | "No active work"                                                  | Composer only, no strip                                     | "No providers configured" + setup CTA                 |
+| Working                   | n/a (not attention-worthy by itself)                                            | Live status word (`editing`, `tests running`)                     | Ambient strip count                                         | n/a                                                   |
+| Needs attention           | The card itself                                                                 | Badge on the task row                                             | Strip count > 0                                             | Provider degraded badge                               |
+| Ready for review          | Completion digest card                                                          | "Ready for review" status                                         | Surfaces via strip/digest                                   | n/a                                                   |
+| Partially complete        | n/a                                                                             | "3/5 workstreams done" rollup                                     | n/a                                                         | n/a                                                   |
+| Failed                    | Failure card, evidence attached                                                 | "Failed" + retry/inspect actions                                  | n/a                                                         | Provider auth failed                                  |
+| Recovering                | n/a (handled silently unless escalated)                                         | "Retrying (2/3)"                                                  | n/a                                                         | n/a                                                   |
+| Paused                    | n/a                                                                             | "Parked until 14:32" + countdown                                  | n/a                                                         | n/a                                                   |
+| Provider unavailable      | Elevated if it blocks active work                                               | Task shows blocked reason                                         | n/a                                                         | Tier badge greys out, reason shown                    |
+| Degraded observability    | n/a                                                                             | Inspector shows "Tier D — verified output only, no permission UI" | n/a                                                         | Tier badge (not an error — a fidelity fact)           |
+| Offline (daemon)          | Stale-but-readable, amber indicator                                             | Same                                                              | Amber "reconnecting," content stays                         | Same                                                  |
+| Returned after inactivity | n/a                                                                             | n/a                                                               | Catch-up digest renders first                               | n/a                                                   |
+| Conflicting learned rule  | n/a                                                                             | n/a                                                               | n/a                                                         | Conflict badge on the rule row, resolves via Decision |
+| Insufficient confidence   | n/a                                                                             | n/a                                                               | Florina asks rather than assumes (last resort, DEC-025/031) | Candidate rule shown greyed, "not yet applied"        |
+| Waiting for worker        | n/a                                                                             | "waiting" status word                                             | n/a                                                         | n/a                                                   |
+| Waiting for human         | The card, with explicit deadline/blocking-impact field                          | "blocked — needs your decision"                                   | n/a                                                         | n/a                                                   |
+| Verification failed       | Routed back to worker, not shown as human-facing failure unless retries exhaust | "verification failed, retrying"                                   | n/a                                                         | n/a                                                   |
+| Verification passed       | Feeds the completion digest headline                                            | "verified"                                                        | n/a                                                         | n/a                                                   |
 
 ---
 
@@ -232,3 +235,28 @@ None of these are "pretty cards" for their own sake — each one exists to
 answer a specific question from brief §§ 12/29 (what's happening, why, is
 it proven, what changed) without requiring the user to reconstruct the
 answer by reading raw session output.
+
+## P. First-run setup and first successful task
+
+The first-run path is one user's journey: that person administers their local
+installation, then uses Florina to delegate and review work. Setup and daily
+use are phases, not separate people, accounts, or permission roles. DEC-017
+continues to defer organization-level administration and multi-user RBAC.
+
+The target journey is: understand what Florina does -> follow one setup step
+at a time -> check only readiness facts Florina can observe -> select and
+confirm the project folder -> see whether setup is blocking and one next
+action -> submit an editable first task -> follow progress -> handle a clearly
+scoped decision -> review observed verification evidence. Setup can be skipped
+and resumed, but missing capabilities must not be described as ready.
+
+Keep the default path calm and light: explain the current step in ordinary
+language, show one primary action, and disclose technical detail only when
+needed. For errors, say what happened, whether the user can continue, and how
+to recover without blame or false reassurance. Never hide permission scope or
+other facts needed for a safe decision.
+
+This is a proposed experience, not a claim about shipped behavior. The
+repository evidence, current-state findings, state inventory, open decisions,
+and milestone issues are recorded in `docs/UX_ONBOARDING_AUDIT.md` and
+`docs/UX_ONBOARDING_CAMPAIGN.md`.
