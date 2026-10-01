@@ -1405,6 +1405,7 @@ describe('CommandApi', () => {
       const res = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
 
       expect(res.ok).toBe(true);
+      expect(res.probed).toBe(true);
       expect(res.providers).toEqual([
         { id: 'claude-code', found: true },
         { id: 'devin', found: true },
@@ -1413,18 +1414,21 @@ describe('CommandApi', () => {
       ]);
     });
 
-    it('returns an empty list when no probe ran (accessor returns null)', async () => {
+    it('marks itself unprobed when no probe ran (accessor returns null)', async () => {
       const api = new CommandApi({ ...fixture.deps, providerAttachment: () => null });
       const res = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
       expect(res.ok).toBe(true);
-      // Honest unknown — never fabricate readiness.
+      // Honest unknown — an empty list here is "not probed", not
+      // "none found" (issue #278 follow-up).
       expect(res.providers).toEqual([]);
+      expect(res.probed).toBe(false);
     });
 
-    it('returns an empty list when the dependency is not wired', async () => {
+    it('marks itself unprobed when the dependency is not wired', async () => {
       const res = (await fixture.api.execute({ kind: 'query-providers' })) as ProvidersResponse;
       expect(res.ok).toBe(true);
       expect(res.providers).toEqual([]);
+      expect(res.probed).toBe(false);
     });
 
     it('reflects the live accessor — a later attach is visible without restart', async () => {
@@ -1437,6 +1441,7 @@ describe('CommandApi', () => {
 
       const before = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
       expect(before.providers).toEqual([]);
+      expect(before.probed).toBe(false);
 
       attachment = {
         attached: [{ id: 'agy', command: 'agy' }],
@@ -1445,6 +1450,7 @@ describe('CommandApi', () => {
       };
       const after = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
       expect(after.providers).toEqual([{ id: 'agy', found: true }]);
+      expect(after.probed).toBe(true);
     });
   });
 
