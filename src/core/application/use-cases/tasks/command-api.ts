@@ -313,6 +313,17 @@ export interface QueryFleetCommand {
   readonly kind: 'query-fleet';
 }
 
+/**
+ * Query provider attach results (issue #277): which provider CLIs the
+ * bootstrap probe found and registered, and which it skipped with the
+ * reason. Discovery is reported, never inflated — `found` means the
+ * executable was located and the adapter registered, NOT that the user
+ * is signed in or the provider is reachable.
+ */
+export interface QueryProvidersCommand {
+  readonly kind: 'query-providers';
+}
+
 /** List tasks, optionally filtered by status. */
 export interface ListTasksCommand {
   readonly kind: 'list-tasks';
@@ -669,6 +680,7 @@ export type Command =
   | QueryTaskCommand
   | QueryEventsCommand
   | QueryFleetCommand
+  | QueryProvidersCommand
   | ListTasksCommand
   | PruneWorktreeCommand
   | ShutdownCommand
@@ -717,6 +729,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'query-task',
   'query-events',
   'query-fleet',
+  'query-providers',
   'list-tasks',
   'prune-worktree',
   'shutdown',
@@ -991,6 +1004,25 @@ export interface ReposResponse {
 }
 
 /**
+ * One provider's attach outcome as observed at daemon startup (issue
+ * #277). `found` = the executable was located and its adapter registered
+ * — it says nothing about sign-in or reachability. `detail` carries the
+ * probe's skip reason for a not-found provider.
+ */
+export interface ProviderStatusView {
+  readonly id: string;
+  readonly found: boolean;
+  readonly detail?: string;
+}
+
+/** query-providers response (issue #277). */
+export interface ProvidersResponse {
+  readonly ok: boolean;
+  readonly providers: readonly ProviderStatusView[];
+  readonly error?: string;
+}
+
+/**
  * Response to `delegate-task` (issue #78): the child-side result of
  * accepting a remote delegation — mirrors `SpawnTaskResult` so the
  * parent sees spawned/parked/error verbatim.
@@ -1120,6 +1152,7 @@ export type Response =
   | EventsResponse
   | SearchJournalResponse
   | FleetResponse
+  | ProvidersResponse
   | StopTaskResponse
   | ApproveResponse
   | InboxResponse
@@ -1341,6 +1374,17 @@ export interface CommandApiDeps {
    */
   readonly quotaLedger?: QuotaLedger;
   /**
+   * Local provider attach results (issue #277). Supplies the bootstrap
+   * probe's attached/skipped lists for `query-providers`. Returns `null`
+   * when no probe ran (e.g. `FLORINA_PROVIDERS=none` handled upstream, or
+   * a daemon built without provider attachment); absent dep → the query
+   * reports an empty list rather than fabricating readiness.
+   */
+  readonly providerAttachment?: () => {
+    readonly attached: readonly { id: string }[];
+    readonly skipped: readonly { id: string; reason: string }[];
+  } | null;
+  /**
    * Secretary conversation store (issue #157). When wired, `chat-send` /
    * `chat-read` / `chat-clear` are served; when absent they fail cleanly.
    */
@@ -1402,6 +1446,7 @@ export class CommandApi {
   private readonly repoScanner?: RepoScannerPort;
   private readonly delegation?: DelegationService;
   private readonly quotaLedger?: QuotaLedger;
+  private readonly providerAttachment?: CommandApiDeps['providerAttachment'];
   private readonly chatStore?: ChatMessageRepositoryPort;
   private readonly chatMessageSink?: (message: ConversationMessage) => void;
   private chatService?: ChatTurnPort;
@@ -1435,6 +1480,7 @@ export class CommandApi {
     this.repoScanner = deps.repoScanner;
     this.delegation = deps.delegation;
     this.quotaLedger = deps.quotaLedger;
+    this.providerAttachment = deps.providerAttachment;
     this.chatStore = deps.chatStore;
     this.chatMessageSink = deps.chatMessageSink;
   }
@@ -1490,6 +1536,8 @@ export class CommandApi {
         return this.handleSearchJournal(command);
       case 'query-fleet':
         return this.handleQueryFleet();
+      case 'query-providers':
+        return this.handleQueryProviders();
       case 'list-tasks':
         return this.handleListTasks(command);
       case 'prune-worktree':
@@ -2240,6 +2288,24 @@ export class CommandApi {
     }
 
     return { ok: true, providers, parked, routingDecisions };
+  }
+
+  /**
+   * query-providers (issue #277): the bootstrap probe's attach results —
+   * `found` for each registered adapter, `not found` with the probe's
+   * reason for each skip. Reports what was observed at startup; it does
+   * not re-probe and cannot prove provider sign-in or reachability.
+   */
+  private handleQueryProviders(): ProvidersResponse {
+    const attachment = this.providerAttachment?.();
+    if (attachment == null) {
+      return { ok: true, providers: [] };
+    }
+    const providers: ProviderStatusView[] = [
+      ...attachment.attached.map((p) => ({ id: p.id, found: true })),
+      ...attachment.skipped.map((p) => ({ id: p.id, found: false, detail: p.reason })),
+    ];
+    return { ok: true, providers };
   }
 
   /** list-tasks: list all tasks, optionally filtered by status. */
@@ -3100,7 +3166,9 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                                         | MoveRepoRootCommand
                                                         | QueryReposCommand
                                                     ? ReposResponse
-                                                    : Response;
+                                                    : C extends QueryProvidersCommand
+                                                      ? ProvidersResponse
+                                                      : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the

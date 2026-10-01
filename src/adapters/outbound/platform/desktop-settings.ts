@@ -34,6 +34,13 @@ export interface DesktopSettings {
    * whisper.cpp adapter. Undefined → auto-detect.
    */
   readonly dictationLanguage?: string;
+  /**
+   * First-run setup state (issue #277): `open` (or undefined on a fresh
+   * install) shows the guided setup on the Florina view; `skipped`
+   * collapses it to a resumable row; `done` hides it. Desktop-local —
+   * setup progress is a UI concern, not daemon state.
+   */
+  readonly onboardingState?: 'open' | 'skipped' | 'done';
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -69,6 +76,11 @@ export function readDesktopSettings(dir?: string): DesktopSettings {
         : {}),
       ...(typeof parsed['dictationLanguage'] === 'string' && parsed['dictationLanguage'].length > 0
         ? { dictationLanguage: parsed['dictationLanguage'] }
+        : {}),
+      ...(parsed['onboardingState'] === 'open' ||
+      parsed['onboardingState'] === 'skipped' ||
+      parsed['onboardingState'] === 'done'
+        ? { onboardingState: parsed['onboardingState'] }
         : {}),
     };
   } catch {

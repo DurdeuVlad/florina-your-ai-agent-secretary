@@ -17,6 +17,7 @@ import type {
   TaskListResponse,
   EventsResponse,
   FleetResponse,
+  ProvidersResponse,
   PruneResponse,
   ShutdownResponse,
   DigestResponse,
@@ -1378,6 +1379,72 @@ describe('CommandApi', () => {
       expect(failover).toBeDefined();
       expect(failover!.summary).toContain('→ codex');
       expect(failover!.summary).toContain('gemini exhausted');
+    });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * query-providers (issue #277 — first-run setup panel)
+   * ---------------------------------------------------------------- */
+  describe('query-providers', () => {
+    it('reports attached providers as found and skipped ones with their reason', async () => {
+      const api = new CommandApi({
+        ...fixture.deps,
+        providerAttachment: () => ({
+          attached: [
+            { id: 'claude-code', command: '/usr/bin/claude' },
+            { id: 'devin', command: 'devin' },
+          ],
+          skipped: [
+            { id: 'codex', reason: 'codex not found on PATH' },
+            { id: 'gemini', reason: 'disabled via FLORINA_PROVIDERS' },
+          ],
+          dispose: () => undefined,
+        }),
+      });
+
+      const res = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+
+      expect(res.ok).toBe(true);
+      expect(res.providers).toEqual([
+        { id: 'claude-code', found: true },
+        { id: 'devin', found: true },
+        { id: 'codex', found: false, detail: 'codex not found on PATH' },
+        { id: 'gemini', found: false, detail: 'disabled via FLORINA_PROVIDERS' },
+      ]);
+    });
+
+    it('returns an empty list when no probe ran (accessor returns null)', async () => {
+      const api = new CommandApi({ ...fixture.deps, providerAttachment: () => null });
+      const res = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+      expect(res.ok).toBe(true);
+      // Honest unknown — never fabricate readiness.
+      expect(res.providers).toEqual([]);
+    });
+
+    it('returns an empty list when the dependency is not wired', async () => {
+      const res = (await fixture.api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+      expect(res.ok).toBe(true);
+      expect(res.providers).toEqual([]);
+    });
+
+    it('reflects the live accessor — a later attach is visible without restart', async () => {
+      let attachment: {
+        attached: readonly { id: string; command: string }[];
+        skipped: readonly { id: string; reason: string }[];
+        dispose: () => void;
+      } | null = null;
+      const api = new CommandApi({ ...fixture.deps, providerAttachment: () => attachment });
+
+      const before = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+      expect(before.providers).toEqual([]);
+
+      attachment = {
+        attached: [{ id: 'agy', command: 'agy' }],
+        skipped: [],
+        dispose: () => undefined,
+      };
+      const after = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+      expect(after.providers).toEqual([{ id: 'agy', found: true }]);
     });
   });
 

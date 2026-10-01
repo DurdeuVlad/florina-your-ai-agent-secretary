@@ -154,6 +154,18 @@ const TAG_CLASS = {
   ReposRepoRow: 'card',
   ReposRepoName: 'title',
   ReposRepoPath: 'summary mono',
+  /* first-run setup panel (issue #277) */
+  SetupPanel: 'setup-panel',
+  SetupCard: 'setup-card',
+  SetupStepTitle: 'setup-title',
+  SetupStepBody: 'setup-body',
+  SetupModeRow: 'setup-modes',
+  SetupList: 'setup-list',
+  SetupItem: 'setup-item',
+  SetupItemName: 'setup-item-name',
+  SetupItemHint: 'setup-item-hint',
+  SetupActions: 'actions',
+  SetupResumeRow: 'setup-resume',
 };
 
 function propsToClass(tag, props) {

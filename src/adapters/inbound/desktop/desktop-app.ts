@@ -38,6 +38,9 @@ import type { DiscoveredRepo } from '../../../core/application/use-cases/repos/d
 import { IDEACMD_KINDS, renderIdeasScreen } from './views/ideas-screen.js';
 import { renderChatScreen } from './views/chat-screen.js';
 import { renderChatActivityDrawer } from './views/chat-activity-drawer.js';
+import { renderSetupHidden, renderSetupResumeRow, renderSetupView } from './views/setup-view.js';
+import type { SetupProvider, SetupStep } from './views/setup-view.js';
+import type { ProviderStatusView } from '../../../core/application/use-cases/tasks/command-api.js';
 import { renderSecretaryScreen } from './views/secretary-screen.js';
 import type { DictationService } from '../../../core/application/use-cases/voice/dictation-service.js';
 import type { VoiceSessionState } from '../../../core/application/ports/outbound/voice.js';
@@ -143,6 +146,13 @@ export interface DesktopAppOptions {
    */
   readonly onDaemonMissing?: () => void;
   /**
+   * Install mode for the first-run setup chooser (issue #277): `true`
+   * when the app is the packaged installer build (`app.isPackaged`),
+   * `false`/absent for source runs. The user can still flip the choice
+   * on the welcome step — the flag only sets the default.
+   */
+  readonly packaged?: boolean;
+  /**
    * Dictation pipeline (issue #161): the mic button's `dictation:start` /
    * `dictation:stop` verbs drive this service; it owns the renderer-mic
    * ↔ realtime/whisper path and reports state + transcripts through its
@@ -212,6 +222,8 @@ export interface DesktopSettingsShape {
   readonly micDeviceId?: string;
   readonly voiceModeDefault: boolean;
   readonly dictationLanguage?: string;
+  /** First-run setup state (issue #277) — see `DesktopSettings`. */
+  readonly onboardingState?: 'open' | 'skipped' | 'done';
 }
 
 /** Read/write port for `~/.florina/desktop-settings.json` (issue #163). */
@@ -308,6 +320,34 @@ export class DesktopApp {
   private readonly catchUpTrigger: CatchUpAutoTrigger;
   /** Guards against overlapping `catchup:opened` fetches (focus + nav can race). */
   private catchUpBusy = false;
+  /**
+   * First-run setup state (issue #277): the current step while the
+   * panel is open, plus the install-mode choice shown on the welcome
+   * step (defaults to the real packaged/source flag). `setupStep` is
+   * null whenever the panel isn't rendering a step (skipped/done).
+   */
+  private setupStep: SetupStep | null = null;
+  private installMode: 'packaged' | 'source';
+  /**
+   * In-memory mirror of the last onboarding intent. Wins over the store
+   * so a missing store or a failed write still honors Skip/Done for the
+   * rest of the session instead of resurrecting the wizard instantly.
+   */
+  private onboardingOverride: 'open' | 'skipped' | 'done' | null = null;
+  /** Serializes async setup verbs — a double-click can't skip a step. */
+  private setupBusy = false;
+  /** Last observed setup facts — kept so the panel renders offline too. */
+  private setupProviders: readonly SetupProvider[] = [];
+  private setupRoots: readonly string[] = [];
+  private setupRepos: readonly { name: string; path: string }[] = [];
+  /**
+   * Honesty flags (issue #277): set only when a well-formed response
+   * actually arrived. Checked-and-empty renders "none found"; never-
+   * checked renders "couldn't check" — the panel never asserts an empty
+   * world on a failed/missing query.
+   */
+  private providersChecked = false;
+  private reposChecked = false;
 
   constructor(options: DesktopAppOptions) {
     this.window = options.window;
@@ -326,6 +366,7 @@ export class DesktopApp {
     this.desktopSettings = options.desktopSettings;
     this.folderPicker = options.folderPicker;
     this.catchUpTrigger = options.catchUpTrigger ?? new CatchUpAutoTrigger();
+    this.installMode = options.packaged === true ? 'packaged' : 'source';
     // Voice-mode state + live transcript captions reach the renderer on
     // voice:update (issue #162). Finals ALSO journal into the chat thread
     // via chat-append (wired in the composition root) — the preview is
@@ -671,6 +712,9 @@ export class DesktopApp {
   private updateDaemonStatus(status: DaemonStatus, extra?: Partial<RendererStateData>): void {
     this.state.update({ daemonStatus: status, ...extra });
     this.bridge.sendToRenderer('daemon:status', { status, error: extra?.error });
+    // The setup panel's offline note reacts to connectivity instantly —
+    // it renders from cached facts, so this is safe pre-first-refresh.
+    this.pushSetup();
     if (this.tray !== null) {
       this.tray.setStatus(status);
     }
@@ -916,6 +960,10 @@ export class DesktopApp {
     }
     if (typeof m.cmd === 'string' && m.cmd.startsWith('deskset:')) {
       this.handleDesktopSettingsCommand(m.cmd, m.id);
+      return;
+    }
+    if (typeof m.cmd === 'string' && m.cmd.startsWith('setup:')) {
+      await this.handleSetupCommand(m.cmd, m.id);
       return;
     }
     if (m.cmd === 'pickfolders' || m.cmd === 'defaultfolder') {
@@ -1524,6 +1572,11 @@ export class DesktopApp {
           : current.dictationLanguage !== undefined
             ? { dictationLanguage: current.dictationLanguage }
             : {}),
+      // onboardingState (issue #277) is written only by the setup:* verbs —
+      // a deskset save must carry it through, not wipe it.
+      ...(current.onboardingState !== undefined
+        ? { onboardingState: current.onboardingState }
+        : {}),
     };
     try {
       this.desktopSettings.write(next);
@@ -1536,6 +1589,216 @@ export class DesktopApp {
     this.dictation?.setSessionLanguage(next.dictationLanguage);
     ack({ ok: true });
     this.replayVoiceConfig();
+  }
+
+  /**
+   * First-run setup verbs (issue #277). `setup:*` commands drive the
+   * guided panel's local step state; they never reach the daemon.
+   * Skipping/done persist through the desktop-settings store so the
+   * choice survives restarts; everything else re-renders the panel.
+   */
+  private async handleSetupCommand(raw: string, id: unknown): Promise<void> {
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      this.bridge.sendToRenderer('command:result', { id, res });
+    };
+    if (this.setupBusy && (raw === 'setup:next' || raw === 'setup:back')) {
+      // Only step navigation races (it mutates setupStep before its
+      // refresh await). Skip/done/resume are single-shot writes — safe
+      // to honor even mid-refresh, and dropping them would feel dead.
+      ack({ ok: true });
+      return;
+    }
+    try {
+      await this.dispatchSetupCommand(raw, ack);
+    } catch {
+      // Renderer gone mid-flight (IpcError on a disposed bridge) — the
+      // verb's state change still applied; nothing left to report to.
+      try {
+        ack({ ok: false, error: 'setup command failed' });
+      } catch {
+        // Bridge disposed — nowhere to send.
+      }
+    }
+  }
+
+  private async dispatchSetupCommand(
+    raw: string,
+    ack: (res: { ok: boolean; error?: string }) => void,
+  ): Promise<void> {
+    const steps: readonly SetupStep[] = ['welcome', 'apps', 'folder', 'done'];
+    if (raw === 'setup:skip') {
+      this.setOnboardingState('skipped');
+      this.setupStep = null;
+      this.pushSetup();
+      ack({ ok: true });
+      return;
+    }
+    if (raw === 'setup:resume') {
+      this.setOnboardingState('open');
+      this.setupStep = 'welcome';
+      await this.refreshSetup();
+      ack({ ok: true });
+      return;
+    }
+    if (raw === 'setup:done') {
+      this.setOnboardingState('done');
+      this.setupStep = null;
+      this.pushSetup();
+      ack({ ok: true });
+      return;
+    }
+    if (raw === 'setup:recheck') {
+      await this.refreshSetup();
+      ack({ ok: true });
+      return;
+    }
+    if (raw === 'setup:mode:packaged' || raw === 'setup:mode:source') {
+      this.installMode = raw === 'setup:mode:packaged' ? 'packaged' : 'source';
+      this.pushSetup();
+      ack({ ok: true });
+      return;
+    }
+    if (raw === 'setup:next' || raw === 'setup:back') {
+      this.setupBusy = true;
+      try {
+        const idx = this.setupStep === null ? 0 : steps.indexOf(this.setupStep);
+        const next =
+          steps[Math.min(steps.length - 1, Math.max(0, idx + (raw === 'setup:next' ? 1 : -1)))];
+        this.setupStep = next;
+        // Step transitions re-pull the observable facts so Apps/Folder/Done
+        // always render current state instead of a stale launch-time probe.
+        await this.refreshSetup();
+      } finally {
+        this.setupBusy = false;
+      }
+      ack({ ok: true });
+      return;
+    }
+    ack({ ok: false, error: `unknown setup command: ${raw}` });
+  }
+
+  /**
+   * Persist the setup lifecycle flag (open/skipped/done) through the
+   * desktop-settings store. A persist failure is non-fatal — the worst
+   * case is the panel reappearing next launch, which is recoverable.
+   */
+  private setOnboardingState(state: 'open' | 'skipped' | 'done'): void {
+    // Record the intent in memory first — even a missing store or a
+    // failed write keeps the choice for the rest of this session.
+    this.onboardingOverride = state;
+    if (this.desktopSettings === undefined) return;
+    try {
+      this.desktopSettings.write({ ...this.desktopSettings.read(), onboardingState: state });
+    } catch {
+      // Persistence is best-effort; the in-memory override already won.
+    }
+  }
+
+  /**
+   * Effective onboarding flag: session override first, then the store,
+   * then 'open' on a fresh install. Reading through the override means a
+   * failed/absent write never resurrects the wizard mid-session.
+   */
+  private onboardingState(): 'open' | 'skipped' | 'done' {
+    return this.onboardingOverride ?? this.desktopSettings?.read().onboardingState ?? 'open';
+  }
+
+  /**
+   * Pull the observable setup facts (provider attach results + repo
+   * roots/discovered projects) and re-render the panel. Queries only run
+   * while setup is open — done/skipped states don't hit the daemon.
+   * Failed queries keep the last-known facts; the panel renders an
+   * honest "can't check right now" note instead of blanking.
+   */
+  private async refreshSetup(prefetchedRepos?: Response | null): Promise<void> {
+    if (this.onboardingState() !== 'open') {
+      this.pushSetup();
+      return;
+    }
+    try {
+      const [provRes, reposRes] = await Promise.all([
+        this.sendCommand({ kind: 'query-providers' }).catch((): null => null),
+        // refreshViews hands in the query-repos response it already made —
+        // no second filesystem scan per refresh cycle.
+        prefetchedRepos !== undefined
+          ? Promise.resolve(prefetchedRepos)
+          : this.sendCommand({ kind: 'query-repos' }).catch((): null => null),
+      ]);
+      // 'parked' discriminates FleetResponse — it shares the `providers`
+      // field name but with a different element shape.
+      if (provRes !== null && provRes.ok && 'providers' in provRes && !('parked' in provRes)) {
+        const list = provRes.providers as readonly ProviderStatusView[];
+        if (list.every((p) => typeof p.id === 'string' && typeof p.found === 'boolean')) {
+          this.setupProviders = list.map((p) => ({
+            id: p.id,
+            found: p.found,
+            ...(typeof p.detail === 'string' ? { detail: p.detail } : {}),
+          }));
+          this.providersChecked = true;
+        }
+      }
+      if (reposRes !== null && reposRes.ok && 'roots' in reposRes && 'repos' in reposRes) {
+        const roots = (reposRes.roots as RepoRootsConfig).roots;
+        const repos = reposRes.repos as readonly DiscoveredRepo[];
+        if (Array.isArray(roots) && Array.isArray(repos)) {
+          this.setupRoots = roots.map((r) => r.path);
+          this.setupRepos = repos.map((r) => ({ name: r.name, path: r.path }));
+          this.reposChecked = true;
+        }
+      }
+    } catch {
+      // Malformed wire data mid-mutation — fall through and re-render
+      // last-known facts rather than leaving the panel one step stale.
+    }
+    try {
+      this.pushSetup();
+    } catch {
+      // sendToRenderer throws when the bridge is disposed mid-flight —
+      // a vanished renderer needs no panel.
+    }
+  }
+
+  /**
+   * Render and push the setup panel on `setup:update`. Open → the current
+   * step card; skipped → the slim resume row; done → an empty panel.
+   * Runs from cached facts so daemon transitions re-render instantly.
+   */
+  private pushSetup(): void {
+    const onboarding = this.onboardingState();
+    if (onboarding === 'done') {
+      this.bridge.sendToRenderer('setup:update', renderSetupHidden());
+      return;
+    }
+    if (onboarding === 'skipped') {
+      this.bridge.sendToRenderer('setup:update', renderSetupResumeRow());
+      return;
+    }
+    this.bridge.sendToRenderer(
+      'setup:update',
+      renderSetupView({
+        step: this.setupStep ?? 'welcome',
+        installMode: this.installMode,
+        providers: this.setupProviders,
+        roots: this.setupRoots,
+        repos: this.setupRepos,
+        providersChecked: this.providersChecked,
+        reposChecked: this.reposChecked,
+        daemonOnline: this.state.snapshot().daemonStatus === 'connected',
+      }),
+    );
+  }
+
+  /**
+   * Re-push the setup panel on `did-finish-load` (same family as
+   * replayDaemonStatus/replayVoiceConfig, #133): a push that landed
+   * before the renderer's listeners attached would otherwise leave the
+   * panel blank until the next refresh.
+   */
+  replaySetup(): void {
+    this.pushSetup();
+    if (this.isConnected && this.onboardingState() === 'open') {
+      void this.refreshSetup().catch(() => undefined);
+    }
   }
 
   /**
@@ -1811,7 +2074,9 @@ export class DesktopApp {
     if (this.inspectorTaskId === null) this.pushInspector();
     else void this.refreshInspectorEvents();
     // Fleet/quota screen (#127): quota + parked + routing decisions.
-    if (fleetRes !== null && fleetRes.ok && 'providers' in fleetRes) {
+    // ('parked' discriminates FleetResponse from query-providers' own
+    // `providers` payload — both surfaced after #277.)
+    if (fleetRes !== null && fleetRes.ok && 'parked' in fleetRes) {
       this.bridge.sendToRenderer('fleet:update', renderFleetScreen(fleetRes));
     }
     // Preferences screen (#128): durable routing rules + denies.
@@ -1885,5 +2150,11 @@ export class DesktopApp {
       }
       this.pushChat();
     }
+    // First-run setup (issue #277): refresh the panel's facts each
+    // refresh cycle while it's open, reusing this cycle's query-repos
+    // response (null = the query failed — the panel shows "couldn't
+    // check", never a fabricated empty state). No-ops to a cached push
+    // once the user finishes or skips.
+    void this.refreshSetup(reposRes).catch(() => undefined);
   }
 }

@@ -647,6 +647,10 @@ export class FlorinaDaemon extends EventEmitter {
         repoScanner: this.repoScanner,
         delegation,
         quotaLedger: this.quotaLedger ?? undefined,
+        // Onboarding/setup surface (issue #277): exposes which provider
+        // CLIs the startup probe attached vs. skipped. Live accessor so a
+        // `none`-disabled or absent attachment reports honestly empty.
+        providerAttachment: () => this.localProviders,
         // Voice sessions report live state here (issue #131); it is
         // broadcast to subscribed surfaces as an ephemeral voice:state
         // push — session ephemera is not journaled.

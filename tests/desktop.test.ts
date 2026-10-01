@@ -292,6 +292,7 @@ describe('IpcBridge', () => {
       'history:search-results',
       'memory:update',
       'repos:update',
+      'setup:update',
       'secretary:update',
       'chat:update',
       'chat:activity',
@@ -3618,6 +3619,365 @@ describe('deskset: desktop settings command (issue #163)', () => {
     await app.handleRendererCommand({ id: 's5', cmd: deskset({ dictationLanguage: 'ro' }) });
     expect(resultFor(transport, 's5')?.ok).toBe(true);
     expect(spy).toHaveBeenCalledWith('ro');
+    await app.disconnect();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * First-run setup panel (issue #277): `setup:*` verbs drive a local
+ * step state machine; skip/done persist via the desktop-settings store;
+ * facts come from query-providers/query-repos while the panel is open.
+ * ------------------------------------------------------------------ */
+describe('setup: first-run setup panel (issue #277)', () => {
+  let server: MockDaemonServer;
+
+  beforeEach(() => {
+    server = new MockDaemonServer();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function memStore(initial?: Partial<DesktopSettingsShape>): {
+    store: DesktopSettingsStore;
+    written: DesktopSettingsShape[];
+    current: () => DesktopSettingsShape;
+  } {
+    let current: DesktopSettingsShape = {
+      stopDaemonOnQuit: false,
+      voiceModeDefault: false,
+      ...initial,
+    };
+    const written: DesktopSettingsShape[] = [];
+    return {
+      store: {
+        read: () => current,
+        write: (s) => {
+          current = s;
+          written.push(s);
+        },
+      },
+      written,
+      current: () => current,
+    };
+  }
+
+  function resultFor(
+    transport: MockIpcTransport,
+    id: string,
+  ): { ok: boolean; error?: string } | undefined {
+    return transport.toRenderer
+      .filter((m) => m.channel === 'command:result')
+      .map((m) => m.data as { id: string; res: { ok: boolean; error?: string } })
+      .find((r) => r.id === id)?.res;
+  }
+
+  /** Latest setup tree pushed to the renderer (undefined until first push). */
+  function lastSetupTree(transport: MockIpcTransport): unknown {
+    const pushes = transport.toRenderer.filter((m) => m.channel === 'setup:update');
+    return pushes.length === 0 ? undefined : pushes[pushes.length - 1]!.data;
+  }
+
+  /** Flatten a RenderTree's text children for substring assertions. */
+  function treeText(node: unknown): string {
+    if (typeof node === 'string') return node;
+    if (node === null || typeof node !== 'object') return '';
+    const rec = node as { children?: readonly unknown[]; tag?: string };
+    return (rec.children ?? []).map(treeText).join(' ');
+  }
+
+  /** Collect every `command` prop in the tree (verbs the panel exposes). */
+  function treeCommands(node: unknown, out: string[] = []): string[] {
+    if (node === null || typeof node !== 'object') return out;
+    const rec = node as {
+      children?: readonly unknown[];
+      props?: { command?: unknown };
+    };
+    if (typeof rec.props?.command === 'string') out.push(rec.props.command);
+    for (const c of rec.children ?? []) treeCommands(c, out);
+    return out;
+  }
+
+  function setupApp(
+    transport: MockIpcTransport,
+    options?: { settings?: DesktopSettingsStore; packaged?: boolean },
+  ): DesktopApp {
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      ...(options?.settings !== undefined ? { desktopSettings: options.settings } : {}),
+      ...(options?.packaged !== undefined ? { packaged: options.packaged } : {}),
+    });
+    app.start();
+    return app;
+  }
+
+  it('first launch (no stored state) renders the welcome step in the Florina view', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    app.replaySetup();
+    const tree = lastSetupTree(transport) as { tag: string };
+    expect(tree.tag).toBe('SetupPanel');
+    const text = treeText(tree);
+    expect(text).toContain('Welcome to Florina');
+    expect(treeCommands(tree)).toEqual(
+      expect.arrayContaining([
+        'setup:next',
+        'setup:skip',
+        'setup:mode:packaged',
+        'setup:mode:source',
+      ]),
+    );
+    await app.disconnect();
+  });
+
+  it('setup:skip persists skipped state and collapses to a resumable row', async () => {
+    const transport = new MockIpcTransport();
+    const { store, current } = memStore();
+    const app = setupApp(transport, { settings: store });
+    await app.handleRendererCommand({ id: 'sk1', cmd: 'setup:skip' });
+    expect(resultFor(transport, 'sk1')?.ok).toBe(true);
+    expect(current().onboardingState).toBe('skipped');
+    const tree = lastSetupTree(transport);
+    expect(treeText(tree)).toContain('Finish setup');
+    expect(treeCommands(tree)).toContain('setup:resume');
+    expect(treeText(tree)).not.toContain('Welcome to Florina');
+    await app.disconnect();
+  });
+
+  it('setup:done persists done state and renders nothing', async () => {
+    const transport = new MockIpcTransport();
+    const { store, current } = memStore({ onboardingState: 'open' });
+    const app = setupApp(transport, { settings: store });
+    await app.handleRendererCommand({ id: 'dn1', cmd: 'setup:done' });
+    expect(resultFor(transport, 'dn1')?.ok).toBe(true);
+    expect(current().onboardingState).toBe('done');
+    const tree = lastSetupTree(transport) as { children?: unknown[] };
+    expect(tree.children).toEqual([]);
+    await app.disconnect();
+  });
+
+  it('skipped state survives restart (stored state → resume row, not the wizard)', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore({ onboardingState: 'skipped' });
+    const app = setupApp(transport, { settings: store });
+    app.replaySetup();
+    const tree = lastSetupTree(transport);
+    expect(treeText(tree)).toContain('Finish setup');
+    expect(treeText(tree)).not.toContain('Welcome to Florina');
+    await app.disconnect();
+  });
+
+  it('setup:resume reopens the wizard at the welcome step', async () => {
+    const transport = new MockIpcTransport();
+    const { store, current } = memStore({ onboardingState: 'skipped' });
+    const app = setupApp(transport, { settings: store });
+    await app.handleRendererCommand({ id: 'rs1', cmd: 'setup:resume' });
+    expect(resultFor(transport, 'rs1')?.ok).toBe(true);
+    expect(current().onboardingState).toBe('open');
+    const tree = lastSetupTree(transport);
+    expect(treeText(tree)).toContain('Welcome to Florina');
+    await app.disconnect();
+  });
+
+  /** Daemon socket responder shared by the connected-step tests. */
+  function respondSetupFacts(socket: WebSocket): string[] {
+    const kinds: string[] = [];
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (typeof cmd['kind'] !== 'string') return;
+      kinds.push(cmd['kind']);
+      if (cmd['kind'] === 'query-providers') {
+        socket.send(
+          JSON.stringify({
+            ok: true,
+            providers: [
+              { id: 'claude-code', found: true },
+              { id: 'codex', found: false, detail: 'codex not found on PATH' },
+            ],
+          }),
+        );
+      } else if (cmd['kind'] === 'query-repos') {
+        socket.send(JSON.stringify({ ok: true, roots: { roots: [] }, repos: [] }));
+      } else {
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    return kinds;
+  }
+
+  async function connect(transport: MockIpcTransport, app: DesktopApp): Promise<WebSocket> {
+    const conn = server.waitForConnection();
+    await app.connectToDaemon(server.url);
+    return conn;
+  }
+
+  it('setup:next advances steps and queries the daemon for provider facts', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    const kinds = respondSetupFacts(socket);
+    await app.handleRendererCommand({ id: 'nx1', cmd: 'setup:next' });
+    expect(resultFor(transport, 'nx1')?.ok).toBe(true);
+    expect(kinds).toContain('query-providers');
+    const text = treeText(lastSetupTree(transport));
+    expect(text).toContain('Check your coding apps');
+    expect(text).toContain('Claude Code — found');
+    expect(text).toContain('Codex — not found');
+    // Sign-in honesty: the step itself says "found" ≠ signed in.
+    expect(text).toContain('does not mean you are signed in');
+    await app.disconnect();
+  });
+
+  it('missing providers show a calm next step, never a failure verdict', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    respondSetupFacts(socket);
+    await app.handleRendererCommand({ id: 'nx2', cmd: 'setup:next' });
+    const text = treeText(lastSetupTree(transport));
+    expect(text).toContain('install it and sign in once in that app');
+    // Honest recovery: a fresh install is seen after a helper restart —
+    // Check again alone can only re-read the boot-time probe.
+    expect(text).toContain('tray → Stop daemon');
+    expect(text).not.toContain('error');
+    expect(text).not.toContain('failed');
+    await app.disconnect();
+  });
+
+  it('a malformed providers response renders "couldn’t check", never fabricated emptiness', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (cmd['kind'] === 'query-providers') {
+        // Old daemon build: no query-providers → ok:false. The panel must
+        // not convert that into "no apps installed".
+        socket.send(JSON.stringify({ ok: false, error: 'unknown command' }));
+      } else {
+        socket.send(JSON.stringify({ ok: true }));
+      }
+    });
+    await app.handleRendererCommand({ id: 'nx6', cmd: 'setup:next' });
+    const text = treeText(lastSetupTree(transport));
+    expect(text).toContain('couldn’t get an answer');
+    expect(text).not.toContain('No supported coding apps are set up yet');
+    await app.disconnect();
+  });
+
+  it('a double setup:next cannot skip a step (verbs serialize)', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    respondSetupFacts(socket);
+    // Fire both without awaiting the first — the second lands while the
+    // first verb's refresh await is still pending.
+    const p1 = app.handleRendererCommand({ id: 'nx7', cmd: 'setup:next' });
+    const p2 = app.handleRendererCommand({ id: 'nx8', cmd: 'setup:next' });
+    await Promise.all([p1, p2]);
+    const text = treeText(lastSetupTree(transport));
+    expect(text).toContain('Check your coding apps');
+    expect(text).not.toContain('Choose a project folder');
+    await app.disconnect();
+  });
+
+  it('deskset saves preserve onboardingState instead of wiping it', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore({ onboardingState: 'done' });
+    const app = setupApp(transport, { settings: store });
+    await app.handleRendererCommand({
+      id: 'ds1',
+      cmd: `deskset:${encodeURIComponent(JSON.stringify({ micDeviceId: 'usb-9' }))}`,
+    });
+    expect(resultFor(transport, 'ds1')?.ok).toBe(true);
+    expect(written[0]?.onboardingState).toBe('done');
+    await app.disconnect();
+  });
+
+  it('the folder step explains scope BEFORE opening the native picker', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    respondSetupFacts(socket);
+    await app.handleRendererCommand({ id: 'nx3', cmd: 'setup:next' });
+    await app.handleRendererCommand({ id: 'nx4', cmd: 'setup:next' });
+    const tree = lastSetupTree(transport);
+    const text = treeText(tree);
+    expect(text).toContain('Choose a project folder');
+    expect(text).toContain('never looks outside the folders you choose');
+    expect(treeCommands(tree)).toContain('pickfolders');
+    await app.disconnect();
+  });
+
+  it('offline apps step says Florina cannot check right now', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore({ onboardingState: 'open' });
+    const app = setupApp(transport, { settings: store });
+    // Advance to apps while offline — refreshSetup's queries reject and
+    // the panel must render the offline note, not fabricated facts.
+    await app.handleRendererCommand({ id: 'nx5', cmd: 'setup:next' });
+    expect(resultFor(transport, 'nx5')?.ok).toBe(true);
+    const text = treeText(lastSetupTree(transport));
+    expect(text).toContain('can’t check right now');
+    await app.disconnect();
+  });
+
+  it('done state stops daemon queries — hidden setup costs nothing', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore({ onboardingState: 'done' });
+    const app = setupApp(transport, { settings: store });
+    const socket = await connect(transport, app);
+    const kinds: string[] = [];
+    socket.on('message', (data) => {
+      const cmd = JSON.parse(String(data)) as Record<string, unknown>;
+      if (typeof cmd['kind'] === 'string') kinds.push(cmd['kind']);
+      socket.send(JSON.stringify({ ok: true }));
+    });
+    app.replaySetup();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(kinds).not.toContain('query-providers');
+    expect(lastSetupTree(transport)).toEqual({ tag: 'SetupPanel', props: {}, children: [] });
+    await app.disconnect();
+  });
+
+  it('unknown setup verbs fail the ack without touching stored state', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore();
+    const app = setupApp(transport, { settings: store });
+    await app.handleRendererCommand({ id: 'u1', cmd: 'setup:bogus' });
+    expect(resultFor(transport, 'u1')?.ok).toBe(false);
+    expect(written).toHaveLength(0);
+    await app.disconnect();
+  });
+
+  it('a settings-store write failure does not crash the skip ack', async () => {
+    const transport = new MockIpcTransport();
+    const app = new DesktopApp({
+      window: new MockWindowBackend(),
+      ipcTransport: transport,
+      desktopSettings: {
+        read: () => ({ stopDaemonOnQuit: false, voiceModeDefault: false }),
+        write: () => {
+          throw new Error('disk full');
+        },
+      },
+    });
+    app.start();
+    await app.handleRendererCommand({ id: 'sk2', cmd: 'setup:skip' });
+    expect(resultFor(transport, 'sk2')?.ok).toBe(true);
+    // The failed write must not resurrect the wizard in-session — the
+    // in-memory override keeps the panel collapsed.
+    const tree = lastSetupTree(transport);
+    expect(treeText(tree)).toContain('Finish setup');
+    expect(treeText(tree)).not.toContain('Welcome to Florina');
     await app.disconnect();
   });
 });
