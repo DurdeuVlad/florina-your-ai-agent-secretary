@@ -2046,6 +2046,28 @@ describe('chat turns (issue #158)', () => {
     expect(startTurn).toHaveBeenCalledOnce();
   });
 
+  it('chat-read surfaces the Method contract version when the service reports one (#287)', async () => {
+    const { api } = createFixture();
+    api.setChatService({
+      startTurn: vi.fn(),
+      turnInFlight: () => false,
+      methodVersion: 'florina-method/1.0',
+    });
+
+    const res = (await api.execute({ kind: 'chat-read' })) as ChatReadResponse;
+    expect(res.ok).toBe(true);
+    expect(res.methodVersion).toBe('florina-method/1.0');
+  });
+
+  it('chat-read omits methodVersion when the service carries no contract', async () => {
+    const { api } = createFixture();
+    api.setChatService({ startTurn: vi.fn(), turnInFlight: () => false });
+
+    const res = (await api.execute({ kind: 'chat-read' })) as ChatReadResponse;
+    expect(res.ok).toBe(true);
+    expect(res.methodVersion).toBeUndefined();
+  });
+
   it('rejects a second send while a turn is in flight — nothing journaled', async () => {
     const { api, chatStore } = createFixture();
     api.setChatService({ startTurn: vi.fn(), turnInFlight: () => true });

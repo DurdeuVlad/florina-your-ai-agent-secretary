@@ -10,9 +10,14 @@ import { StorageDatabase } from '../src/storage/index.js';
 import { ChatMessageRepository } from '../src/adapters/outbound/persistence/sqlite/repositories/chat-message.js';
 import {
   ChatService,
+  DEFAULT_CHAT_INSTRUCTIONS,
   toWireMessage,
   toConversationMessage,
 } from '../src/core/application/use-cases/chat/chat-service.js';
+import {
+  FLORINA_CONTRACT_VERSION,
+  renderFlorinaContract,
+} from '../src/core/application/use-cases/prompting/florina-method.js';
 import { ModelPortError } from '../src/core/application/ports/outbound/model.js';
 import type {
   CompletionRequest,
@@ -193,6 +198,77 @@ describe('ChatService', () => {
     const sent = connector.requests[0]?.messages ?? [];
     expect(sent.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
     expect(sent[2]).toEqual({ role: 'assistant', content: 'answer one' });
+  });
+});
+
+describe('Florina Method composition (#287)', () => {
+  let db: StorageDatabase;
+  let store: ChatMessageRepository;
+  let connector: ScriptedConnector;
+  let executor: CommandExecutor;
+
+  beforeEach(() => {
+    db = new StorageDatabase({ path: ':memory:' });
+    db.open();
+    store = new ChatMessageRepository(db.connection);
+    connector = new ScriptedConnector();
+    executor = {
+      execute: () => Promise.resolve({ ok: true, items: [] } as Response),
+    };
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  function service(extra: Partial<ConstructorParameters<typeof ChatService>[0]> = {}) {
+    return new ChatService({ store, connector, commandApi: executor, ...extra });
+  }
+
+  it('composes the persona with the Method contract', () => {
+    expect(DEFAULT_CHAT_INSTRUCTIONS).toContain('You are Florina');
+    expect(DEFAULT_CHAT_INSTRUCTIONS).toContain(renderFlorinaContract());
+    expect(DEFAULT_CHAT_INSTRUCTIONS).toContain(FLORINA_CONTRACT_VERSION);
+    // Goal + standing rules reach the Secretary; raise_attention is the
+    // persona's surfacing channel (the contract names no tools).
+    expect(DEFAULT_CHAT_INSTRUCTIONS).toContain("deliver the user's task working");
+    expect(DEFAULT_CHAT_INSTRUCTIONS).toContain('Evidence over assertion');
+    expect(DEFAULT_CHAT_INSTRUCTIONS).toContain('raise_attention');
+  });
+
+  it('sends the contract to the model on the wire', async () => {
+    store.append(userMessage('hello'));
+    connector.enqueue({ content: 'hi', toolCalls: [] });
+    const svc = service();
+    svc.startTurn();
+    await vi.waitFor(() => expect(svc.turnInFlight()).toBe(false));
+
+    const sys = connector.requests[0]?.messages[0];
+    expect(sys?.role).toBe('system');
+    expect(sys?.content).toBe(DEFAULT_CHAT_INSTRUCTIONS);
+    expect(svc.methodVersion).toBe(FLORINA_CONTRACT_VERSION);
+  });
+
+  it('an explicit systemPrompt replaces the whole prompt — contract included', async () => {
+    store.append(userMessage('hello'));
+    connector.enqueue({ content: 'hi', toolCalls: [] });
+    const svc = service({ systemPrompt: 'Custom persona only.' });
+    svc.startTurn();
+    await vi.waitFor(() => expect(svc.turnInFlight()).toBe(false));
+
+    const sys = connector.requests[0]?.messages[0];
+    expect(sys?.content).toBe('Custom persona only.');
+    expect(svc.methodVersion).toBeUndefined();
+  });
+
+  it('treats a defined-but-empty systemPrompt as an override, not the default', () => {
+    const svc = service({ systemPrompt: '' });
+    expect(svc.methodVersion).toBeUndefined();
+  });
+
+  it('keeps the repertoire non-prescriptive in the prompt', () => {
+    expect(DEFAULT_CHAT_INSTRUCTIONS).toContain('No fixed order');
+    expect(DEFAULT_CHAT_INSTRUCTIONS).not.toMatch(/must follow|always run/i);
   });
 });
 

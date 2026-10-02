@@ -24,6 +24,7 @@ import type { ChatMessage } from '../../ports/outbound/model.js';
 import { ModelPortError, type ModelPort } from '../../ports/outbound/model.js';
 import type { ChatMessageRepositoryPort } from '../../ports/outbound/repositories.js';
 import { FlorinaLoop, LoopError, type LoopEvent } from '../florina/loop.js';
+import { FLORINA_CONTRACT_VERSION, renderFlorinaContract } from '../prompting/florina-method.js';
 import type { ChatTurnPort, CommandExecutor } from '../tasks/command-api.js';
 import { buildChatToolRegistry } from './chat-tools.js';
 
@@ -38,7 +39,12 @@ export interface ChatServiceDeps {
   readonly onMessage?: (message: ConversationMessage) => void;
   /** Sink for ephemeral loop progress (daemon → `chat:event` push). */
   readonly onEvent?: (event: LoopEvent) => void;
-  /** System prompt prepended at run time (not journaled — it's config). */
+  /**
+   * System prompt prepended at run time (not journaled — it's config).
+   * When set, it replaces the entire default prompt *including the
+   * Florina Method contract* — a deliberate opt-out, reported by
+   * `methodVersion` becoming undefined.
+   */
   readonly systemPrompt?: string;
   readonly maxIterations?: number;
   /** Injectable clock for tests. */
@@ -49,7 +55,7 @@ export interface ChatServiceDeps {
  * Default Secretary persona for the chat surface — plain-language
  * supervision of the user's coding agents, honest about what it can see.
  */
-export const DEFAULT_CHAT_INSTRUCTIONS =
+const SECRETARY_PERSONA =
   'You are Florina, the user’s Secretary for their coding agents. ' +
   'You can see the task fleet, the attention inbox, digests, provider quota, ' +
   'and idea ledgers through your tools — check them rather than guessing. ' +
@@ -58,6 +64,14 @@ export const DEFAULT_CHAT_INSTRUCTIONS =
   'permissions the user has not asked for in this conversation. ' +
   'When the user asks you to start work, delegate_task is the only path — ' +
   'report what you actually did, not what you would do.';
+
+/**
+ * The default Secretary system prompt: the persona composed with the
+ * versioned Florina Method contract (#287). The contract disciplines
+ * the Secretary's *work* — evidence over assertion, honest states,
+ * user-owned decisions surfaced rather than guessed — not its tone.
+ */
+export const DEFAULT_CHAT_INSTRUCTIONS = `${SECRETARY_PERSONA}\n\n${renderFlorinaContract()}`;
 
 let seq = 0;
 function messageId(): string {
@@ -137,6 +151,7 @@ export class ChatService implements ChatTurnPort {
   private readonly onMessage: ((message: ConversationMessage) => void) | undefined;
   private readonly onEvent: ((event: LoopEvent) => void) | undefined;
   private readonly systemPrompt: string;
+  private readonly methodActive: boolean;
   private readonly maxIterations: number | undefined;
   private readonly now: () => ISODateString;
   private readonly tools;
@@ -148,6 +163,7 @@ export class ChatService implements ChatTurnPort {
     this.onMessage = deps.onMessage;
     this.onEvent = deps.onEvent;
     this.systemPrompt = deps.systemPrompt ?? DEFAULT_CHAT_INSTRUCTIONS;
+    this.methodActive = deps.systemPrompt == null;
     this.maxIterations = deps.maxIterations;
     this.now = deps.now ?? (() => new Date().toISOString());
     this.tools = buildChatToolRegistry(deps.commandApi);
@@ -160,6 +176,16 @@ export class ChatService implements ChatTurnPort {
   /** Whether a model is configured — when false, sends journal only. */
   get modelAvailable(): boolean {
     return this.connector !== undefined;
+  }
+
+  /**
+   * The Florina Method contract version in effect, or `undefined` when
+   * a custom `systemPrompt` replaced the composed default. The version
+   * also travels inside the system prompt itself (the wire-observable
+   * channel — prompts are config, not journaled).
+   */
+  get methodVersion(): string | undefined {
+    return this.methodActive ? FLORINA_CONTRACT_VERSION : undefined;
   }
 
   /**
