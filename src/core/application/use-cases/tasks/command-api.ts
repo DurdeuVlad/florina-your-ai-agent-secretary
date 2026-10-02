@@ -1136,6 +1136,11 @@ export interface ChatReadResponse {
    * state instead of a client's stale guess.
    */
   readonly turnInFlight: boolean;
+  /**
+   * Florina Method contract version governing Secretary turns (#287) —
+   * absent when no chat service is wired or it runs without the contract.
+   */
+  readonly methodVersion?: string;
   readonly error?: string;
 }
 
@@ -1236,6 +1241,13 @@ export interface ChatTurnPort {
   startTurn(): void;
   /** Whether a turn is currently running. */
   turnInFlight(): boolean;
+  /**
+   * Florina Method contract version in effect (#287), or `undefined`
+   * when the implementation runs without the contract (e.g. a custom
+   * system prompt replaced the composed default). Prompts are config —
+   * not journaled — so this accessor is the observable channel.
+   */
+  readonly methodVersion?: string;
 }
 
 /**
@@ -2936,6 +2948,9 @@ export class CommandApi {
       ok: true,
       messages: this.chatStore.listVisible(),
       turnInFlight: this.chatService?.turnInFlight() === true,
+      ...(this.chatService?.methodVersion !== undefined
+        ? { methodVersion: this.chatService.methodVersion }
+        : {}),
       ...(clearedAt !== null ? { clearedAt } : {}),
     };
   }
