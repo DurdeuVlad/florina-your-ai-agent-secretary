@@ -87,6 +87,11 @@ export const KIND_METADATA: Readonly<Record<AttentionItemKind, DisplayMetadata>>
     color: 'red',
     label: 'Journal gap',
   },
+  ProviderAuth: {
+    icon: 'key',
+    color: 'amber',
+    label: 'Sign-in needed',
+  },
   Custom: {
     icon: 'info',
     color: 'slate',

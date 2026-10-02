@@ -21,9 +21,10 @@ import type {
   ISODateString,
 } from '../../../domain/types.js';
 import type { ChatMessage } from '../../ports/outbound/model.js';
-import { ModelPortError, type ModelPort } from '../../ports/outbound/model.js';
+import type { ModelPort } from '../../ports/outbound/model.js';
 import type { ChatMessageRepositoryPort } from '../../ports/outbound/repositories.js';
-import { FlorinaLoop, LoopError, type LoopEvent } from '../florina/loop.js';
+import { FlorinaLoop, type LoopEvent } from '../florina/loop.js';
+import { sanitizeFailureText } from '../readiness/provider-readiness.js';
 import { FLORINA_CONTRACT_VERSION, renderFlorinaContract } from '../prompting/florina-method.js';
 import type { ChatTurnPort, CommandExecutor } from '../tasks/command-api.js';
 import { buildChatToolRegistry } from './chat-tools.js';
@@ -47,6 +48,14 @@ export interface ChatServiceDeps {
    */
   readonly systemPrompt?: string;
   readonly maxIterations?: number;
+  /**
+   * Turn-outcome hooks for chat-model readiness (issue #294): the daemon
+   * wires these to the provider-readiness tracker so a rejected key or
+   * unreachable endpoint classifies the chat model instead of only
+   * failing the one turn.
+   */
+  readonly onTurnError?: (err: unknown) => void;
+  readonly onTurnSuccess?: () => void;
   /** Injectable clock for tests. */
   readonly now?: () => ISODateString;
 }
@@ -153,6 +162,8 @@ export class ChatService implements ChatTurnPort {
   private readonly systemPrompt: string;
   private readonly methodActive: boolean;
   private readonly maxIterations: number | undefined;
+  private readonly onTurnError: ((err: unknown) => void) | undefined;
+  private readonly onTurnSuccess: (() => void) | undefined;
   private readonly now: () => ISODateString;
   private readonly tools;
   private inFlight = false;
@@ -165,6 +176,8 @@ export class ChatService implements ChatTurnPort {
     this.systemPrompt = deps.systemPrompt ?? DEFAULT_CHAT_INSTRUCTIONS;
     this.methodActive = deps.systemPrompt == null;
     this.maxIterations = deps.maxIterations;
+    this.onTurnError = deps.onTurnError;
+    this.onTurnSuccess = deps.onTurnSuccess;
     this.now = deps.now ?? (() => new Date().toISOString());
     this.tools = buildChatToolRegistry(deps.commandApi);
   }
@@ -222,16 +235,26 @@ export class ChatService implements ChatTurnPort {
     } catch (err) {
       // Honest failure surface: journal an assistant message so the user
       // sees the turn failed in the thread itself, not a silent gap.
-      const detail =
-        err instanceof LoopError || err instanceof ModelPortError ? err.message : String(err);
+      // Sanitized — a connector error can echo the key into its message.
+      const detail = sanitizeFailureText(err);
       this.journal({
         role: 'assistant',
         content: `I couldn't complete that turn — ${detail}`,
         createdAt: this.now(),
       });
+      try {
+        this.onTurnError?.(err);
+      } catch {
+        /* a readiness observer must never break the failure path */
+      }
       return;
     }
 
+    try {
+      this.onTurnSuccess?.();
+    } catch {
+      /* same containment — a recorder must not break a completed turn */
+    }
     // Journal everything the loop produced beyond the input, in order.
     for (const wire of result.messages.slice(input.length)) {
       this.journal(toConversationMessage(wire, this.now()));

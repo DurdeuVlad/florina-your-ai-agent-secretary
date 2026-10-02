@@ -20,7 +20,7 @@
  * `FLORINA_PROVIDERS=none` disables attachment entirely;
  * `FLORINA_DISABLED_PROVIDERS=a,b` skips individual providers.
  */
-import { type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -339,5 +339,132 @@ export async function attachLocalAgentProviders(
         }
       }
     },
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Credential-evidence probe (issue #294)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Well-known local credential evidence per provider — file paths under
+ * the user home, or a provider-blessed environment variable. Presence
+ * means "credentials exist on disk", never "they work": expired OAuth
+ * tokens and revoked keys still satisfy this until a runtime failure
+ * contradicts them (that's what `ProviderReadiness.recordFailure` is
+ * for). Providers without a known evidence source return `'unknown'`.
+ */
+const CREDENTIAL_EVIDENCE: Readonly<
+  Record<
+    string,
+    {
+      readonly files: readonly string[];
+      readonly envVars: readonly string[];
+      /**
+       * macOS Keychain service holding the credential (darwin only —
+       * Claude Code prefers the keychain over .credentials.json there
+       * and may delete the file after a successful keychain write).
+       */
+      readonly darwinKeychain?: string;
+    }
+  >
+> = {
+  'claude-code': {
+    files: ['.claude/.credentials.json'],
+    envVars: ['ANTHROPIC_API_KEY'],
+    darwinKeychain: 'Claude Code-credentials',
+  },
+  codex: { files: ['.codex/auth.json'], envVars: ['OPENAI_API_KEY'] },
+  gemini: {
+    files: [
+      '.gemini/oauth_creds.json',
+      // Application Default Credentials — the gcloud auth path.
+      '.config/gcloud/application_default_credentials.json',
+    ],
+    envVars: ['GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS'],
+  },
+  devin: { files: [], envVars: ['DEVIN_API_KEY'] },
+  // antigravity (agy) has no documented local credential path — unknown.
+};
+
+/**
+ * The readiness service's `credsProbe`: reports whether any known local
+ * credential evidence exists for the provider — a credential file under
+ * the user home, a provider-blessed env var, or (on macOS) a Keychain
+ * item. Called lazily per query so "check again" re-reads the
+ * filesystem without a daemon restart. `spawnFn`/`platform` are
+ * injectable so the keychain path is testable off-darwin.
+ */
+export function makeCredentialProbe(
+  deps: {
+    env?: NodeJS.ProcessEnv;
+    homeDir?: string;
+    platform?: NodeJS.Platform;
+    spawnFn?: typeof spawnSync;
+    nowMs?: () => number;
+  } = {},
+): (providerId: string) => 'present' | 'absent' | 'unknown' {
+  const env = deps.env ?? process.env;
+  const home = deps.homeDir ?? homedir();
+  const platform = deps.platform ?? process.platform;
+  const run = deps.spawnFn ?? spawnSync;
+  const nowMs = deps.nowMs ?? Date.now;
+  // The keychain call is synchronous (`security` has no async mode) and
+  // blocks the daemon loop while it runs — a locked keychain can hold it
+  // for the full timeout on every `query-providers`. Cache the verdict
+  // briefly: a fresh sign-in can lag the user-visible "Check again" by a
+  // few seconds, which beats stalling every command on the socket.
+  const KEYCHAIN_TTL_MS = 5000;
+  const keychainCache = new Map<string, { at: number; signal: 'present' | 'absent' | 'unknown' }>();
+  return (providerId) => {
+    const evidence = CREDENTIAL_EVIDENCE[providerId];
+    if (evidence === undefined) return 'unknown';
+    for (const rel of evidence.files) {
+      if (existsSync(join(home, ...rel.split('/')))) return 'present';
+    }
+    for (const name of evidence.envVars) {
+      if (env[name] !== undefined && env[name] !== '') return 'present';
+    }
+    // macOS Keychain is a primary credential store for some providers —
+    // file absence alone must NOT claim "not signed in" there. No `-w`:
+    // existence only — the password never enters daemon memory.
+    if (platform === 'darwin' && evidence.darwinKeychain !== undefined) {
+      const service = evidence.darwinKeychain;
+      const cached = keychainCache.get(service);
+      if (cached !== undefined && nowMs() - cached.at < KEYCHAIN_TTL_MS) {
+        if (cached.signal === 'present') return 'present';
+      } else {
+        const res = run('security', ['find-generic-password', '-s', service], {
+          timeout: 1500,
+          encoding: 'utf8',
+        });
+        if (res.status === 0) {
+          keychainCache.set(service, { at: nowMs(), signal: 'present' });
+          return 'present';
+        }
+        // `security` exits 44 for "item not found" — a definitive miss;
+        // cache it too so a locked-but-empty keychain doesn't spam the
+        // loop. Any other failure can't prove absence → 'unknown',
+        // cached the same way.
+        keychainCache.set(service, {
+          at: nowMs(),
+          signal: res.status === 44 ? 'absent' : 'unknown',
+        });
+        if (res.status === 44) {
+          // Fall through to the absent check below — a definitive miss
+          // means file absence is still the honest verdict.
+        } else {
+          return 'unknown';
+        }
+      }
+      // Cached non-present: honor a definitive 'absent', else 'unknown'.
+      const signal = keychainCache.get(service)?.signal;
+      if (signal === 'unknown') return 'unknown';
+    }
+    // 'absent' is only honest when we know where credentials would
+    // live — a provider with no known credential file (devin stores its
+    // auth who-knows-where) must degrade to 'unknown', not falsely
+    // claim "not signed in".
+    return evidence.files.length === 0 ? 'unknown' : 'absent';
   };
 }

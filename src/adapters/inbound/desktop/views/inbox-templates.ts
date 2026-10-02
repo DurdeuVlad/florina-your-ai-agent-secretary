@@ -248,6 +248,31 @@ function actionsFor(item: AttentionItemView): RenderTree[] {
       );
       return actions;
     }
+    case 'ProviderAuth': {
+      /* Issue #294: sign-in remediation — launch the provider's native
+       * login (setup:signin verb → daemon opens a visible terminal) or
+       * deep-link the keys card for API-key fixes; Dismiss resolves. */
+      const fix = (item.payload as { fix?: { kind?: string } }).fix;
+      const providerId = String((item.payload as { providerId?: unknown }).providerId ?? '');
+      const actions: RenderTree[] = [];
+      if (providerId !== '' && fix?.kind === 'run-command') {
+        actions.push(actionButton('Sign in', `setup:signin:${providerId}`, 'primary'));
+      }
+      if (fix?.kind === 'store-key') {
+        actions.push(actionButton('Add key', 'navto:prefs', 'primary'));
+      }
+      // `set-env` fixes aren't stored secrets — the summary carries the
+      // instructions; no button could perform them.
+      actions.push(
+        actionButton(
+          'Dismiss',
+          `resolve:${item.id}`,
+          'ghost',
+          'Resolve this item? Re-check with “Check again” in setup if the sign-in is fixed.',
+        ),
+      );
+      return actions;
+    }
     case 'IdleAgent':
     case 'StaleTask':
       return [actionButton('Inspect', `inspect:${item.id}`, 'ghost')];

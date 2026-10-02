@@ -302,6 +302,65 @@ export class AttentionAggregator {
     });
   }
 
+  /**
+   * Report a provider auth/config failure (issue #294). Provider-level
+   * issues have no task (`taskId: ''`); dedup is per-provider against
+   * the open card — repeated failures while a card stands fold into it
+   * (latest detail + count) instead of stacking a duplicate or being
+   * swallowed by the taskId-keyed dedup window.
+   */
+  reportProviderAuthIssue(issue: {
+    readonly providerId: string;
+    readonly failureClass: string;
+    readonly detail: string;
+    readonly fix?: {
+      readonly kind: 'run-command' | 'store-key' | 'set-env';
+      readonly label: string;
+      readonly command?: string;
+      readonly detail: string;
+    };
+  }): void {
+    const open = this.inbox
+      .list({ kind: 'ProviderAuth' })
+      .filter((i) => i.status !== 'Resolved' && i.payload['providerId'] === issue.providerId)
+      .at(-1);
+    const message =
+      `${issue.fix?.label ?? `Provider ${issue.providerId}`}: ${issue.detail}` +
+      (issue.fix !== undefined ? ` — ${issue.fix.detail}` : '');
+    if (open !== undefined) {
+      const count =
+        typeof open.payload['failures'] === 'number' ? (open.payload['failures'] as number) : 1;
+      this.inbox.mergePayload(open.id, {
+        reason: issue.detail,
+        message,
+        failureClass: issue.failureClass,
+        failures: count + 1,
+        ...(issue.fix !== undefined ? { fix: issue.fix } : {}),
+      });
+      return;
+    }
+    // Deliberately NOT maybeAddItem: its (taskId, kind) dedup window
+    // keys every provider card to `:ProviderAuth` — two providers
+    // failing within the window would collapse into one card, and a
+    // re-raised card after resolution would be swallowed. The
+    // open-card scan above IS the dedup for this kind.
+    this.inbox.add(
+      createAttentionItem({
+        taskId: '',
+        kind: 'ProviderAuth',
+        priority: 'High',
+        payload: {
+          providerId: issue.providerId,
+          failureClass: issue.failureClass,
+          reason: issue.detail,
+          message,
+          failures: 1,
+          ...(issue.fix !== undefined ? { fix: issue.fix } : {}),
+        },
+      }),
+    );
+  }
+
   /* ---------------------------------------------------------------- *
    * Event handlers
    * ---------------------------------------------------------------- */
