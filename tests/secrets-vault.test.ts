@@ -25,7 +25,10 @@ import type { EventJournalPort } from '../src/core/application/ports/outbound/re
 import type { EventPublisherPort } from '../src/core/application/ports/outbound/event-stream.js';
 import { EncryptedFileSecretsVault } from '../src/adapters/outbound/credentials/encrypted-file-secrets-vault.js';
 import { CredentialBroker } from '../src/adapters/outbound/credentials/os-credential-vault.js';
-import { SecretsVaultService } from '../src/core/application/use-cases/security/secrets-vault-service.js';
+import {
+  SecretsVaultService,
+  type VaultAuditEntry,
+} from '../src/core/application/use-cases/security/secrets-vault-service.js';
 
 class InMemoryEventJournal implements EventJournalPort {
   readonly events: Event[] = [];
@@ -178,16 +181,28 @@ describe('Secrets Vault (issue #172)', () => {
       });
       expect(vault2.getSecretValue('shared-secret')).toBe('shared-value-abc');
 
-      // A vault on a "different machine" (different credential store) cannot.
+      // A vault on a "different machine" (credential store without the
+      // master key) must refuse to construct: silently generating a fresh
+      // key over a populated vault would orphan every stored secret.
       const foreignBroker = new CredentialBroker({
         backend: 'file',
         fileStoreDir: path.join(tmpDir, 'other-machine-credentials'),
       });
-      const foreignVault = new EncryptedFileSecretsVault({
+      expect(
+        () =>
+          new EncryptedFileSecretsVault({
+            filePath: secretsFilePath,
+            credentialBroker: foreignBroker,
+          }),
+      ).toThrow(/master key is unreachable/);
+
+      // The vault file is untouched by the refusal — the original broker
+      // still decrypts.
+      const stillAlive = new EncryptedFileSecretsVault({
         filePath: secretsFilePath,
-        credentialBroker: foreignBroker,
+        credentialBroker: broker,
       });
-      expect(foreignVault.getSecretValue('shared-secret')).toBeNull();
+      expect(stillAlive.getSecretValue('shared-secret')).toBe('shared-value-abc');
     });
 
     it('preserves an unreadable vault file instead of overwriting it', () => {
@@ -207,6 +222,163 @@ describe('Secrets Vault (issue #172)', () => {
       // The vault still accepts new secrets afterwards.
       vault.storeSecret('fresh', 'fresh-value', {});
       expect(vault.getSecretValue('fresh')).toBe('fresh-value');
+    });
+
+    it('treats prototype-adjacent names as ordinary secret names', () => {
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
+      for (const name of ['__proto__', 'constructor', 'hasOwnProperty', 'toString']) {
+        vault.storeSecret(name, `val-${name}`, {});
+      }
+      expect(vault.getSecretValue('__proto__')).toBe('val-__proto__');
+      expect(vault.getSecretValue('constructor')).toBe('val-constructor');
+      expect(vault.getSecretValue('toString')).toBe('val-toString');
+      // An absent prototype-builtin name reports an honest miss — the
+      // prototype chain must never look like a stored secret.
+      expect(vault.deleteSecret('valueOf')).toBe(false);
+      expect(vault.getSecretValue('valueOf')).toBeNull();
+      expect(
+        vault
+          .listSecretMetadata()
+          .map((m) => m.name)
+          .sort(),
+      ).toEqual(['__proto__', 'constructor', 'hasOwnProperty', 'toString']);
+      // And they survive a reload from disk.
+      const reloaded = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
+      expect(reloaded.getSecretValue('__proto__')).toBe('val-__proto__');
+    });
+
+    it('merges concurrent writers per-key instead of clobbering the file', () => {
+      // Two vault instances on one file — as the CLI and a running daemon
+      // can be. Neither reloads between their writes.
+      const a = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      const b = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      a.storeSecret('a-key', 'val-a', {});
+      b.storeSecret('b-key', 'val-b', {});
+
+      const fresh = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      expect(fresh.getSecretValue('a-key')).toBe('val-a');
+      expect(fresh.getSecretValue('b-key')).toBe('val-b');
+    });
+
+    it('a local delete wins over a concurrent remote write (tombstone)', () => {
+      const a = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      a.storeSecret('doomed', 'val-x', {});
+      const b = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      // b writes after a loaded — its remote-merge must not resurrect the
+      // name a deleted, and a's save must not drop b-key.
+      b.storeSecret('b-key', 'val-b', {});
+      a.deleteSecret('doomed');
+
+      const fresh = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      expect(fresh.getSecretValue('doomed')).toBeNull();
+      expect(fresh.getSecretValue('b-key')).toBe('val-b');
+    });
+
+    /** Timestamps are ms-granularity — space mutations to keep ordering honest. */
+    async function tick(): Promise<void> {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+
+    it('a remote delete propagates: a stale local copy cannot resurrect a revoked secret', async () => {
+      // The review's concrete counterexample: B loaded before A's delete,
+      // still holds x in memory, then saves — x must stay deleted.
+      const a = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      a.storeSecret('revoked', 'val-x', {});
+      const b = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      }); // b loads with 'revoked' present
+      await tick();
+      a.deleteSecret('revoked'); // persisted tombstone (now > stored updatedAt)
+      await tick();
+      b.storeSecret('b-key', 'val-b', {}); // b's merge must drop its stale copy
+
+      const fresh = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      expect(fresh.getSecretValue('revoked')).toBeNull();
+      expect(fresh.getSecretValue('b-key')).toBe('val-b');
+
+      // A genuinely NEWER re-add (post-tombstone) still wins.
+      const c = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      c.storeSecret('revoked', 'val-x2', {});
+      const fresh2 = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      expect(fresh2.getSecretValue('revoked')).toBe('val-x2');
+    });
+
+    it('a stale writer cannot shadow a newer remote re-add (per-name LWW)', async () => {
+      // The reviewer's round-2 repro: D holds x@t0, A deletes x (t1),
+      // B re-adds x (t2 > t1), then stale D writes unrelated z — D's
+      // x@t0 must lose the overlay, not destroy the live re-add.
+      const a = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      a.storeSecret('x', 'v0', {});
+      const d = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      const b = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      await tick();
+      a.deleteSecret('x');
+      await tick();
+      b.storeSecret('x', 'v2', {});
+      await tick();
+      d.storeSecret('z', 'vz', {});
+
+      const fresh = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'shared-key',
+      });
+      expect(fresh.getSecretValue('x')).toBe('v2');
+      expect(fresh.getSecretValue('z')).toBe('vz');
+    });
+
+    it('treats an unparseable stored expiry as expired — fail closed', () => {
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
+      vault.storeSecret('bad-expiry', 'v', {}, { expiresAt: 'garbage-not-a-date' });
+      expect(vault.getSecretValue('bad-expiry')).toBeNull();
     });
 
     it('never reads or injects expired secrets', async () => {
@@ -239,7 +411,10 @@ describe('Secrets Vault (issue #172)', () => {
 
   describe('SecretsVaultService (prompted capture & scoped injection)', () => {
     it('creates masked input prompt for Secretary / desktop UI', () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const service = new SecretsVaultService({ vault });
 
       const prompt = service.createCapturePrompt({
@@ -256,7 +431,10 @@ describe('Secrets Vault (issue #172)', () => {
     });
 
     it('captures secret and journals audit event without leaking secret value (DEC-012)', async () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const eventJournal = new InMemoryEventJournal();
       const service = new SecretsVaultService({ vault, eventJournal });
 
@@ -287,7 +465,10 @@ describe('Secrets Vault (issue #172)', () => {
     });
 
     it('scoped injection: enforces provider x project allowlist rules', async () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const eventJournal = new InMemoryEventJournal();
       const service = new SecretsVaultService({ vault, eventJournal });
 
@@ -357,8 +538,56 @@ describe('Secrets Vault (issue #172)', () => {
       expect(JSON.stringify(injEvt.payload)).not.toContain('codex-alpha-val-444');
     });
 
+    it('refuses to inject loader/proxy env vars even when the name is derived', async () => {
+      // The denylist is enforced on the FINAL env key at the injection
+      // boundary — a secret named 'path' derives PATH and must not slip
+      // past capture-time validation that only sees scope.envVarName.
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
+      const service = new SecretsVaultService({ vault });
+      await service.captureSecret({ name: 'path', value: '/evil/bin', scope: {} });
+      await service.captureSecret({
+        name: 'node_options',
+        value: '--require /evil/hook',
+        scope: {},
+      });
+      await service.captureSecret({
+        name: 'http_proxy',
+        value: 'http://exfil.example',
+        scope: {},
+      });
+      const inj = await service.resolveInjections({});
+      expect(inj['PATH']).toBeUndefined();
+      expect(inj['NODE_OPTIONS']).toBeUndefined();
+      expect(inj['HTTP_PROXY']).toBeUndefined();
+    });
+
+    it('revocation audit entries carry the secret real scope, not an empty one', async () => {
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
+      const audit: VaultAuditEntry[] = [];
+      const service = new SecretsVaultService({ vault, auditSink: (e) => audit.push(e) });
+      await service.captureSecret({
+        name: 'scoped-key',
+        value: 'v',
+        scope: { provider: 'codex', projectId: 'p-1' },
+      });
+      await service.deleteSecret('scoped-key');
+      expect(audit.map((e) => e.action)).toEqual(['secret_captured', 'secret_revoked']);
+      expect(audit[1]!.scope).toEqual({ provider: 'codex', projectId: 'p-1' });
+      // The audit ledger never sees values.
+      expect(JSON.stringify(audit)).not.toContain('"v"');
+    });
+
     it('redacts secret values from text streams', async () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const service = new SecretsVaultService({ vault });
 
       await service.captureSecret({
@@ -384,7 +613,10 @@ describe('Secrets Vault (issue #172)', () => {
     });
 
     it('revokes secrets with audit logging', async () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const eventJournal = new InMemoryEventJournal();
       const service = new SecretsVaultService({ vault, eventJournal });
 
@@ -409,7 +641,10 @@ describe('Secrets Vault (issue #172)', () => {
     });
 
     it('redacts substrings without leaking suffixes when one secret is a prefix of another', async () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const service = new SecretsVaultService({ vault });
 
       // Register short secret first, then long secret with short secret as prefix
@@ -433,7 +668,10 @@ describe('Secrets Vault (issue #172)', () => {
     });
 
     it('prioritizes specific scope over broad scope for identical environment variable', async () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const service = new SecretsVaultService({ vault });
 
       // Global default
@@ -460,7 +698,10 @@ describe('Secrets Vault (issue #172)', () => {
     });
 
     it('broadcasts audit events to eventBus when provided', async () => {
-      const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+      const vault = new EncryptedFileSecretsVault({
+        filePath: secretsFilePath,
+        masterKey: 'test-key',
+      });
       const published: SupervisorEvent[] = [];
       const eventBus: EventPublisherPort = {
         publish: (evt: SupervisorEvent) => {
@@ -532,7 +773,10 @@ describe('Secrets Vault (issue #172)', () => {
         const session = buildSession({ taskId: task.id, agentId: agent.id });
         sessionRepo.insert(session);
 
-        const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+        const vault = new EncryptedFileSecretsVault({
+          filePath: secretsFilePath,
+          masterKey: 'test-key',
+        });
         const service = new SecretsVaultService({
           vault,
           eventJournal: eventRepo,
@@ -580,7 +824,10 @@ describe('Secrets Vault (issue #172)', () => {
 
       try {
         const eventRepo = new EventRepository(db.connection);
-        const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+        const vault = new EncryptedFileSecretsVault({
+          filePath: secretsFilePath,
+          masterKey: 'test-key',
+        });
         const service = new SecretsVaultService({
           vault,
           eventJournal: eventRepo,
@@ -611,7 +858,10 @@ describe('Secrets Vault (issue #172)', () => {
 
       try {
         const eventRepo = new EventRepository(db.connection);
-        const vault = new EncryptedFileSecretsVault({ filePath: secretsFilePath });
+        const vault = new EncryptedFileSecretsVault({
+          filePath: secretsFilePath,
+          masterKey: 'test-key',
+        });
         const failures: { err: unknown; row: unknown }[] = [];
         const service = new SecretsVaultService({
           vault,

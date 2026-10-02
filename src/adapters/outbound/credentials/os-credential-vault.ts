@@ -244,20 +244,25 @@ export class CredentialBroker implements CredentialVaultPort {
 
   private storeWindows(name: string, record: StoredCredential): void {
     const target = this.windowsTarget(name);
-    // Delete any existing entry first (cmdkey errors if the target exists).
+    // File store first — it is the authoritative retrieval path on
+    // Windows (cmdkey cannot read passwords back). Writing it before the
+    // cmdkey mirror means a delete/add race or crash can't lose the
+    // credential: worst case, Credential Manager holds a stale entry
+    // while reads still return the new value.
+    this.storeFile(name, record);
+    // Mirror into Windows Credential Manager (presence + GUI visibility).
+    // Delete first: cmdkey errors if the target already exists.
     try {
       execFileSync('cmdkey', [`/delete:${target}`], { stdio: 'ignore' });
     } catch {
       // Ignore — target may not exist yet.
     }
-    // Store the credential. The password is base64-encoded to avoid command-
-    // line parsing issues with special characters in the JSON payload.
+    // The password is base64-encoded to avoid command-line parsing issues
+    // with special characters in the JSON payload.
     const encoded = Buffer.from(JSON.stringify(record), 'utf-8').toString('base64');
     execFileSync('cmdkey', [`/generic:${target}`, '/user:florina', `/pass:${encoded}`], {
       stdio: 'ignore',
     });
-    // Also write to the encrypted file store (retrieval path on Windows).
-    this.storeFile(name, record);
   }
 
   private deleteWindows(name: string): boolean {
@@ -294,18 +299,11 @@ export class CredentialBroker implements CredentialVaultPort {
 
   private storeMacos(name: string, record: StoredCredential): void {
     const payload = JSON.stringify(record);
-    // Delete existing item first (security add-generic-password fails if it
-    // exists).
-    try {
-      execFileSync('security', ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', name], {
-        stdio: 'ignore',
-      });
-    } catch {
-      // Ignore — item may not exist yet.
-    }
+    // `-U` updates an existing item in place — no delete/add window in
+    // which a crash would leave the credential gone entirely.
     execFileSync(
       'security',
-      ['add-generic-password', '-s', KEYCHAIN_SERVICE, '-a', name, '-w', payload],
+      ['add-generic-password', '-U', '-s', KEYCHAIN_SERVICE, '-a', name, '-w', payload],
       { stdio: 'ignore' },
     );
   }

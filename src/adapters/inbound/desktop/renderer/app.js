@@ -737,6 +737,88 @@ $('deskSave').addEventListener('click', () => {
   });
 });
 
+/* ---------- API keys card (issue #292) ---------- */
+
+/**
+ * Render the stored-secret metadata list — names and scope only; values
+ * are write-only and never come back over the wire.
+ */
+function renderKeysList(secrets) {
+  const host = $('keysList');
+  host.innerHTML = '';
+  if (!secrets || secrets.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'hint';
+    empty.textContent = 'No keys stored yet.';
+    host.appendChild(empty);
+    return;
+  }
+  secrets.forEach((s) => {
+    const row = document.createElement('div');
+    row.className = 'desk-row';
+    const label = document.createElement('span');
+    const scope = [
+      s.scope && s.scope.provider ? 'provider:' + s.scope.provider : null,
+      s.scope && s.scope.projectId ? 'project:' + s.scope.projectId : null,
+      s.scope && s.scope.envVarName ? 'env:' + s.scope.envVarName : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    label.textContent = s.name + (scope ? '  [' + scope + ']' : '');
+    const del = document.createElement('button');
+    del.textContent = 'Remove';
+    del.addEventListener('click', () => {
+      void bridge.command('keysdel:' + encodeURIComponent(s.name)).then((res) => {
+        if (res && res.ok === false) toast(res.error || 'could not delete key');
+        void refreshKeys();
+      });
+    });
+    row.appendChild(label);
+    row.appendChild(del);
+    host.appendChild(row);
+  });
+}
+
+/** Fetch the vault's metadata list; stays quiet when the daemon is down. */
+async function refreshKeys() {
+  try {
+    const res = await bridge.command('keylist');
+    if (res && res.ok) renderKeysList(res.secrets || []);
+  } catch {
+    /* daemon unreachable — leave the list as-is */
+  }
+}
+
+$('keySave').addEventListener('click', () => {
+  const name = $('keyName').value.trim();
+  const value = $('keyValue').value;
+  if (!name) {
+    toast('give the key a name first');
+    return;
+  }
+  if (!value) {
+    toast('paste the key value first');
+    return;
+  }
+  const payload = {
+    name,
+    value,
+    provider: $('keyProvider').value.trim() || undefined,
+    projectId: $('keyProject').value.trim() || undefined,
+    envVarName: $('keyEnvVar').value.trim() || undefined,
+  };
+  void bridge.command('keyset:' + encodeURIComponent(JSON.stringify(payload))).then((res) => {
+    if (res && res.ok === false) {
+      toast(res.error || 'could not store key');
+      return;
+    }
+    $('keyName').value = '';
+    $('keyValue').value = '';
+    toast('key stored');
+    void refreshKeys();
+  });
+});
+
 /** Insert dictated text at the composer cursor — editable, not sent. */
 function insertDictated(text) {
   const input = $('chatInput');
@@ -903,7 +985,10 @@ function showView(name) {
     maybeCatchUp();
   }
   // Enumerate mics whenever prefs opens — covers g p as well as clicks.
-  if (name === 'prefs') void listMicrophones();
+  if (name === 'prefs') {
+    void listMicrophones();
+    void refreshKeys();
+  }
   // Leaving Chat suspends an open capture (issue #162): voice talk turns
   // end (the reply still journals into the thread); dictation rounds
   // cancel — inserting dictated text while the user is away would be a

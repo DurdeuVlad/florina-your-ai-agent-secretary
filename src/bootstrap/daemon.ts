@@ -88,6 +88,13 @@ import { CapsuleRollupService } from '../core/application/use-cases/context/caps
 import { PreferenceProfileStore } from '../adapters/outbound/preferences/json-preference-profile.js';
 import { RepoRootsStore } from '../adapters/outbound/repos/json-repo-roots.js';
 import { FsRepoScanner } from '../adapters/outbound/repos/fs-repo-scanner.js';
+import { EncryptedFileSecretsVault } from '../adapters/outbound/credentials/encrypted-file-secrets-vault.js';
+import {
+  CredentialBroker,
+  type CredentialBackend,
+} from '../adapters/outbound/credentials/os-credential-vault.js';
+import { SecretsVaultService } from '../core/application/use-cases/security/secrets-vault-service.js';
+import type { SecretsVaultPort } from '../core/application/ports/outbound/secrets-vault.js';
 import { FlorinaMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
 import { managerServiceFactory } from './mcp-server.js';
 import type { SupervisorEvent } from '../core/domain/events.js';
@@ -184,6 +191,23 @@ export interface DaemonOptions {
     /** Passed to the connector — e.g. `'none'` for models that reject tools with reasoning. */
     readonly reasoningEffort?: string;
   };
+  /**
+   * Secrets vault port override (issue #292). When absent the daemon
+   * constructs an {@link EncryptedFileSecretsVault} whose file lives beside
+   * {@link dbPath} (`secrets.enc`) with its master key held by a
+   * {@link CredentialBroker} whose file store is `credentials/` beside
+   * {@link dbPath} — test daemons with a temp dbPath get an isolated vault
+   * automatically. Pass an injected port for tests that need full control.
+   */
+  readonly secretsVault?: SecretsVaultPort;
+  /**
+   * Credential backend for the vault's master key (issue #292). Defaults
+   * to OS auto-detect; `'file'` keeps the key entirely inside the
+   * daemon-local `credentials/` store — the right choice for headless
+   * hosts and test daemons so no real OS keychain is touched. Forced to
+   * `'file'` for `:memory:` databases regardless.
+   */
+  readonly secretsCredentialBackend?: CredentialBackend;
 }
 
 /** Daemon lifecycle states. */
@@ -222,6 +246,8 @@ export class FlorinaDaemon extends EventEmitter {
     remoteProviders?: NonNullable<DaemonOptions['remoteProviders']>;
     chatModel?: DaemonOptions['chatModel'];
     methodEnabled: boolean;
+    secretsVault?: SecretsVaultPort;
+    secretsCredentialBackend?: CredentialBackend;
   };
   private state: DaemonState = 'stopped';
   private server: WebSocketControlPlaneServer | null = null;
@@ -243,6 +269,9 @@ export class FlorinaDaemon extends EventEmitter {
   private preferenceStore: PreferenceProfileStore | null = null;
   private repoRootsStore: RepoRootsStore | null = null;
   private readonly repoScanner = new FsRepoScanner();
+  private secretsVaultService: SecretsVaultService | null = null;
+  /** Why vault wiring failed at startup — surfaced in command errors. */
+  private secretsUnavailableReason: string | undefined;
   private failoverService: FailoverService | null = null;
   private capsuleRollup: CapsuleRollupService | null = null;
   private grantService: GrantService | null = null;
@@ -277,6 +306,10 @@ export class FlorinaDaemon extends EventEmitter {
         ? { remoteProviders: options.remoteProviders }
         : {}),
       ...(options.chatModel !== undefined ? { chatModel: options.chatModel } : {}),
+      ...(options.secretsVault !== undefined ? { secretsVault: options.secretsVault } : {}),
+      ...(options.secretsCredentialBackend !== undefined
+        ? { secretsCredentialBackend: options.secretsCredentialBackend }
+        : {}),
     };
   }
 
@@ -613,6 +646,110 @@ export class FlorinaDaemon extends EventEmitter {
         dispatcher: briefDispatcher,
       });
 
+      // Secrets vault (issue #292, DEC-011/DEC-022): the #172 engine wired
+      // into the command API so `secrets-*` commands reach real encrypted
+      // storage. Default file locations follow the database directory so
+      // temp-db daemons get isolated vaults; `:memory:` daemons get an
+      // isolated tempdir (never the real ~/.florina vault). Construction
+      // can hit the OS keychain — a failure degrades to the honest
+      // "vault not wired" command response instead of failing daemon start.
+      // Journal-write failures surface as attention items via the #264
+      // sink convention — never throw here.
+      const ephemeralSecrets = this.options.dbPath === ':memory:';
+      try {
+        const secretsDir = ephemeralSecrets
+          ? fs.mkdtempSync(path.join(os.tmpdir(), 'florina-secrets-'))
+          : path.dirname(this.options.dbPath);
+        if (ephemeralSecrets) {
+          // The whole vault — encrypted file, key material, audit log — is
+          // throwaway state for memory-mode daemons; remove it on stop so
+          // tests never litter key material into the shared tempdir.
+          const dir = secretsDir;
+          this.cleanups.push(() => {
+            try {
+              fs.rmSync(dir, { recursive: true, force: true });
+            } catch {
+              /* best effort — temp litter is not a stop failure */
+            }
+          });
+        }
+        const vaultAuditLog = path.join(secretsDir, 'secrets.audit.jsonl');
+        const secretsVault =
+          this.options.secretsVault ??
+          new EncryptedFileSecretsVault({
+            filePath: path.join(secretsDir, 'secrets.enc'),
+            credentialBroker: new CredentialBroker({
+              fileStoreDir: path.join(secretsDir, 'credentials'),
+              // Memory-mode daemons are tests: force the file backend so
+              // they never touch the real OS keychain (cmdkey/security)
+              // with test master keys. An explicit option (headless
+              // hosts, hermetic tests) wins otherwise.
+              ...(this.options.secretsCredentialBackend !== undefined || ephemeralSecrets
+                ? { backend: this.options.secretsCredentialBackend ?? 'file' }
+                : {}),
+            }),
+          });
+        this.secretsVaultService = new SecretsVaultService({
+          vault: secretsVault,
+          eventJournal: repos.events,
+          eventBus: this.bus,
+          onJournalFailure: (err, row) => {
+            try {
+              this.attentionAggregator?.reportJournalFailure({
+                source: 'secrets-vault',
+                error: err instanceof Error ? err.message : String(err),
+                write: row,
+                retryable: !isPermanentJournalError(err),
+              });
+            } catch {
+              /* the failure sink must never break vault operations */
+            }
+          },
+          // Vault-local audit ledger (issue #292): user-scope secret ops
+          // carry no task/session context so the event journal's FK schema
+          // can't hold them — provenance lands in an append-only JSONL
+          // beside secrets.enc (who/what/when/scope, never values).
+          auditSink: (entry) => {
+            try {
+              fs.appendFileSync(vaultAuditLog, JSON.stringify(entry) + '\n', {
+                encoding: 'utf8',
+                mode: 0o600,
+              });
+              // mode above only applies at file creation — re-assert so
+              // a pre-existing loose-mode audit file is tightened too.
+              try {
+                fs.chmodSync(vaultAuditLog, 0o600);
+              } catch {
+                /* best effort on platforms without chmod */
+              }
+            } catch (err) {
+              try {
+                // No `write` row — the dropped entry targets the JSONL
+                // audit ledger, not the event journal, so a journal
+                // retry card must not try to re-insert it. Its metadata
+                // (never values) rides in the error text instead.
+                this.attentionAggregator?.reportJournalFailure({
+                  source: 'secrets-vault-audit',
+                  error:
+                    `${err instanceof Error ? err.message : String(err)} ` +
+                    `(dropped audit entry: ${JSON.stringify(entry)})`,
+                  retryable: true,
+                });
+              } catch {
+                /* the failure sink must never break vault operations */
+              }
+            }
+          },
+        });
+      } catch (err) {
+        // Broker/keychain unavailable (headless, locked keychain, missing
+        // cmdkey) — secrets-* commands will honestly report the vault as
+        // unwired rather than the daemon failing to start, and the
+        // reason reaches the user through the error text.
+        this.secretsVaultService = null;
+        this.secretsUnavailableReason = err instanceof Error ? err.message : String(err);
+      }
+
       // Federated delegation surface (DEC-036, issue #78): remote
       // parents delegate into this daemon through `delegate-task`. The
       // command API is resolved lazily — delegation delegates arrive
@@ -677,6 +814,11 @@ export class FlorinaDaemon extends EventEmitter {
         },
         // Florina Method (issue #288): `florina.method.enabled` opt-out.
         methodEnabled: this.options.methodEnabled,
+        // Secrets vault (issue #292): `secrets-*` commands; null when the
+        // keychain/broker was unreachable at start — handlers report the
+        // vault as unwired honestly.
+        secrets: this.secretsVaultService ?? undefined,
+        secretsUnavailableReason: this.secretsUnavailableReason,
         onShutdown: () => {
           void this.stop();
         },
@@ -1003,6 +1145,8 @@ export class FlorinaDaemon extends EventEmitter {
     this.repoRootsStore = null;
     this.failoverService = null;
     this.capsuleRollup = null;
+    this.secretsVaultService = null;
+    this.secretsUnavailableReason = undefined;
     this.grantService = null;
     this.verificationGate = null;
   }

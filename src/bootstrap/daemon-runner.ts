@@ -23,6 +23,8 @@ import * as path from 'node:path';
 
 import { FlorinaDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_MCP_PORT } from './daemon.js';
 import { ensureLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
+import type { CredentialBackend } from '../adapters/outbound/credentials/os-credential-vault.js';
+import type { SecretsVaultPort } from '../core/application/ports/outbound/secrets-vault.js';
 
 /** Default PID file location (per-user OS temp dir). */
 export const DEFAULT_PID_FILE = path.join(os.tmpdir(), 'florina.pid');
@@ -52,6 +54,13 @@ export interface DaemonRunnerOptions {
    * recommended — the control plane is then open to any local process).
    */
   readonly authTokenDir?: string | null;
+  /**
+   * Secrets-vault overrides forwarded to {@link FlorinaDaemon} (issue
+   * #292): tests pass `secretsCredentialBackend: 'file'` (or an injected
+   * vault) so a runner-started daemon never touches the real OS keychain.
+   */
+  readonly secretsVault?: SecretsVaultPort;
+  readonly secretsCredentialBackend?: CredentialBackend;
 }
 
 /** Status snapshot returned by {@link DaemonRunner.status}. */
@@ -78,6 +87,8 @@ export class DaemonRunner {
   private readonly lockfile: string;
   private readonly mcpPort: number | null;
   private readonly authTokenDir: string | null;
+  private readonly secretsVault?: SecretsVaultPort;
+  private readonly secretsCredentialBackend?: CredentialBackend;
   private daemon: FlorinaDaemon | null = null;
 
   constructor(options: DaemonRunnerOptions = {}) {
@@ -88,6 +99,8 @@ export class DaemonRunner {
     this.mcpPort = options.mcpPort === undefined ? DEFAULT_MCP_PORT : options.mcpPort;
     this.authTokenDir =
       options.authTokenDir === undefined ? path.dirname(this.dbPath) : options.authTokenDir;
+    this.secretsVault = options.secretsVault;
+    this.secretsCredentialBackend = options.secretsCredentialBackend;
   }
 
   /**
@@ -144,6 +157,10 @@ export class DaemonRunner {
       methodEnabled: !['0', 'false', 'off', 'no', 'disabled'].includes(
         (process.env['FLORINA_METHOD_ENABLED'] ?? '').toLowerCase().trim(),
       ),
+      ...(this.secretsVault !== undefined ? { secretsVault: this.secretsVault } : {}),
+      ...(this.secretsCredentialBackend !== undefined
+        ? { secretsCredentialBackend: this.secretsCredentialBackend }
+        : {}),
     });
     await this.daemon.start();
     this.writePid(process.pid);

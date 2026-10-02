@@ -49,6 +49,9 @@ import type {
   PreferenceResponse,
   CatchUpResponse,
   ConfirmCatchUpResponse,
+  SecretsSetResponse,
+  SecretsListResponse,
+  SecretsDeleteResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { TaskState } from '../../../core/domain/enums.js';
 import type {
@@ -170,6 +173,11 @@ Commands:
   catchup                     Show what happened since you were last active
   metrics [--since <ms>]      Show metrics snapshot
   preferences [--project <id>]  Show routing preference rules + deny list
+  keys set <name> [--provider <id>] [--project <id>] [--env-var <NAME>]
+                              Store an API key or secret (prompts, no echo)
+      [--description <text>] [--expires <ISO>]
+  keys list                   List stored secrets (metadata only)
+  keys remove <name>          Delete a stored secret
   prune <taskId>              Prune the worktree for a task
   voice [--api-key <key>]     Start a voice session (push-to-talk)
       [--litellm-url <url>]   LiteLLM proxy for Florina-loop tools
@@ -248,6 +256,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdMetrics(ctx);
     case 'preferences':
       return cmdPreferences(ctx);
+    case 'keys':
+      return cmdKeys(ctx);
     case 'prune':
       return cmdPrune(ctx);
     case 'voice':
@@ -520,6 +530,167 @@ async function cmdPreferences(ctx: CommandContext): Promise<CommandResult> {
   }
   const r = response as PreferenceResponse;
   return { exitCode: 0, message: `${r.summary ?? 'no preferences recorded'}\n` };
+}
+
+/* --- keys --- */
+/**
+ * Read a secret value from stdin without echoing it.
+ * - TTY: raw-mode read, no character echo at all (sudo-style).
+ * - Non-TTY (piped): reads ALL of stdin so multi-line values (PEM keys)
+ *   work; trailing line endings are stripped.
+ * The caller trims, so a secret with significant leading/trailing
+ * whitespace is not preserved — true for every real API key format.
+ */
+async function readSecretValue(): Promise<string> {
+  const stdin = process.stdin;
+  if (!stdin.isTTY) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stdin) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    return Buffer.concat(chunks)
+      .toString('utf8')
+      .replace(/[\r\n]+$/, '');
+  }
+  out('Secret value (input hidden): ');
+  return new Promise<string>((resolve, reject) => {
+    let buf = '';
+    const finish = (value: string): void => {
+      stdin.removeListener('data', onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+      out('\n');
+      resolve(value);
+    };
+    const onData = (data: string): void => {
+      for (const ch of data) {
+        if (ch === '\r' || ch === '\n') {
+          finish(buf);
+          return;
+        } else if (ch === '\u0003') {
+          stdin.removeListener('data', onData);
+          stdin.setRawMode(false);
+          stdin.pause();
+          out('\n');
+          reject(new Error('cancelled'));
+          return;
+        } else if (ch === '\u007F' || ch === '\b') {
+          buf = buf.slice(0, -1);
+        } else if (ch >= ' ') {
+          // Printable only — arrows/ESC/etc. send multi-byte sequences
+          // that would silently corrupt the pasted key.
+          buf += ch;
+        }
+      }
+    };
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    stdin.on('data', onData);
+  });
+}
+
+/** Strip control chars so a hostile/stale vault field can't inject ANSI. */
+function safeDisplay(text: string): string {
+  // eslint-disable-next-line no-control-regex -- intentional: display sanitizer
+  return text.replace(/[\x00-\x1F\x7F-\x9F]/g, '?');
+}
+
+async function cmdKeys(ctx: CommandContext): Promise<CommandResult> {
+  const [sub, name] = ctx.args.positionals;
+  if (sub === 'set') {
+    if (!name) {
+      return {
+        exitCode: 1,
+        message:
+          'Usage: florina keys set <name> [--provider <id>] [--project <id>] [--env-var <NAME>] [--description <text>] [--expires <ISO>]\n',
+      };
+    }
+    // Fail fast on an unreachable daemon before prompting for a secret.
+    const status = await ctx.deps.runner.status();
+    if (!status.running) {
+      return {
+        exitCode: 1,
+        message: 'Florina daemon is not running — start it first (`florina start`).\n',
+      };
+    }
+    let value: string;
+    try {
+      value = (await readSecretValue()).trim();
+    } catch {
+      return { exitCode: 130, message: 'Cancelled.\n' };
+    }
+    if (value === '') {
+      return { exitCode: 1, message: 'Empty value — nothing stored.\n' };
+    }
+    const flag = (k: string): string | undefined =>
+      typeof ctx.args.flags[k] === 'string' ? (ctx.args.flags[k] as string) : undefined;
+    const scope = {
+      ...(flag('provider') !== undefined ? { provider: flag('provider') } : {}),
+      ...(flag('project') !== undefined ? { projectId: flag('project') } : {}),
+      ...(flag('env-var') !== undefined ? { envVarName: flag('env-var') } : {}),
+    };
+    const response = await sendCommand(ctx.deps.client, {
+      kind: 'secrets-set',
+      name,
+      value,
+      ...(Object.keys(scope).length > 0 ? { scope } : {}),
+      ...(flag('description') !== undefined ? { description: flag('description') } : {}),
+      ...(flag('expires') !== undefined ? { expiresAt: flag('expires') } : {}),
+    });
+    if (!response.ok) {
+      const r = response as SecretsSetResponse;
+      return { exitCode: 1, message: `Failed to store secret: ${r.error ?? errorOf(response)}\n` };
+    }
+    return {
+      exitCode: 0,
+      message: `Secret "${(response as SecretsSetResponse).name ?? name}" stored.\n`,
+    };
+  }
+  if (sub === 'list') {
+    const response = await sendCommand(ctx.deps.client, { kind: 'secrets-list' });
+    if (!response.ok) {
+      const r = response as SecretsListResponse;
+      return { exitCode: 1, message: `Failed to list secrets: ${r.error ?? errorOf(response)}\n` };
+    }
+    const secrets = (response as SecretsListResponse).secrets ?? [];
+    if (secrets.length === 0) {
+      return { exitCode: 0, message: 'No secrets stored.\n' };
+    }
+    const lines = secrets.map((s) => {
+      const scope = s.scope ?? {};
+      const scopeBits = [
+        scope.provider !== undefined ? `provider:${safeDisplay(scope.provider)}` : null,
+        scope.projectId !== undefined ? `project:${safeDisplay(scope.projectId)}` : null,
+        scope.envVarName !== undefined ? `env:${safeDisplay(scope.envVarName)}` : null,
+      ]
+        .filter((b): b is string => b !== null)
+        .join(' ');
+      const scopeStr = scopeBits !== '' ? ` [${scopeBits}]` : ' [global]';
+      const desc = s.description !== undefined ? ` — ${safeDisplay(s.description)}` : '';
+      return `  ${safeDisplay(s.name)}${scopeStr}${desc}  (stored ${s.createdAt})`;
+    });
+    return { exitCode: 0, message: `${secrets.length} secret(s):\n${lines.join('\n')}\n` };
+  }
+  if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
+    if (!name) {
+      return { exitCode: 1, message: 'Usage: florina keys remove <name>\n' };
+    }
+    const response = await sendCommand(ctx.deps.client, { kind: 'secrets-delete', name });
+    if (!response.ok) {
+      const r = response as SecretsDeleteResponse;
+      return { exitCode: 1, message: `Failed to delete secret: ${r.error ?? errorOf(response)}\n` };
+    }
+    const deleted = (response as SecretsDeleteResponse).deleted === true;
+    return {
+      exitCode: 0,
+      message: deleted ? `Secret "${name}" deleted.\n` : `No secret named "${name}".\n`,
+    };
+  }
+  return {
+    exitCode: 1,
+    message: 'Usage: florina keys <set|list|remove> [args]\nRun "florina help" for details.\n',
+  };
 }
 
 /* --- prune --- */

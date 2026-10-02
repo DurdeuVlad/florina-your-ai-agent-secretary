@@ -747,6 +747,43 @@
                    daemon profile — persisted to ~/.florina/desktop-
                    settings.json via the deskset: verb. Static DOM like
                    the composer so tree re-mounts never drop an edit. -->
+              <!-- API keys (issue #292): stored in the daemon's encrypted
+                   vault — values are write-only, never rendered back.
+                   Static DOM like the composer so re-mounts keep drafts. -->
+              <div class="sect" style="margin-top: 18px">API keys</div>
+              <div class="card" id="keysCard">
+                <div class="pref-addform">
+                  <label class="desk-row">
+                    Name
+                    <input id="keyName" type="text" placeholder="e.g. openai-key" />
+                  </label>
+                  <label class="desk-row">
+                    Value
+                    <input
+                      id="keyValue"
+                      type="password"
+                      placeholder="paste the key — never shown again"
+                      autocomplete="new-password"
+                    />
+                  </label>
+                  <label class="desk-row">
+                    Provider (optional)
+                    <input id="keyProvider" type="text" placeholder="e.g. claude-code" />
+                  </label>
+                  <label class="desk-row">
+                    Project (optional)
+                    <input id="keyProject" type="text" placeholder="only this project's runs" />
+                  </label>
+                  <label class="desk-row">
+                    Env var (optional)
+                    <input id="keyEnvVar" type="text" placeholder="e.g. OPENAI_API_KEY" />
+                  </label>
+                  <div>
+                    <button id="keySave">Store key</button>
+                  </div>
+                </div>
+                <div id="keysList"></div>
+              </div>
               <div class="sect" style="margin-top: 18px">Desktop &amp; voice</div>
               <div class="card" id="deskCard">
                 <div class="pref-addform">

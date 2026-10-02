@@ -78,6 +78,11 @@ import {
   type PreferenceProfilePort,
 } from '../../ports/outbound/preference-profile.js';
 import type { RepoRootsConfig, RepoRootsPort } from '../../ports/outbound/repo-roots.js';
+import type { SecretMetadata, SecretScope } from '../../ports/outbound/secrets-vault.js';
+import {
+  injectionEnvVarError,
+  type SecretsVaultService,
+} from '../security/secrets-vault-service.js';
 import {
   discoverRepos,
   searchRepos,
@@ -580,6 +585,31 @@ export interface ConfirmCatchUpCommand {
 }
 
 /**
+ * Store a secret in the vault (issue #292). The `value` crosses the wire
+ * only inside this authenticated local command payload; it is never
+ * journaled, never echoed in responses, and never returned by `secrets-list`.
+ */
+export interface SecretsSetCommand {
+  readonly kind: 'secrets-set';
+  readonly name: string;
+  readonly value: string;
+  readonly scope?: SecretScope;
+  readonly description?: string;
+  readonly expiresAt?: string;
+}
+
+/** List vault secret metadata — never values (issue #292). */
+export interface SecretsListCommand {
+  readonly kind: 'secrets-list';
+}
+
+/** Delete a secret from the vault (issue #292). */
+export interface SecretsDeleteCommand {
+  readonly kind: 'secrets-delete';
+  readonly name: string;
+}
+
+/**
  * Create a pull request for a task's branch (issue #27).
  *
  * Invoked by the side-by-side digest & diff viewer's "Create PR" action. The
@@ -717,7 +747,10 @@ export type Command =
   | AddRepoRootCommand
   | RemoveRepoRootCommand
   | MoveRepoRootCommand
-  | QueryReposCommand;
+  | QueryReposCommand
+  | SecretsSetCommand
+  | SecretsListCommand
+  | SecretsDeleteCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -764,6 +797,9 @@ export const COMMAND_KINDS: readonly string[] = [
   'remove-repo-root',
   'move-repo-root',
   'query-repos',
+  'secrets-set',
+  'secrets-list',
+  'secrets-delete',
 ] as const;
 
 /* ================================================================== *
@@ -1049,6 +1085,28 @@ export interface DelegateTaskResponse {
   readonly error?: string;
 }
 
+/** secrets-set response (issue #292) — never carries the stored value. */
+export interface SecretsSetResponse {
+  readonly ok: boolean;
+  readonly name?: string;
+  readonly error?: string;
+}
+
+/** secrets-list response (issue #292) — metadata only, never values. */
+export interface SecretsListResponse {
+  readonly ok: boolean;
+  readonly secrets?: readonly SecretMetadata[];
+  readonly error?: string;
+}
+
+/** secrets-delete response (issue #292). */
+export interface SecretsDeleteResponse {
+  readonly ok: boolean;
+  readonly name?: string;
+  readonly deleted?: boolean;
+  readonly error?: string;
+}
+
 /** Generic error response for unknown / malformed commands. */
 export interface UnknownCommandResponse {
   readonly ok: false;
@@ -1199,6 +1257,9 @@ export type Response =
   | ChatClearResponse
   | ChatAppendResponse
   | ReposResponse
+  | SecretsSetResponse
+  | SecretsListResponse
+  | SecretsDeleteResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -1426,6 +1487,19 @@ export interface CommandApiDeps {
    * contract (honest detection, not a silent claim).
    */
   readonly methodEnabled?: boolean;
+  /**
+   * Secrets vault service (issue #292, DEC-011/DEC-022). When wired,
+   * `secrets-set`/`secrets-list`/`secrets-delete` are served; when absent
+   * the commands fail cleanly with `ok: false` — surfaces never pretend
+   * a store exists.
+   */
+  readonly secrets?: SecretsVaultService;
+  /**
+   * Why the vault failed to wire (issue #292) — e.g. a locked OS keychain
+   * or unreachable master key. Appended to the honest "not wired" error
+   * so the user sees the cause, not just the symptom.
+   */
+  readonly secretsUnavailableReason?: string;
 }
 
 /* ================================================================== *
@@ -1481,6 +1555,8 @@ export class CommandApi {
   private readonly methodEnabled: boolean;
   private readonly chatStore?: ChatMessageRepositoryPort;
   private readonly chatMessageSink?: (message: ConversationMessage) => void;
+  private readonly secrets?: SecretsVaultService;
+  private readonly secretsUnavailableReason?: string;
   private chatService?: ChatTurnPort;
 
   /** Whether a `shutdown` command has been received. */
@@ -1516,6 +1592,19 @@ export class CommandApi {
     this.chatStore = deps.chatStore;
     this.chatMessageSink = deps.chatMessageSink;
     this.methodEnabled = deps.methodEnabled !== false;
+    this.secrets = deps.secrets;
+    this.secretsUnavailableReason = deps.secretsUnavailableReason;
+  }
+
+  /** Honest "vault not wired" error — carries the reason when known. */
+  private secretsUnavailable(): { ok: false; error: string } {
+    const reason = this.secretsUnavailableReason;
+    return {
+      ok: false,
+      error:
+        'secrets vault is not wired into this daemon' +
+        (reason !== undefined && reason !== '' ? ` (${reason})` : ''),
+    };
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -1540,6 +1629,21 @@ export class CommandApi {
    * {@link UnknownCommandResponse}.
    */
   async execute(command: Command): Promise<Response> {
+    try {
+      return await this.dispatch(command);
+    } catch (err) {
+      // A throwing handler must never hang the transport — convert to a
+      // plain error response (issue #292; hardens every kind, not just
+      // the ones written defensively).
+      return {
+        ok: false,
+        error: `command ${command?.kind ?? '<unknown>'} failed: ${errorMessage(err)}`,
+      };
+    }
+  }
+
+  /** Dispatch to the handler for `command.kind` — wrapped by {@link execute}. */
+  private async dispatch(command: Command): Promise<Response> {
     switch (command.kind) {
       case 'start-task':
         return this.handleStartTask(command);
@@ -1632,6 +1736,12 @@ export class CommandApi {
         return this.handleMoveRepoRoot(command);
       case 'query-repos':
         return this.handleQueryRepos(command);
+      case 'secrets-set':
+        return this.handleSecretsSet(command);
+      case 'secrets-list':
+        return this.handleSecretsList();
+      case 'secrets-delete':
+        return this.handleSecretsDelete(command);
       default:
         return {
           ok: false,
@@ -2743,6 +2853,85 @@ export class CommandApi {
     return { ok: true, roots, repos };
   }
 
+  /**
+   * secrets-set (issue #292): store a secret in the vault. The value is
+   * used for the store call and then dropped — the response carries the
+   * name only; audit events journal metadata, never the value.
+   *
+   * Wire validation is strict: the daemon socket is authenticated but the
+   * payload is still untrusted JSON — non-string fields are rejected
+   * before any vault call rather than crashing mid-handler.
+   */
+  private async handleSecretsSet(cmd: SecretsSetCommand): Promise<SecretsSetResponse> {
+    if (this.secrets === undefined) {
+      return this.secretsUnavailable();
+    }
+    if (typeof cmd.name !== 'string' || cmd.name.trim() === '') {
+      return { ok: false, error: 'name must be a non-empty string' };
+    }
+    if (typeof cmd.value !== 'string' || cmd.value === '') {
+      return { ok: false, error: 'value must be a non-empty string' };
+    }
+    if (cmd.description !== undefined && typeof cmd.description !== 'string') {
+      return { ok: false, error: 'description must be a string' };
+    }
+    // Normalize to canonical ISO-8601 — the vault's expiry check compares
+    // timestamps; a `Date.parse`-valid but non-ISO value like
+    // '12/31/2099' would otherwise be stored raw (issue #292).
+    let expiresAt: string | undefined;
+    if (cmd.expiresAt !== undefined) {
+      if (typeof cmd.expiresAt !== 'string' || Number.isNaN(Date.parse(cmd.expiresAt))) {
+        return { ok: false, error: 'expiresAt must be a parseable timestamp string' };
+      }
+      expiresAt = new Date(cmd.expiresAt).toISOString();
+    }
+    const scopeError = validateSecretScope(cmd.scope);
+    if (scopeError !== null) {
+      return { ok: false, error: scopeError };
+    }
+    const name = cmd.name.trim();
+    try {
+      await this.secrets.captureSecret({
+        name,
+        value: cmd.value,
+        scope: cmd.scope ?? {},
+        ...(cmd.description !== undefined ? { description: cmd.description } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+      });
+      return { ok: true, name };
+    } catch (err) {
+      return { ok: false, error: `Failed to store secret: ${errorMessage(err)}` };
+    }
+  }
+
+  /** secrets-list (issue #292): metadata only — values never leave the vault. */
+  private async handleSecretsList(): Promise<SecretsListResponse> {
+    if (this.secrets === undefined) {
+      return this.secretsUnavailable();
+    }
+    try {
+      return { ok: true, secrets: await this.secrets.listSecrets() };
+    } catch (err) {
+      return { ok: false, error: `Failed to list secrets: ${errorMessage(err)}` };
+    }
+  }
+
+  /** secrets-delete (issue #292): revoke a stored secret by name. */
+  private async handleSecretsDelete(cmd: SecretsDeleteCommand): Promise<SecretsDeleteResponse> {
+    if (this.secrets === undefined) {
+      return this.secretsUnavailable();
+    }
+    if (typeof cmd.name !== 'string' || cmd.name.trim() === '') {
+      return { ok: false, error: 'name must be a non-empty string' };
+    }
+    try {
+      const deleted = await this.secrets.deleteSecret(cmd.name.trim());
+      return { ok: true, name: cmd.name.trim(), deleted };
+    } catch (err) {
+      return { ok: false, error: `Failed to delete secret: ${errorMessage(err)}` };
+    }
+  }
+
   /** get-digest: return the latest completion digest for a task (issue #37). */
   private async handleGetDigest(cmd: GetDigestCommand): Promise<DigestResponse> {
     if (!cmd.taskId) {
@@ -3121,6 +3310,37 @@ function renderPreferenceSummary(profile: PreferenceProfile, projectId?: string)
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/**
+ * Validate a `secrets-set` scope object (issue #292). Returns a readable
+ * error string or `null` when valid. Unknown keys are rejected — the
+ * wire shape is exactly `SecretScope`. Env-var targets are checked
+ * against the shared injection denylist (`injectionEnvVarError`) so the
+ * capture surface and the injection boundary enforce the same rule.
+ */
+function validateSecretScope(scope: unknown): string | null {
+  if (scope === undefined) return null;
+  if (scope === null || typeof scope !== 'object' || Array.isArray(scope)) {
+    return 'scope must be an object with provider/projectId/envVarName string fields';
+  }
+  const s = scope as Record<string, unknown>;
+  for (const key of Object.keys(s)) {
+    if (key !== 'provider' && key !== 'projectId' && key !== 'envVarName') {
+      return `scope.${key} is not a known scope field`;
+    }
+    if (s[key] !== undefined && typeof s[key] !== 'string') {
+      return `scope.${key} must be a string`;
+    }
+  }
+  const envVar = s['envVarName'];
+  if (typeof envVar === 'string') {
+    const envError = injectionEnvVarError(envVar);
+    if (envError !== null) {
+      return `scope.${envError}`;
+    }
+  }
+  return null;
 }
 
 /** Map an {@link AttentionItem} to a serializable snapshot. */
