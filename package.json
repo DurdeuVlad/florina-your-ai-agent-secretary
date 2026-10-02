@@ -1,6 +1,6 @@
 {
   "name": "florina",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "An open-source attention broker for coding agents.",
   "type": "module",
   "main": "dist/index.js",
