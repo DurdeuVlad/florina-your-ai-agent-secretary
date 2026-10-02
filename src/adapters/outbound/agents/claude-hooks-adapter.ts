@@ -275,7 +275,9 @@ export class ClaudeHooksAdapter extends BaseAdapter {
       file: this.options.command ?? 'claude',
       args: cliArgs,
       cwd: sessionConfig.workingDir,
-      env: { ...process.env } as Record<string, string>,
+      // sessionConfig.env carries scoped secret injections resolved by the
+      // session manager (issue #293); merged over the inherited environment.
+      env: { ...process.env, ...(sessionConfig.env ?? {}) } as Record<string, string>,
     });
     this.cliProcess.onExit((exitCode, _signal) => this.handleCliExit(exitCode));
 

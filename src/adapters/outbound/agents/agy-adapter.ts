@@ -47,15 +47,23 @@ export interface AgyProcess {
   kill(): void;
 }
 
-/** Spawns an `agy -p` headless run. */
-export type AgySpawner = (command: string, args: readonly string[], cwd: string) => AgyProcess;
+/** Spawns an `agy -p` headless run. `env` carries scoped secret
+ * injections resolved per-session (issue #293); merged over the
+ * inherited process environment. */
+export type AgySpawner = (
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  env?: Readonly<Record<string, string>>,
+) => AgyProcess;
 
 /** Default spawner: plain child_process. Swap for a PTY spawner to work
  * around the non-TTY stdout bug (upstream #76). */
-export const nodeAgySpawner: AgySpawner = (command, args, cwd) => {
+export const nodeAgySpawner: AgySpawner = (command, args, cwd, env) => {
   const child: ChildProcess = spawnCli(command, args, {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
+    ...(env !== undefined ? { env: { ...process.env, ...env } } : {}),
   });
   const out = createInterface({ input: child.stdout! });
   const err = createInterface({ input: child.stderr! });
@@ -143,7 +151,7 @@ export class AgyAdapter extends BaseAdapter {
     if (sessionConfig.model !== undefined) {
       args.push('--model', sessionConfig.model);
     }
-    this.process = this.spawner(this.command, args, sessionConfig.workingDir);
+    this.process = this.spawner(this.command, args, sessionConfig.workingDir, sessionConfig.env);
     this.process.onLine((line) => this.handleLine(line));
     this.process.onStderrLine(() => {
       /* diagnostics only — stream-json stays on stdout */

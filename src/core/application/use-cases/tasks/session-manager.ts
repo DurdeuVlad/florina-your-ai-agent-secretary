@@ -55,6 +55,21 @@ export interface StopSessionResult {
   readonly error?: string;
 }
 
+/**
+ * Context handed to {@link SessionManagerOptions.secretEnvResolver} when a
+ * session's scoped secrets are resolved at spawn time (issue #293).
+ */
+export interface SecretInjectionContext {
+  /** Task being run. */
+  readonly taskId: string;
+  /** Run/session id assigned for this dispatch. */
+  readonly sessionId: string;
+  /** Provider/agent id executing the run (adapter id). */
+  readonly provider: string;
+  /** Project the task belongs to, when known. */
+  readonly projectId?: string;
+}
+
 /** Options for {@link SessionManager}. */
 export interface SessionManagerOptions {
   /**
@@ -66,6 +81,20 @@ export interface SessionManagerOptions {
    * fire-and-forget on the stream-end path.
    */
   readonly onSessionEnd?: (taskId: string, sessionId: string) => void | Promise<void>;
+  /**
+   * Resolves scoped secret env-vars for a session at spawn time (issue
+   * #293). The composition root wires this to the secrets vault's
+   * injection resolution; resolved vars are merged over
+   * `sessionConfig.env` — a stored credential is the user's most recent
+   * explicit credential input and wins on conflicts. Values flow only
+   * into the spawned process environment; they are never journaled or
+   * returned to callers. A resolver failure degrades to no injection
+   * rather than blocking dispatch — the provider surfaces its own auth
+   * failure, which the attention path can remediate.
+   */
+  readonly secretEnvResolver?: (
+    context: SecretInjectionContext,
+  ) => Promise<Record<string, string> | undefined>;
 }
 
 /**
@@ -75,12 +104,14 @@ export interface SessionManagerOptions {
 export class SessionManager {
   private readonly bus: EventPublisherPort;
   private readonly onSessionEnd?: (taskId: string, sessionId: string) => void | Promise<void>;
+  private readonly secretEnvResolver?: SessionManagerOptions['secretEnvResolver'];
   /** Map of taskId → active session info (one session per task in MVP). */
   private readonly sessions = new Map<string, SessionInfo>();
 
   constructor(bus: EventPublisherPort, options: SessionManagerOptions = {}) {
     this.bus = bus;
     this.onSessionEnd = options.onSessionEnd;
+    this.secretEnvResolver = options.secretEnvResolver;
   }
 
   /**
@@ -112,7 +143,8 @@ export class SessionManager {
 
     let sessionId: string;
     try {
-      const result = await adapter.startRun(taskId, sessionConfig);
+      const config = await this.withSecretEnv(taskId, sessionConfig);
+      const result = await adapter.startRun(taskId, config);
       if (!result.started) {
         await safeDisconnect(adapter);
         return { ok: false, error: 'Adapter reported the run did not start' };
@@ -201,6 +233,37 @@ export class SessionManager {
   /* ---------------------------------------------------------------- *
    * Internal helpers
    * ---------------------------------------------------------------- */
+
+  /**
+   * Merge resolved scoped secrets into the session env (issue #293).
+   * The vault's resolved injections win over caller-supplied `env` on
+   * conflicts — a stored credential is the user's most recent explicit
+   * credential input. Resolver absence or failure yields the caller's
+   * config unchanged so dispatch is never blocked by a vault hiccup.
+   */
+  private async withSecretEnv(
+    taskId: string,
+    sessionConfig: SessionConfig,
+  ): Promise<SessionConfig> {
+    if (this.secretEnvResolver === undefined) {
+      return sessionConfig;
+    }
+    let injected: Record<string, string> | undefined;
+    try {
+      injected = await this.secretEnvResolver({
+        taskId,
+        sessionId: sessionConfig.sessionId,
+        provider: sessionConfig.agentId,
+        projectId: sessionConfig.projectId,
+      });
+    } catch {
+      return sessionConfig;
+    }
+    if (injected === undefined || Object.keys(injected).length === 0) {
+      return sessionConfig;
+    }
+    return { ...sessionConfig, env: { ...sessionConfig.env, ...injected } };
+  }
 
   /**
    * Consume the adapter's `streamEvents` async iterable in the background,

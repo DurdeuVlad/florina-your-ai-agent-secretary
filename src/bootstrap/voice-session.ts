@@ -68,6 +68,12 @@ export async function createStdinVoiceSession(options: {
     readonly baseUrl: string;
     readonly model: string;
     readonly apiKey?: string;
+    /**
+     * Per-request credential resolver (issue #293) — lets a stored vault
+     * key take effect without re-launching the session; takes precedence
+     * over {@link apiKey} when it resolves a value.
+     */
+    readonly apiKeyResolver?: () => Promise<string | undefined | null>;
   };
   /**
    * Override the session instructions (issue #65) — when absent, an empty

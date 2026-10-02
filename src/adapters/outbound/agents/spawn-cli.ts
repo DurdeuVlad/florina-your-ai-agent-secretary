@@ -36,7 +36,11 @@ export function spawnCli(
   if (process.platform !== 'win32') {
     return spawn(command, [...args], options);
   }
-  const line = [command, ...args].map(quoteWinArg).join(' ');
+  // `/s` strips the outermost quote pair of the whole command line, so the
+  // assembled line is wrapped in one extra pair — otherwise a spaced
+  // executable path (e.g. `C:\Program Files\nodejs\node.exe`) arrives
+  // unquoted at cmd.exe and fails to launch.
+  const line = `"${[command, ...args].map(quoteWinArg).join(' ')}"`;
   return spawn(process.env['ComSpec'] ?? 'cmd.exe', ['/d', '/s', '/c', line], {
     ...options,
     windowsVerbatimArguments: true,

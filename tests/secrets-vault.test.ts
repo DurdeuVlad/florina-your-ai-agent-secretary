@@ -470,7 +470,12 @@ describe('Secrets Vault (issue #172)', () => {
         masterKey: 'test-key',
       });
       const eventJournal = new InMemoryEventJournal();
-      const service = new SecretsVaultService({ vault, eventJournal });
+      const auditEntries: VaultAuditEntry[] = [];
+      const service = new SecretsVaultService({
+        vault,
+        eventJournal,
+        auditSink: (e) => auditEntries.push(e),
+      });
 
       // 1. Global secret (no project, no provider restriction)
       await service.captureSecret({
@@ -524,18 +529,33 @@ describe('Secrets Vault (issue #172)', () => {
       expect(injB['DEPLOY_TOKEN']).toBeUndefined();
       expect(injB['SPECIAL_FLAG']).toBeUndefined();
 
-      // Audit event for injection logged without values
-      expect(eventJournal.events).toHaveLength(1);
-      const injEvt = eventJournal.events[0];
-      expect(injEvt.payload['action']).toBe('secret_injected');
-      expect(injEvt.payload['secretNames']).toEqual([
+      // Injection provenance lands in the vault-local ledger (issue #293):
+      // at dispatch time the session row does not exist yet — the journal's
+      // session FK cannot be satisfied, so the ledger (which has no FKs)
+      // records it with task/session/project/provider context instead.
+      const injEntries = auditEntries.filter((e) => e.action === 'secret_resolved');
+      // Scenario A injected 3 secrets; scenario B injected 2.
+      expect(injEntries.map((e) => e.name)).toEqual([
         'global-analytics-key',
         'alpha-deploy-token',
         'codex-alpha-special',
+        'global-analytics-key',
+        'anthropic-custom-key',
       ]);
-      expect(JSON.stringify(injEvt.payload)).not.toContain('analytics-val-111');
-      expect(JSON.stringify(injEvt.payload)).not.toContain('deploy-token-alpha-222');
-      expect(JSON.stringify(injEvt.payload)).not.toContain('codex-alpha-val-444');
+      expect(injEntries[0]!.context).toMatchObject({
+        taskId: 't-1',
+        sessionId: 's-1',
+        projectId: 'proj-alpha',
+        provider: 'codex',
+      });
+      expect(injEntries[4]!.context).toMatchObject({
+        projectId: 'proj-beta',
+        provider: 'claude-code',
+      });
+      const ledgerText = JSON.stringify(auditEntries);
+      expect(ledgerText).not.toContain('analytics-val-111');
+      expect(ledgerText).not.toContain('deploy-token-alpha-222');
+      expect(ledgerText).not.toContain('codex-alpha-val-444');
     });
 
     it('refuses to inject loader/proxy env vars even when the name is derived', async () => {
@@ -777,9 +797,11 @@ describe('Secrets Vault (issue #172)', () => {
           filePath: secretsFilePath,
           masterKey: 'test-key',
         });
+        const auditEntries: VaultAuditEntry[] = [];
         const service = new SecretsVaultService({
           vault,
           eventJournal: eventRepo,
+          auditSink: (e) => auditEntries.push(e),
         });
 
         // Capture secret in task context
@@ -798,11 +820,20 @@ describe('Secrets Vault (issue #172)', () => {
         });
         expect(injected['DB_PASSWORD']).toBe('super-db-password-12345');
 
-        // Verify SQLite events table has both audit events
+        // Verify SQLite events table has the capture audit event. The
+        // injection lands in the vault-local ledger (issue #293): at real
+        // dispatch time the session row does not exist yet, so injection
+        // provenance is kept where no session FK is required.
         const taskEvents = eventRepo.listByTask(task.id);
-        expect(taskEvents).toHaveLength(2);
-        expect(taskEvents[0].payload['action']).toBe('secret_captured');
-        expect(taskEvents[1].payload['action']).toBe('secret_injected');
+        expect(taskEvents).toHaveLength(1);
+        expect(taskEvents[0]!.payload['action']).toBe('secret_captured');
+        const injLedger = auditEntries.filter((e) => e.action === 'secret_resolved');
+        expect(injLedger.map((e) => e.name)).toEqual(['db-secret']);
+        expect(injLedger[0]!.context).toMatchObject({
+          taskId: task.id,
+          sessionId: session.id,
+          projectId: project.id,
+        });
 
         // Verify no raw secrets in the SQLite database rows
         for (const evt of taskEvents) {
