@@ -438,3 +438,45 @@ describe('FailoverService', () => {
     expect(prompt).toContain('Prior sessions: 1');
   });
 });
+
+/* ================================================================== *
+ * Florina Method contract parity (issue #288)
+ * ================================================================== */
+
+describe('Florina Method in failover (issue #288)', () => {
+  it('buildFailoverPrompt leads with the contract block by default', () => {
+    const task = buildTask({
+      projectId: 'p',
+      objective: 'fix the thing',
+      agentIds: ['codex'],
+      sessionIds: ['s1'],
+    });
+    const prompt = buildFailoverPrompt(task);
+    expect(prompt).toMatch(/^You are running under the Florina Method/);
+    expect(prompt).toContain('fix the thing');
+    expect(prompt).toContain('[failover briefing]');
+  });
+
+  it('buildFailoverPrompt honors the methodEnabled opt-out', () => {
+    const task = buildTask({ projectId: 'p', objective: 'fix the thing' });
+    const prompt = buildFailoverPrompt(task, undefined, { methodEnabled: false });
+    expect(prompt).not.toContain('Florina Method');
+    expect(prompt).toContain('fix the thing');
+  });
+
+  it('a real failover dispatch carries the contract + briefing together', async () => {
+    const fx = createFixture();
+    const { taskId } = await startRunningTask(fx, 'codex');
+    const res = await fx.service.failover({ taskId, reason: 'quota_exhausted' });
+    expect(res.kind).toBe('failed-over');
+
+    const dispatched = fx.adapters.get('claude-code')!.runs[0].config.objective;
+    // Contract leads; briefing and objective ride inside the same block
+    // (the seam detects the embedded contract and does not double-prepend).
+    expect(dispatched).toMatch(/^You are running under the Florina Method/);
+    expect(dispatched).toContain('[failover briefing]');
+    expect(dispatched).toContain('implement the widget');
+    // Exactly one contract block — no duplication.
+    expect(dispatched.split('Florina Method (').length - 1).toBe(1);
+  });
+});

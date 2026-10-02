@@ -47,6 +47,11 @@ import {
 } from '../resumption/catchup-digest.js';
 import { searchJournalEvents } from '../journal/journal-search.js';
 import { isPermanentJournalError } from '../journal/event-journal-writer.js';
+import {
+  FLORINA_CONTRACT_VERSION,
+  contractVersionOf,
+  withFlorinaContract,
+} from '../prompting/florina-method.js';
 import type { CatchUpDigest } from '../resumption/catchup-digest.js';
 import type { CatchUpWatermarkPort } from '../../ports/outbound/catchup-watermark.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
@@ -1412,6 +1417,15 @@ export interface CommandApiDeps {
    * every client sees appends regardless of which surface sent them.
    */
   readonly chatMessageSink?: (message: ConversationMessage) => void;
+  /**
+   * Florina Method opt-out (`florina.method.enabled`, issue #288).
+   * Default on: every dispatched prompt is prepended with the versioned
+   * contract block and `AgentStarted` journals the version in effect.
+   * `false` sends raw prompts — the journal then records `'disabled'`,
+   * or the embedded version if the incoming prompt already carried a
+   * contract (honest detection, not a silent claim).
+   */
+  readonly methodEnabled?: boolean;
 }
 
 /* ================================================================== *
@@ -1464,6 +1478,7 @@ export class CommandApi {
   private readonly delegation?: DelegationService;
   private readonly quotaLedger?: QuotaLedger;
   private readonly providerAttachment?: CommandApiDeps['providerAttachment'];
+  private readonly methodEnabled: boolean;
   private readonly chatStore?: ChatMessageRepositoryPort;
   private readonly chatMessageSink?: (message: ConversationMessage) => void;
   private chatService?: ChatTurnPort;
@@ -1500,6 +1515,7 @@ export class CommandApi {
     this.providerAttachment = deps.providerAttachment;
     this.chatStore = deps.chatStore;
     this.chatMessageSink = deps.chatMessageSink;
+    this.methodEnabled = deps.methodEnabled !== false;
   }
 
   /** Whether a `shutdown` command has been received. */
@@ -1704,6 +1720,7 @@ export class CommandApi {
     // task remains in its original state and the caller can retry with a
     // different agent or after fixing the adapter (issue #35 audit fix).
     let adapterTier: AdapterFidelityTier = 'E';
+    let dispatchedPrompt: string | undefined;
     if (this.adapterRegistry && this.sessionManager) {
       let adapter: AgentRuntimePort;
       try {
@@ -1717,12 +1734,17 @@ export class CommandApi {
           error: `Unknown or unavailable adapter for agent "${cmd.agentId}": ${errorMessage(err)}`,
         };
       }
+      const rawPrompt = cmd.sessionConfig.prompt ?? task.objective;
+      // Florina Method (#288): every dispatched prompt is bound to the
+      // contract — idempotent so failover briefings already carrying
+      // the block pass through unchanged.
+      dispatchedPrompt = this.methodEnabled ? withFlorinaContract(rawPrompt) : rawPrompt;
       const adapterSessionConfig: AdapterSessionConfig = {
         taskId: cmd.taskId,
         sessionId,
         agentId: cmd.agentId,
         workingDir: cmd.sessionConfig.workingDir,
-        objective: cmd.sessionConfig.prompt ?? task.objective,
+        objective: dispatchedPrompt,
         model: cmd.sessionConfig.model,
         autonomyLevel: cmd.sessionConfig.autonomyLevel,
         mcpServers: cmd.sessionConfig.mcpServers,
@@ -1842,6 +1864,17 @@ export class CommandApi {
       model: cmd.sessionConfig.model,
       autonomyLevel: cmd.sessionConfig.autonomyLevel,
       executionBrief: cmd.sessionConfig.executionBrief,
+      // Journal the contract the dispatched prompt *actually* carries —
+      // the real version even when an upstream embedding overrode the
+      // flag, 'disabled' when the opt-out held, absent when nothing was
+      // dispatched to an adapter.
+      ...(dispatchedPrompt !== undefined
+        ? {
+            methodVersion:
+              contractVersionOf(dispatchedPrompt) ??
+              (this.methodEnabled ? FLORINA_CONTRACT_VERSION : 'disabled'),
+          }
+        : {}),
     };
     this.eventBus.publish(event);
 

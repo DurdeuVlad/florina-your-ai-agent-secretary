@@ -41,6 +41,7 @@ import type {
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
 import type { CapacityRouter } from '../routing/capacity-router.js';
 import type { CommandApi } from './command-api.js';
+import { withFlorinaContract } from '../prompting/florina-method.js';
 import type { SessionManager } from './session-manager.js';
 import type { TaskStateMachine, TransitionContext } from './task-lifecycle.js';
 
@@ -108,6 +109,14 @@ export interface FailoverServiceDeps {
   readonly journal: EventJournalPort;
   /** Task Capsule lookup for the failover briefing; optional. */
   readonly capsuleStore?: ContextCapsuleRepositoryPort;
+  /**
+   * Florina Method opt-out (`florina.method.enabled`, issue #288).
+   * Default on: failover briefings embed the contract block so the
+   * replacement provider runs under the same guarantee; `false` keeps
+   * the briefing bare. Should mirror the CommandApi flag — if they
+   * disagree, the dispatch seam still journals what actually shipped.
+   */
+  readonly methodEnabled?: boolean;
 }
 
 /**
@@ -124,6 +133,7 @@ export class FailoverService {
   private readonly eventBus: EventPublisherPort;
   private readonly journal: EventJournalPort;
   private readonly capsuleStore?: ContextCapsuleRepositoryPort;
+  private readonly methodEnabled: boolean;
 
   constructor(deps: FailoverServiceDeps) {
     this.commandApi = deps.commandApi;
@@ -134,6 +144,7 @@ export class FailoverService {
     this.eventBus = deps.eventBus;
     this.journal = deps.journal;
     this.capsuleStore = deps.capsuleStore;
+    this.methodEnabled = deps.methodEnabled !== false;
   }
 
   /**
@@ -367,7 +378,9 @@ export class FailoverService {
       sessionConfig: {
         workingDir: task.worktreePath,
         model,
-        prompt: buildFailoverPrompt(task, this.lookupTaskCapsule(task)),
+        prompt: buildFailoverPrompt(task, this.lookupTaskCapsule(task), {
+          methodEnabled: this.methodEnabled,
+        }),
       },
     });
     if (response.ok === false) {
@@ -492,6 +505,7 @@ export function buildFailoverPrompt(
       readonly agentIds: readonly string[];
     };
   },
+  options?: { readonly methodEnabled?: boolean },
 ): string {
   const lines: string[] = [
     task.objective,
@@ -514,7 +528,12 @@ export function buildFailoverPrompt(
       lines.push(`- ${summary}`);
     }
   }
-  return lines.join('\n');
+  // Florina Method (#288): the failover briefing carries the same
+  // contract block as a first dispatch — the handoff changes the
+  // provider, not the guarantee. `withFlorinaContract` is idempotent,
+  // so the start-task seam passes this through untouched.
+  const briefing = lines.join('\n');
+  return options?.methodEnabled === false ? briefing : withFlorinaContract(briefing);
 }
 
 /** Extract a human-readable message from an unknown error. */

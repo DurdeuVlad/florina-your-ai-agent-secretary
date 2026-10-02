@@ -1,1 +1,6 @@
-export { FLORINA_CONTRACT_VERSION, renderFlorinaContract } from './florina-method.js';
+export {
+  FLORINA_CONTRACT_VERSION,
+  contractVersionOf,
+  renderFlorinaContract,
+  withFlorinaContract,
+} from './florina-method.js';

@@ -2544,3 +2544,156 @@ describe('repo roots (issue #253)', () => {
     expect(res.error).toContain('disk write failed');
   });
 });
+
+/* ================================================================== *
+ * Florina Method dispatch contract (issue #288)
+ * ================================================================== */
+
+import { SessionManager } from '../src/core/application/use-cases/tasks/session-manager.js';
+import {
+  FLORINA_CONTRACT_VERSION,
+  withFlorinaContract,
+} from '../src/core/application/use-cases/prompting/florina-method.js';
+import type {
+  AgentRuntimePort,
+  SessionConfig,
+  StartRunResult,
+} from '../src/core/application/ports/outbound/agent-runtime.js';
+
+/** Adapter stub that records the SessionConfig handed to startRun. */
+class CapturingAdapter implements AgentRuntimePort {
+  readonly fidelityTier = 'B' as const;
+  readonly runs: SessionConfig[] = [];
+
+  async connect(): Promise<void> {}
+  async startRun(_taskId: string, config: SessionConfig): Promise<StartRunResult> {
+    this.runs.push(config);
+    return { sessionId: 'cap-run-1', started: true };
+  }
+  streamEvents(): AsyncIterable<Event> {
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<Event>>(() => {}),
+      }),
+    };
+  }
+  async cancel(): Promise<void> {}
+  async disconnect(): Promise<void> {}
+}
+
+describe('Florina Method dispatch (issue #288)', () => {
+  function apiWithAdapter(fixture: Fixture, methodEnabled?: boolean) {
+    const adapter = new CapturingAdapter();
+    const api = new CommandApi({
+      ...fixture.deps,
+      sessionManager: new SessionManager(fixture.eventBus),
+      adapterRegistry: { create: () => adapter },
+      ...(methodEnabled !== undefined ? { methodEnabled } : {}),
+    });
+    return { api, adapter };
+  }
+
+  it('prepends the contract to the objective fallback path', async () => {
+    const fixture = createFixture();
+    const { api, adapter } = apiWithAdapter(fixture);
+    const { task, agentId } = createTaskWithSession(fixture);
+
+    const res = await api.execute({
+      kind: 'start-task',
+      taskId: task.id,
+      agentId,
+      sessionConfig: { workingDir: '/repo/wt' },
+    });
+    expect(res.ok).toBe(true);
+
+    const dispatched = adapter.runs[0]?.objective;
+    expect(dispatched).toMatch(/^You are running under the Florina Method/);
+    expect(dispatched).toContain(FLORINA_CONTRACT_VERSION);
+    expect(dispatched).toContain('Test objective');
+    // Contract precedes the task text.
+    expect(dispatched!.indexOf('Florina Method')).toBeLessThan(
+      dispatched!.indexOf('Test objective'),
+    );
+  });
+
+  it('prepends the contract to an explicit sessionConfig.prompt override', async () => {
+    const fixture = createFixture();
+    const { api, adapter } = apiWithAdapter(fixture);
+    const { task, agentId } = createTaskWithSession(fixture);
+
+    await api.execute({
+      kind: 'start-task',
+      taskId: task.id,
+      agentId,
+      sessionConfig: { workingDir: '/repo/wt', prompt: 'Custom capsule prompt' },
+    });
+
+    const dispatched = adapter.runs[0]?.objective ?? '';
+    expect(dispatched).toMatch(/^You are running under the Florina Method/);
+    expect(dispatched).toContain('Custom capsule prompt');
+  });
+
+  it('journals the contract version on the AgentStarted event', async () => {
+    const fixture = createFixture();
+    const { api } = apiWithAdapter(fixture);
+    const { task, agentId } = createTaskWithSession(fixture);
+    const publishSpy = vi.spyOn(fixture.eventBus, 'publish');
+
+    await api.execute({
+      kind: 'start-task',
+      taskId: task.id,
+      agentId,
+      sessionConfig: { workingDir: '/repo/wt' },
+    });
+
+    const started = publishSpy.mock.calls.map((c) => c[0]).find((e) => e.type === 'AgentStarted');
+    expect(started).toBeDefined();
+    expect(started && 'methodVersion' in started ? started.methodVersion : undefined).toBe(
+      FLORINA_CONTRACT_VERSION,
+    );
+  });
+
+  it('opt-out dispatches the raw prompt and journals the disabled state', async () => {
+    const fixture = createFixture();
+    const { api, adapter } = apiWithAdapter(fixture, false);
+    const { task, agentId } = createTaskWithSession(fixture);
+    const publishSpy = vi.spyOn(fixture.eventBus, 'publish');
+
+    await api.execute({
+      kind: 'start-task',
+      taskId: task.id,
+      agentId,
+      sessionConfig: { workingDir: '/repo/wt' },
+    });
+
+    expect(adapter.runs[0]?.objective).toBe('Test objective');
+    const started = publishSpy.mock.calls.map((c) => c[0]).find((e) => e.type === 'AgentStarted');
+    expect(started && 'methodVersion' in started ? started.methodVersion : undefined).toBe(
+      'disabled',
+    );
+  });
+
+  it('a disabled seam journals the embedded version when the prompt already carries a contract', async () => {
+    const fixture = createFixture();
+    const { api, adapter } = apiWithAdapter(fixture, false);
+    const { task, agentId } = createTaskWithSession(fixture);
+    const publishSpy = vi.spyOn(fixture.eventBus, 'publish');
+    // A contract-bound prompt arriving through the override seam (e.g. a
+    // failover briefing or a parent daemon's delegation) must journal
+    // the version it actually carries — never a false 'disabled' claim.
+    const boundPrompt = withFlorinaContract('pre-briefed task');
+
+    await api.execute({
+      kind: 'start-task',
+      taskId: task.id,
+      agentId,
+      sessionConfig: { workingDir: '/repo/wt', prompt: boundPrompt },
+    });
+
+    expect(adapter.runs[0]?.objective).toBe(boundPrompt);
+    const started = publishSpy.mock.calls.map((c) => c[0]).find((e) => e.type === 'AgentStarted');
+    expect(started && 'methodVersion' in started ? started.methodVersion : undefined).toBe(
+      FLORINA_CONTRACT_VERSION,
+    );
+  });
+});

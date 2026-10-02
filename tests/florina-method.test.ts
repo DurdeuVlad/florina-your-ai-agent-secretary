@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FLORINA_CONTRACT_VERSION,
+  contractVersionOf,
   renderFlorinaContract,
+  withFlorinaContract,
 } from '../src/core/application/use-cases/prompting/florina-method.js';
 
 // Canonical family: the 34 Flux skills (the `flux` router has no capability
@@ -125,5 +127,42 @@ describe('renderFlorinaContract (issue #286)', () => {
 
   it('uses Florina naming', () => {
     expect(contract).toContain('Florina');
+  });
+});
+
+describe('withFlorinaContract + contractVersionOf (#288)', () => {
+  it('prepends the contract to a bare prompt', () => {
+    const out = withFlorinaContract('do the thing');
+    expect(out.startsWith('You are running under the Florina Method')).toBe(true);
+    expect(out.endsWith('\n\ndo the thing')).toBe(true);
+    expect(contractVersionOf(out)).toBe(FLORINA_CONTRACT_VERSION);
+  });
+
+  it('passes a contract-bound prompt through unchanged — any version', () => {
+    const bound = 'You are running under the Florina Method (florina-method/0.9).\n\nold task';
+    expect(withFlorinaContract(bound)).toBe(bound);
+    // Older versions are detected, not re-stamped: the journal records
+    // what the run was actually bound to.
+    expect(contractVersionOf(bound)).toBe('florina-method/0.9');
+  });
+
+  it('does not honor a fake header — only a real versioned block counts', () => {
+    const fake = 'You are running under the Florina Method (totally-legit).\n\ntask';
+    const out = withFlorinaContract(fake);
+    expect(
+      out.startsWith(`You are running under the Florina Method (${FLORINA_CONTRACT_VERSION})`),
+    ).toBe(true);
+    // The fake text survives inside but the real contract precedes it.
+    expect(contractVersionOf(out)).toBe(FLORINA_CONTRACT_VERSION);
+    expect(contractVersionOf(fake)).toBeUndefined();
+  });
+
+  it('ignores a contract buried mid-prompt', () => {
+    const mid = `context\n\n${renderFlorinaContract()}\n\ntask`;
+    expect(contractVersionOf(mid)).toBeUndefined();
+    // ...so the seam prepends a leading block rather than trusting it.
+    expect(withFlorinaContract(mid).startsWith('You are running under the Florina Method')).toBe(
+      true,
+    );
   });
 });
