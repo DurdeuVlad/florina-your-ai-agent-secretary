@@ -66,11 +66,11 @@ your attention and your agent sessions:
 Download the installer for your platform from the
 [Releases](https://github.com/DurdeuVlad/agent-secretary/releases) page:
 
-| Platform | Download                          |
-| -------- | --------------------------------- |
-| Windows  | `Florina-Setup-*.exe` (NSIS, x64) |
-| macOS    | `Florina-*.dmg` (x64 + arm64)     |
-| Linux    | `Florina-*.AppImage` (x64)        |
+| Platform | Download                                                        |
+| -------- | --------------------------------------------------------------- |
+| Windows  | `Florina.Setup.*.exe` (NSIS installer, x64)                     |
+| macOS    | `Florina-*.dmg` (Intel) · `Florina-*-arm64.dmg` (Apple Silicon) |
+| Linux    | `Florina-*.AppImage` (x64)                                      |
 
 The guided setup and install docs currently target **Windows and Linux**; the
 macOS package is built by the same pipeline but the walkthrough coverage is
