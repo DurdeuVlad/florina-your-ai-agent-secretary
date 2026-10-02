@@ -15,10 +15,16 @@ import { dirname, join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const electronDir = dirname(require.resolve('electron')); // …/node_modules/electron
+// Electron's extracted layout differs per OS: win32 → dist/electron.exe,
+// darwin → dist/Electron.app/Contents/MacOS/Electron, linux → dist/electron.
 const binaryPath = join(
   electronDir,
   'dist',
-  process.platform === 'win32' ? 'electron.exe' : 'electron',
+  process.platform === 'win32'
+    ? 'electron.exe'
+    : process.platform === 'darwin'
+      ? join('Electron.app', 'Contents', 'MacOS', 'Electron')
+      : 'electron',
 );
 
 if (!existsSync(binaryPath)) {
