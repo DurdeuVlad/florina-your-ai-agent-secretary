@@ -20,6 +20,10 @@ import { checkSupervisionCostDiscipline } from '../../../core/application/use-ca
 import type { CompletionDigest } from '../../../core/application/use-cases/attention/completion-digest.js';
 import type { ContextHealthSnapshot } from '../../../core/application/use-cases/context/context-health-monitor.js';
 import type { CatchUpDigest } from '../../../core/application/use-cases/resumption/catchup-digest.js';
+import type {
+  ChatModelStatusView,
+  ProviderStatusView,
+} from '../../../core/application/use-cases/tasks/command-api.js';
 
 /* ------------------------------------------------------------------ *
  * ANSI color helpers (sparing usage per PRODUCT_DESIGN.md tone)
@@ -421,6 +425,105 @@ export function formatContextHealth(snapshots: readonly ContextHealthSnapshot[])
         ? `, last condensed ${s.lastCondensationAt}`
         : ', never condensed';
     lines.push(`    ${s.agentId}: ${statusColor(s.status)(s.status)} (fill ${fill}${condense})`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Provider readiness formatting (issue #294)
+ * ------------------------------------------------------------------ */
+
+/** Plain-language label for a provider auth state — never the enum verbatim. */
+function authStateLabel(state: string | undefined): { text: string; color: (t: string) => string } {
+  switch (state) {
+    case 'signed-in':
+      return { text: 'signed in (credentials on disk)', color: GREEN };
+    case 'found-not-signed-in':
+      return { text: 'installed but not signed in', color: YELLOW };
+    case 'auth-failing':
+      return { text: 'sign-in is failing', color: RED };
+    default:
+      return { text: 'sign-in unknown', color: GRAY };
+  }
+}
+
+/**
+ * Format provider + chat-model readiness lines for `florina status` and
+ * `florina auth` (issue #294). Rows that need action name the next step;
+ * rows with nothing actionable stay terse. `probed: false` reports the
+ * probe never ran rather than implying an empty world.
+ */
+export function formatProviderReadiness(
+  providers: readonly ProviderStatusView[],
+  probed: boolean,
+  chatModel: ChatModelStatusView | undefined,
+): string {
+  const lines: string[] = ['  providers:'];
+  if (!probed) {
+    lines.push(`    ${GRAY('provider check did not run on this daemon')}`);
+  } else if (providers.length === 0) {
+    lines.push(`    ${GRAY('none found — install a supported provider CLI')}`);
+  } else {
+    for (const p of providers) {
+      if (!p.found) {
+        lines.push(`    ${p.id}: ${GRAY('not installed')} ${GRAY(`— ${p.detail ?? ''}`)}`);
+        continue;
+      }
+      const { text, color } = authStateLabel(p.auth);
+      const hint =
+        p.fix !== undefined
+          ? ` — fix: ${
+              // run-command: the CLI verb does it. store-key/set-env:
+              // the label names the action (`Set GOOGLE_CLOUD_PROJECT`).
+              p.fix.kind === 'run-command' && p.fix.command !== undefined
+                ? `florina auth ${p.id}`
+                : p.fix.label
+            }`
+          : '';
+      // Show the classified failure detail whenever one stands — a 429 or
+      // ENOTFOUND on an `unknown` row is still real information, not noise.
+      const detail =
+        p.auth !== 'signed-in' && p.authDetail !== undefined
+          ? ` (${p.authDetail.slice(0, 120)})`
+          : '';
+      lines.push(`    ${p.id}: ${color(text)}${detail}${hint}`);
+    }
+  }
+  if (chatModel !== undefined) {
+    const source =
+      ({ env: 'env var', vault: 'key vault', none: 'no key' } as Record<string, string>)[
+        chatModel.keySource
+      ] ?? chatModel.keySource;
+    const state =
+      chatModel.state === 'ok'
+        ? GREEN('working')
+        : chatModel.state === 'auth-failing'
+          ? RED('sign-in is failing')
+          : chatModel.state === 'misconfigured'
+            ? YELLOW('missing a setting')
+            : chatModel.state === 'unreachable'
+              ? YELLOW('unreachable')
+              : chatModel.state === 'unconfigured'
+                ? GRAY('not configured')
+                : GRAY('untested');
+    const fix =
+      // A working keyless model (unauthenticated local LiteLLM) is not
+      // broken — don't nag for a key it doesn't need. A misconfigured
+      // model needs the env var the detail names, not a key.
+      chatModel.state !== 'ok' &&
+      (chatModel.state === 'auth-failing' || chatModel.keySource === 'none')
+        ? ` ${GRAY('— fix: florina auth chat-model')}`
+        : chatModel.state === 'misconfigured'
+          ? ` ${GRAY('— fix: the error names the missing setting')}`
+          : '';
+    // The classified failure detail is what actually tells the user
+    // what broke — render it so hints like "the error names the
+    // missing setting" aren't a dangling pointer.
+    const detail =
+      chatModel.state !== 'ok' && chatModel.detail !== undefined
+        ? `\n    ${GRAY(chatModel.detail.slice(0, 160))}`
+        : '';
+    lines.push(`  chat model: ${state} (${source})${fix}${detail}`);
   }
   return `${lines.join('\n')}\n`;
 }

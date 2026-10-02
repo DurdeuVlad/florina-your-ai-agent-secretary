@@ -46,7 +46,13 @@ import {
 import { EventBus } from '../adapters/outbound/events/in-memory-event-bus.js';
 import { GitWorktreeAdapter } from '../adapters/outbound/git/worktree-manager.js';
 import { AdapterRegistry } from '../adapters/outbound/agents/registry.js';
-import { attachLocalAgentProviders, type LocalProviderAttachment } from './agent-providers.js';
+import {
+  attachLocalAgentProviders,
+  makeCredentialProbe,
+  type LocalProviderAttachment,
+} from './agent-providers.js';
+import { ProviderReadiness } from '../core/application/use-cases/readiness/provider-readiness.js';
+import { launchVisibleTerminal } from '../adapters/outbound/platform/terminal-launcher.js';
 import { StubAdapter, STUB_ADAPTER_ID } from '../adapters/outbound/agents/stub-adapter.js';
 import { EventStream } from '../adapters/inbound/websocket/event-stream.js';
 import {
@@ -264,6 +270,7 @@ export class FlorinaDaemon extends EventEmitter {
   private taskStateMachine: TaskStateMachine | null = null;
   private adapterRegistry: AdapterRegistry | null = null;
   private localProviders: LocalProviderAttachment | null = null;
+  private providerReadiness: ProviderReadiness | null = null;
   private sessionManager: SessionManager | null = null;
   private quotaLedger: QuotaLedger | null = null;
   private preferenceStore: PreferenceProfileStore | null = null;
@@ -551,6 +558,24 @@ export class FlorinaDaemon extends EventEmitter {
       // (adapterRegistry.list()) is the user-visible surface.
       this.localProviders = await attachLocalAgentProviders(this.adapterRegistry);
 
+      // Provider auth readiness (issue #294): cheap local evidence —
+      // credential-file probe (lazy, re-read per query so a fresh
+      // sign-in is seen without restart) + classified runtime failures
+      // from dispatch, the bus (AgentFailed mid-run), and chat turns.
+      // Auth/config-class failures raise one deduped inbox card.
+      this.providerReadiness = new ProviderReadiness({
+        credsProbe: makeCredentialProbe(),
+        bus: this.bus,
+        onAuthIssue: (issue) => {
+          try {
+            this.attentionAggregator?.reportProviderAuthIssue(issue);
+          } catch {
+            /* the inbox sink must never break a failure path */
+          }
+        },
+      });
+      this.providerReadiness.start();
+
       // Federated capacity pools (DEC-036, issue #78): each configured
       // child daemon registers under its `provider@host` id — the router
       // treats it as ordinary provider capacity.
@@ -833,6 +858,50 @@ export class FlorinaDaemon extends EventEmitter {
         // CLIs the startup probe attached vs. skipped. Live accessor so a
         // `none`-disabled or absent attachment reports honestly empty.
         providerAttachment: () => this.localProviders,
+        providerReadiness: this.providerReadiness ?? undefined,
+        // signin-provider launches the provider's own login in a visible
+        // terminal (issue #294) — the spawn stays at the composition
+        // boundary; core never touches child_process.
+        terminalLauncher: (command) => launchVisibleTerminal(command),
+        // Chat-model readiness (issue #294): configured/key-source/state
+        // computed live — a vault key stored mid-run is seen immediately.
+        chatModelStatus: async () => {
+          const chatModel = this.options.chatModel;
+          const configured = chatModel !== undefined;
+          const vaultKey =
+            this.secretsVaultService === null
+              ? false
+              : await this.secretsVaultService.hasProviderCredential({
+                  envVarNames: ['FLORINA_LITELLM_KEY', 'OPENAI_API_KEY'],
+                  providers: ['litellm', 'openai'],
+                });
+          const keySource =
+            vaultKey === true
+              ? 'vault'
+              : chatModel?.apiKey !== undefined && chatModel.apiKey !== ''
+                ? 'env'
+                : 'none';
+          const failure = this.providerReadiness?.lastFailure('chat-model');
+          const state = !configured
+            ? 'unconfigured'
+            : failure !== undefined
+              ? failure.failureClass === 'auth'
+                ? 'auth-failing'
+                : failure.failureClass === 'config'
+                  ? 'misconfigured'
+                  : failure.failureClass === 'network'
+                    ? 'unreachable'
+                    : 'unknown'
+              : this.providerReadiness?.hasSucceeded('chat-model') === true
+                ? 'ok'
+                : 'unknown';
+          return {
+            configured,
+            keySource,
+            state,
+            ...(failure !== undefined ? { detail: failure.detail } : {}),
+          };
+        },
         // Voice sessions report live state here (issue #131); it is
         // broadcast to subscribed surfaces as an ephemeral voice:state
         // push — session ephemera is not journaled.
@@ -892,6 +961,11 @@ export class FlorinaDaemon extends EventEmitter {
           onEvent: (event) => {
             this.stream?.broadcast({ type: 'chat:event', event });
           },
+          // Chat-model readiness (issue #294): classify turn outcomes so
+          // a dead key/unreachable endpoint flips `chatModel.state` and
+          // raises an inbox card instead of only failing this turn.
+          onTurnError: (err) => this.providerReadiness?.recordFailure('chat-model', err),
+          onTurnSuccess: () => this.providerReadiness?.recordSuccess('chat-model'),
         });
         this.commandApi.setChatService(chatService);
       }
@@ -1141,6 +1215,8 @@ export class FlorinaDaemon extends EventEmitter {
     // Kill provider helper processes (codex app-server) after sessions stop.
     this.localProviders?.dispose();
     this.localProviders = null;
+    this.providerReadiness?.stop();
+    this.providerReadiness = null;
     if (this.attentionAggregator) {
       this.attentionAggregator.stop();
       this.attentionAggregator = null;

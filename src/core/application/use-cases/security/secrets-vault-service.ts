@@ -379,10 +379,56 @@ export class SecretsVaultService {
     readonly envVarNames?: readonly string[];
     readonly providers?: readonly string[];
   }): Promise<string | null> {
+    const candidates = await this.matchingCredentials(match);
+    for (const candidate of candidates) {
+      const value = await this.vault.getSecretValue(candidate.name);
+      if (value !== null) {
+        this.emitVaultAudit({
+          action: 'secret_resolved',
+          name: candidate.name,
+          scope: candidate.scope,
+        });
+        return value;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Metadata-only presence check for the same match contract as
+   * {@link resolveProviderCredential} (issue #294) — used by readiness
+   * reporting, which must answer "does the vault hold a usable key"
+   * without decrypting a value or writing a resolve audit entry.
+   * Expired matches don't count: a dead key is not a key source.
+   */
+  async hasProviderCredential(match: {
+    readonly envVarNames?: readonly string[];
+    readonly providers?: readonly string[];
+  }): Promise<boolean> {
+    return (await this.matchingCredentials(match)).length > 0;
+  }
+
+  /**
+   * Candidate metadata for a provider credential match, shared by the
+   * value resolver and the presence check. See
+   * {@link resolveProviderCredential} for the scope contract.
+   */
+  private async matchingCredentials(match: {
+    readonly envVarNames?: readonly string[];
+    readonly providers?: readonly string[];
+  }): Promise<readonly SecretMetadata[]> {
     const envNames = new Set(match.envVarNames ?? []);
     const providers = new Set(match.providers ?? []);
+    const nowMs = Date.parse(this.now());
     const allMetadata = await this.vault.listSecretMetadata();
-    const candidates = allMetadata
+    return allMetadata
+      // Fail closed on expiry, mirroring the vault's getSecretValue:
+      // an unparseable or past expiresAt is not a usable credential.
+      .filter((m) => {
+        if (m.expiresAt === undefined) return true;
+        const t = Date.parse(m.expiresAt);
+        return !Number.isNaN(t) && t > nowMs;
+      })
       // A project-scoped secret must never feed a global consumer.
       .filter((m) => m.scope.projectId === undefined)
       // Provider scope is a restriction, not just a label: a secret
@@ -403,18 +449,6 @@ export class SecretsVaultService {
         );
       })
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    for (const candidate of candidates) {
-      const value = await this.vault.getSecretValue(candidate.name);
-      if (value !== null) {
-        this.emitVaultAudit({
-          action: 'secret_resolved',
-          name: candidate.name,
-          scope: candidate.scope,
-        });
-        return value;
-      }
-    }
-    return null;
   }
 
   /**

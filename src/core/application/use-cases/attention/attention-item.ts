@@ -34,6 +34,7 @@ export type AttentionItemKind =
   | 'UnverifiedCompletion'
   | 'DegradedContext'
   | 'JournalFailure'
+  | 'ProviderAuth'
   | 'Custom';
 
 /**
@@ -110,6 +111,7 @@ export const ATTENTION_ITEM_KINDS: readonly AttentionItemKind[] = [
   'UnverifiedCompletion',
   'DegradedContext',
   'JournalFailure',
+  'ProviderAuth',
   'Custom',
 ] as const;
 

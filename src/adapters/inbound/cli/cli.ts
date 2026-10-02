@@ -19,6 +19,7 @@ import {
   formatMetrics,
   formatStatus,
   formatContextHealth,
+  formatProviderReadiness,
   formatCatchUp,
   setColorEnabled,
 } from './formatters.js';
@@ -52,6 +53,8 @@ import type {
   SecretsSetResponse,
   SecretsListResponse,
   SecretsDeleteResponse,
+  ProvidersResponse,
+  SigninProviderResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { TaskState } from '../../../core/domain/enums.js';
 import type {
@@ -178,6 +181,9 @@ Commands:
       [--description <text>] [--expires <ISO>]
   keys list                   List stored secrets (metadata only)
   keys remove <name>          Delete a stored secret
+  auth                        Show provider sign-in state (re-checks now)
+  auth <provider>             Open the provider's sign-in flow (or print
+                              the exact fix); use 'chat' for the model key
   prune <taskId>              Prune the worktree for a task
   voice [--api-key <key>]     Start a voice session (push-to-talk)
       [--litellm-url <url>]   LiteLLM proxy for Florina-loop tools
@@ -258,6 +264,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdPreferences(ctx);
     case 'keys':
       return cmdKeys(ctx);
+    case 'auth':
+      return cmdAuth(ctx);
     case 'prune':
       return cmdPrune(ctx);
     case 'voice':
@@ -304,6 +312,17 @@ async function cmdStatus(ctx: CommandContext): Promise<CommandResult> {
     const response = await sendCommand(ctx.deps.client, { kind: 'context-health' });
     if (response.ok) {
       message += formatContextHealth((response as ContextHealthResponse).snapshots);
+    }
+    // Provider auth readiness (issue #294): signed-in / not-signed-in /
+    // failing per installed provider plus the chat-model key source —
+    // the check that would have caught a dead credential before a turn
+    // failed on it.
+    const provRes = await sendCommand(ctx.deps.client, { kind: 'query-providers' }).catch(
+      () => null,
+    );
+    if (provRes !== null && provRes.ok) {
+      const p = provRes as ProvidersResponse;
+      message += formatProviderReadiness(p.providers, p.probed === true, p.chatModel);
     }
   }
   return { exitCode: 0, message };
@@ -691,6 +710,68 @@ async function cmdKeys(ctx: CommandContext): Promise<CommandResult> {
     exitCode: 1,
     message: 'Usage: florina keys <set|list|remove> [args]\nRun "florina help" for details.\n',
   };
+}
+
+/* --- auth --- */
+
+/**
+ * `florina auth` (issue #294): provider sign-in remediation. With no
+ * argument it prints the readiness table (the re-check path); with a
+ * provider id it asks the daemon to open that provider's own sign-in
+ * flow in a visible terminal, or prints the exact manual fix when the
+ * provider has no automatable login.
+ */
+async function cmdAuth(ctx: CommandContext): Promise<CommandResult> {
+  const [providerId] = ctx.args.positionals;
+  const status = await ctx.deps.runner.status();
+  if (!status.running) {
+    return {
+      exitCode: 1,
+      message: 'Florina daemon is not running — start it first (`florina start`).\n',
+    };
+  }
+  const provRes = await sendCommand(ctx.deps.client, { kind: 'query-providers' });
+  if (!provRes.ok) {
+    const r = provRes as ProvidersResponse;
+    return { exitCode: 1, message: `Couldn't check providers: ${r.error ?? 'unknown error'}\n` };
+  }
+  const probed = (provRes as ProvidersResponse).probed === true;
+  const providers = (provRes as ProvidersResponse).providers;
+  const chatModel = (provRes as ProvidersResponse).chatModel;
+
+  if (providerId === undefined) {
+    return {
+      exitCode: 0,
+      message:
+        'Sign-in state per provider (re-checked now):\n' +
+        formatProviderReadiness(providers, probed, chatModel) +
+        'Run `florina auth <provider>` to open a provider’s sign-in, or ' +
+        '`florina keys set <name>` to store an API key.\n',
+    };
+  }
+
+  // 'chat' is the friendly alias for the Secretary model key. The daemon
+  // owns the recipe table — ask it rather than gating on the probed list
+  // (a provider skipped by the startup probe may still have a recipe).
+  const id = providerId === 'chat' || providerId === 'secretary' ? 'chat-model' : providerId;
+  const res = await sendCommand(ctx.deps.client, { kind: 'signin-provider', providerId: id });
+  if (!res.ok) {
+    const r = res as SigninProviderResponse;
+    const ids = providers.map((p) => p.id).join(', ');
+    return {
+      exitCode: 1,
+      message:
+        `${r.error ?? 'Sign-in could not be started.'}\n` +
+        `Known providers: ${ids || '(none probed)'}, chat-model.\n`,
+    };
+  }
+  const r = res as SigninProviderResponse;
+  const state = id === 'chat-model' ? chatModel?.state : providers.find((p) => p.id === id)?.auth;
+  const already =
+    state === 'signed-in' || state === 'ok'
+      ? 'Note: this provider already looked healthy — a fresh sign-in is still fine.\n'
+      : '';
+  return { exitCode: 0, message: `${already}${r.detail ?? r.fix?.detail ?? 'Done.'}\n` };
 }
 
 /* --- prune --- */

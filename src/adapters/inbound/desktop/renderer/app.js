@@ -267,8 +267,17 @@ document.addEventListener('click', (e) => {
     openIdeaCompiler(btn.closest('.card'), cmd.slice('ideacompile:'.length));
     return;
   }
+  /* view-navigation verbs (issue #294): `navto:<view>` switches screens
+   * renderer-side — e.g. a readiness card's "Add key" deep-links the
+   * Settings API-keys card without a daemon round-trip. */
+  if (cmd.startsWith('navto:')) {
+    const target = cmd.slice('navto:'.length);
+    if (Object.hasOwn(TITLES, target)) showView(target);
+    return;
+  }
   void bridge.command(cmd).then((res) => {
     if (res && res.ok === false) toast(res.error || 'command failed');
+    else if (res && typeof res.detail === 'string' && res.detail.length > 0) toast(res.detail);
   });
 });
 

@@ -63,6 +63,16 @@ import type {
 import type { AgentRuntimeRegistryPort } from '../../ports/outbound/runtime-registry.js';
 import type { DelegationService } from '../federation/delegation.js';
 import type {
+  ProviderAuthState,
+  ProviderFix,
+  ProviderReadiness,
+} from '../readiness/provider-readiness.js';
+import {
+  providerFixFor,
+  providerFixIds,
+  sanitizeFailureText,
+} from '../readiness/provider-readiness.js';
+import type {
   AgentRepositoryPort,
   ApprovalRepositoryPort,
   ChatMessageRepositoryPort,
@@ -610,6 +620,19 @@ export interface SecretsDeleteCommand {
 }
 
 /**
+ * Launch or explain a provider's sign-in/remediation path (issue
+ * #294). For providers with a native login command the daemon opens it
+ * in a new visible terminal — Florina never brokers the credential
+ * exchange. For API-key providers the response carries the vault/key
+ * instructions instead. `providerId` is an adapter id (e.g.
+ * `claude-code`) or `chat-model` for the Secretary model key.
+ */
+export interface SigninProviderCommand {
+  readonly kind: 'signin-provider';
+  readonly providerId: string;
+}
+
+/**
  * Create a pull request for a task's branch (issue #27).
  *
  * Invoked by the side-by-side digest & diff viewer's "Create PR" action. The
@@ -750,7 +773,8 @@ export type Command =
   | QueryReposCommand
   | SecretsSetCommand
   | SecretsListCommand
-  | SecretsDeleteCommand;
+  | SecretsDeleteCommand
+  | SigninProviderCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -800,6 +824,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'secrets-set',
   'secrets-list',
   'secrets-delete',
+  'signin-provider',
 ] as const;
 
 /* ================================================================== *
@@ -1054,6 +1079,39 @@ export interface ProviderStatusView {
   readonly id: string;
   readonly found: boolean;
   readonly detail?: string;
+  /**
+   * Best-effort auth state (issue #294): derived from local credential
+   * evidence plus observed runtime failures — never from a provider API
+   * probe. Omitted on daemons that predate the field or lack the dep.
+   */
+  readonly auth?: ProviderAuthState;
+  /** Plain-language reason for a non-`signed-in` state, when known. */
+  readonly authDetail?: string;
+  /** How to fix a not-signed-in or auth-failing provider, when known. */
+  readonly fix?: ProviderFix;
+}
+
+/**
+ * Secretary chat-model readiness (issue #294), reported on
+ * `query-providers` so every surface sees the same contract.
+ * `keySource` names where the key comes from — never the value.
+ */
+export interface ChatModelStatusView {
+  /** Whether a chat model connector is configured at all. */
+  readonly configured: boolean;
+  /** 'env' static key, 'vault' resolver-backed key, or 'none'. */
+  readonly keySource: 'env' | 'vault' | 'none';
+  /**
+   * `ok` after an observed successful turn; `auth-failing` after an
+   * auth-class failure; `misconfigured` after a config-class one (a
+   * missing env var — not a rejected key); `unreachable` after a
+   * network-class one; `unknown` until evidence exists;
+   * `unconfigured` when no connector exists.
+   */
+  readonly state:
+    'ok' | 'auth-failing' | 'misconfigured' | 'unreachable' | 'unknown' | 'unconfigured';
+  /** Plain-language failure detail (sanitized — never a key). */
+  readonly detail?: string;
 }
 
 /** query-providers response (issue #277). */
@@ -1065,6 +1123,8 @@ export interface ProvidersResponse {
    * not "none found". Omitted/falsey on daemons that predate the field.
    */
   readonly probed?: boolean;
+  /** Secretary chat-model readiness (issue #294). Absent on older daemons. */
+  readonly chatModel?: ChatModelStatusView;
   readonly error?: string;
 }
 
@@ -1104,6 +1164,20 @@ export interface SecretsDeleteResponse {
   readonly ok: boolean;
   readonly name?: string;
   readonly deleted?: boolean;
+  readonly error?: string;
+}
+
+/**
+ * signin-provider response (issue #294). `launched` is true only when a
+ * visible terminal was actually opened; `detail` carries either the
+ * launch confirmation or the exact manual instructions.
+ */
+export interface SigninProviderResponse {
+  readonly ok: boolean;
+  readonly providerId: string;
+  readonly launched?: boolean;
+  readonly fix?: ProviderFix;
+  readonly detail?: string;
   readonly error?: string;
 }
 
@@ -1260,6 +1334,7 @@ export type Response =
   | SecretsSetResponse
   | SecretsListResponse
   | SecretsDeleteResponse
+  | SigninProviderResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -1468,6 +1543,25 @@ export interface CommandApiDeps {
     readonly skipped: readonly { id: string; reason: string }[];
   } | null;
   /**
+   * Provider auth-readiness tracker (issue #294). When wired,
+   * `query-providers` rows carry `auth`/`fix` and dispatch failures are
+   * classified into it; absent → the query reports install facts only.
+   */
+  readonly providerReadiness?: ProviderReadiness;
+  /**
+   * Chat-model readiness snapshot (issue #294). The composition root
+   * computes it live — configured state, key source, last classified
+   * failure — because those facts live at the composition boundary.
+   */
+  readonly chatModelStatus?: () => ChatModelStatusView | Promise<ChatModelStatusView>;
+  /**
+   * Visible-terminal launcher (issue #294) used by `signin-provider` for
+   * `run-command` fixes. The composition root owns the actual spawn —
+   * core never touches child_process. Absent → the handler returns the
+   * manual command instructions honestly (`launched: false`).
+   */
+  readonly terminalLauncher?: (command: string) => Promise<{ ok: boolean; detail: string }>;
+  /**
    * Secretary conversation store (issue #157). When wired, `chat-send` /
    * `chat-read` / `chat-clear` are served; when absent they fail cleanly.
    */
@@ -1552,6 +1646,9 @@ export class CommandApi {
   private readonly delegation?: DelegationService;
   private readonly quotaLedger?: QuotaLedger;
   private readonly providerAttachment?: CommandApiDeps['providerAttachment'];
+  private readonly providerReadiness?: ProviderReadiness;
+  private readonly chatModelStatus?: CommandApiDeps['chatModelStatus'];
+  private readonly terminalLauncher?: CommandApiDeps['terminalLauncher'];
   private readonly methodEnabled: boolean;
   private readonly chatStore?: ChatMessageRepositoryPort;
   private readonly chatMessageSink?: (message: ConversationMessage) => void;
@@ -1589,6 +1686,9 @@ export class CommandApi {
     this.delegation = deps.delegation;
     this.quotaLedger = deps.quotaLedger;
     this.providerAttachment = deps.providerAttachment;
+    this.providerReadiness = deps.providerReadiness;
+    this.chatModelStatus = deps.chatModelStatus;
+    this.terminalLauncher = deps.terminalLauncher;
     this.chatStore = deps.chatStore;
     this.chatMessageSink = deps.chatMessageSink;
     this.methodEnabled = deps.methodEnabled !== false;
@@ -1675,6 +1775,8 @@ export class CommandApi {
         return this.handleQueryFleet();
       case 'query-providers':
         return this.handleQueryProviders();
+      case 'signin-provider':
+        return this.handleSigninProvider(command);
       case 'list-tasks':
         return this.handleListTasks(command);
       case 'prune-worktree':
@@ -1837,11 +1939,12 @@ export class CommandApi {
         adapter = this.adapterRegistry.create(cmd.agentId);
         adapterTier = adapter.fidelityTier;
       } catch (err) {
+        this.providerReadiness?.recordFailure(cmd.agentId, err);
         return {
           ok: false,
           taskId: cmd.taskId,
           sessionId: '',
-          error: `Unknown or unavailable adapter for agent "${cmd.agentId}": ${errorMessage(err)}`,
+          error: `Unknown or unavailable adapter for agent "${cmd.agentId}": ${sanitizeFailureText(err)}`,
         };
       }
       const rawPrompt = cmd.sessionConfig.prompt ?? task.objective;
@@ -1867,13 +1970,22 @@ export class CommandApi {
         adapterSessionConfig,
       );
       if (!sessionResult.ok) {
+        // Dispatch-time failures never reach the bus (no session, no
+        // AgentFailed) — classify here so auth-broken providers surface
+        // on readiness and in the inbox (#294).
+        this.providerReadiness?.recordFailure(
+          cmd.agentId,
+          sessionResult.error ?? 'Failed to start adapter session',
+        );
         return {
           ok: false,
           taskId: cmd.taskId,
           sessionId: '',
-          error: sessionResult.error ?? 'Failed to start adapter session',
+          // Sanitized — an adapter error can echo a credential value.
+          error: sanitizeFailureText(sessionResult.error ?? 'Failed to start adapter session'),
         };
       }
+      this.providerReadiness?.recordSuccess(cmd.agentId);
     }
 
     // --- Materialize the agents row for the resolved adapter id ---
@@ -2454,19 +2566,182 @@ export class CommandApi {
   /**
    * query-providers (issue #277): the bootstrap probe's attach results —
    * `found` for each registered adapter, `not found` with the probe's
-   * reason for each skip. Reports what was observed at startup; it does
-   * not re-probe and cannot prove provider sign-in or reachability.
+   * reason for each skip — plus additive readiness fields (issue #294):
+   * credential-evidence `auth` state re-read lazily per query, the
+   * classified failure detail, the remediation recipe, and the
+   * chat-model block. Executable discovery still proves nothing about
+   * sign-in; `unknown` says so honestly.
    */
-  private handleQueryProviders(): ProvidersResponse {
+  private async handleQueryProviders(): Promise<ProvidersResponse> {
     const attachment = this.providerAttachment?.();
-    if (attachment == null) {
-      return { ok: true, providers: [], probed: false };
+    // The chat-model check is best-effort: a failing vault read must
+    // never take provider facts down with it.
+    let chatModel: ChatModelStatusView | undefined;
+    if (this.chatModelStatus !== undefined) {
+      // A hung vault read must not hang the whole command — bound it.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        chatModel = await Promise.race([
+          this.chatModelStatus(),
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => resolve(undefined), 3000);
+          }),
+        ]);
+      } catch {
+        chatModel = undefined;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     }
+    if (attachment == null) {
+      return { ok: true, providers: [], probed: false, ...(chatModel ? { chatModel } : {}) };
+    }
+    const readiness = this.providerReadiness;
+    const readinessFields = (id: string): Partial<ProviderStatusView> => {
+      if (readiness === undefined) return {};
+      const auth = readiness.authStateOf(id);
+      const failure = readiness.lastFailure(id);
+      return {
+        auth,
+        ...(auth !== 'signed-in' && failure !== undefined ? { authDetail: failure.detail } : {}),
+        ...(auth === 'found-not-signed-in' || auth === 'auth-failing'
+          ? (() => {
+              // Pass the standing failure's class+detail — a config-class
+              // failure yields the set-env recipe, not a sign-in button.
+              const fix = readiness.fixFor(id, failure?.failureClass, failure?.detail);
+              return fix !== undefined ? { fix } : {};
+            })()
+          : {}),
+      };
+    };
     const providers: ProviderStatusView[] = [
-      ...attachment.attached.map((p) => ({ id: p.id, found: true, detail: p.detail })),
-      ...attachment.skipped.map((p) => ({ id: p.id, found: false, detail: p.reason })),
+      ...attachment.attached.map((p) => ({
+        id: p.id,
+        found: true,
+        detail: p.detail,
+        ...readinessFields(p.id),
+      })),
+      // Skipped = binary not found. Sign-in state is meaningless for a
+      // CLI that isn't installed — 'found-not-signed-in' on a not-found
+      // row is self-contradictory, and a sign-in button would launch a
+      // command that can't exist.
+      ...attachment.skipped.map((p) => ({
+        id: p.id,
+        found: false,
+        detail: p.reason,
+      })),
     ];
-    return { ok: true, providers, probed: true };
+    return { ok: true, providers, probed: true, ...(chatModel ? { chatModel } : {}) };
+  }
+
+  /**
+   * signin-provider (issue #294): resolve the provider's fix recipe and
+   * act on it. `run-command` opens the provider's own sign-in in a new
+   * visible terminal via the composition-root launcher; `store-key` /
+   * `set-env` return the exact manual instructions — the response is
+   * the remediation, so it must read plainly on any surface.
+   */
+  private async handleSigninProvider(cmd: SigninProviderCommand): Promise<SigninProviderResponse> {
+    if (typeof cmd.providerId !== 'string' || cmd.providerId.trim() === '') {
+      return { ok: false, providerId: '', error: 'providerId is required' };
+    }
+    const providerId = cmd.providerId.trim();
+    // A sign-in command can't run when the provider's binary isn't
+    // installed — short-circuit before the recipe even resolves.
+    const skipped = this.providerAttachment?.()?.skipped.some((p) => p.id === providerId);
+    if (skipped === true) {
+      return {
+        ok: false,
+        providerId,
+        error:
+          `"${providerId}" isn't installed on this machine — install it first ` +
+          '(the provider’s own docs), then sign in',
+      };
+    }
+    // A standing failure changes the recipe — config-class yields the
+    // set-env fix, not the sign-in command. When the readiness service
+    // isn't wired the static table still answers — FIXES is not
+    // service-dependent.
+    const standing = this.providerReadiness?.lastFailure(providerId);
+    const fix = providerFixFor(
+      providerId,
+      standing?.failureClass,
+      standing?.detail,
+      standing?.envVar,
+    );
+    if (fix === undefined) {
+      // Enumerate the known ids — a typo'd or guessed id is a dead-end
+      // for the user unless the error names the valid choices.
+      const known = providerFixIds().join(', ');
+      return {
+        ok: false,
+        providerId,
+        error:
+          `no sign-in recipe is known for "${providerId}" (known: ${known}) — sign in inside ` +
+          'the provider’s own app or CLI, then re-check with `florina status`',
+      };
+    }
+    if (fix.kind !== 'run-command') {
+      // Instructional fixes: the recipe text IS the remediation —
+      // `florina keys set ...` or the env var to export. For the chat
+      // model, honesty requires one more check: when no connector is
+      // configured at all, a stored key changes nothing — name the env
+      // vars and the restart first.
+      let detail = fix.detail;
+      if (providerId === 'chat-model' && this.chatModelStatus !== undefined) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          // Bound the advisory check — a hung vault/status must not hang
+          // the WS response.
+          const status = await Promise.race([
+            this.chatModelStatus(),
+            new Promise<undefined>((resolve) => {
+              timer = setTimeout(() => resolve(undefined), 3000);
+            }),
+          ]);
+          if (status?.configured === false) {
+            detail =
+              'no chat model is configured — set FLORINA_LITELLM_URL and FLORINA_MODEL ' +
+              'on the daemon and restart it, then ' +
+              fix.detail;
+          }
+        } catch {
+          /* status is advisory — the static recipe still stands */
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      }
+      return { ok: true, providerId, launched: false, fix, detail };
+    }
+    const command = fix.command;
+    if (command === undefined) {
+      return { ok: false, providerId, fix, error: 'this fix has no command to run' };
+    }
+    if (this.terminalLauncher === undefined) {
+      return {
+        ok: true,
+        providerId,
+        launched: false,
+        fix,
+        detail: `run \`${command}\` in a terminal — this daemon can't open one for you`,
+      };
+    }
+    let launched: { ok: boolean; detail: string };
+    try {
+      launched = await this.terminalLauncher(command);
+    } catch (err) {
+      launched = {
+        ok: false,
+        detail: `couldn't open a terminal (${errorMessage(err)}) — run \`${command}\` yourself`,
+      };
+    }
+    return {
+      ok: true,
+      providerId,
+      launched: launched.ok,
+      fix,
+      detail: launched.detail,
+    };
   }
 
   /** list-tasks: list all tasks, optionally filtered by status. */

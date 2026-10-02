@@ -44,7 +44,7 @@ import {
   renderSetupResumeRow,
   renderSetupView,
 } from './views/setup-view.js';
-import type { SetupProvider, SetupStep } from './views/setup-view.js';
+import type { SetupChatModel, SetupProvider, SetupStep } from './views/setup-view.js';
 import type { ProviderStatusView } from '../../../core/application/use-cases/tasks/command-api.js';
 import { renderSecretaryScreen } from './views/secretary-screen.js';
 import type { DictationService } from '../../../core/application/use-cases/voice/dictation-service.js';
@@ -353,6 +353,7 @@ export class DesktopApp {
    */
   private providersChecked = false;
   private reposChecked = false;
+  private setupChatModel: SetupChatModel | undefined;
 
   constructor(options: DesktopAppOptions) {
     this.window = options.window;
@@ -1257,11 +1258,11 @@ export class DesktopApp {
       return null;
     }
     // `resolve:<itemId>` — the acknowledge-the-gap path on JournalFailure
-    // cards (issue #264). Scoped to that kind so other items' lifecycle
-    // stays exactly as before.
+    // cards (issue #264) and the "I fixed it" dismiss on ProviderAuth
+    // cards (issue #294). Other kinds' lifecycle stays exactly as before.
     if (verb === 'resolve') {
       const item = this.state.snapshot().inboxItems.find((i) => i.id === itemId);
-      if (item?.kind === 'JournalFailure') {
+      if (item?.kind === 'JournalFailure' || item?.kind === 'ProviderAuth') {
         return { kind: 'resolve-item', itemId: item.id };
       }
       return null;
@@ -1762,6 +1763,33 @@ export class DesktopApp {
       ack({ ok: true });
       return;
     }
+    if (raw.startsWith('setup:signin:')) {
+      // Provider sign-in (issue #294): the daemon opens the provider's
+      // own login in a visible terminal — Florina never brokers the
+      // credential exchange. Afterwards re-pull the facts so the row
+      // reflects whatever the probe now sees.
+      const providerId = raw.slice('setup:signin:'.length);
+      const res = await this.sendCommand({ kind: 'signin-provider', providerId }).catch(
+        (e: unknown) => ({
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+      if (res.ok) {
+        await this.refreshSetup();
+        // Forward the daemon's detail — when launched:false it carries
+        // the manual instructions; when true it confirms what opened.
+        ack({
+          ok: true,
+          ...((res as { detail?: string }).detail !== undefined
+            ? { detail: (res as { detail?: string }).detail }
+            : {}),
+        });
+      } else {
+        ack({ ok: false, error: (res as { error?: string }).error ?? 'sign-in failed to start' });
+      }
+      return;
+    }
     if (raw === 'setup:mode:packaged' || raw === 'setup:mode:source') {
       this.installMode = raw === 'setup:mode:packaged' ? 'packaged' : 'source';
       this.pushSetup();
@@ -1845,11 +1873,20 @@ export class DesktopApp {
             id: p.id,
             found: p.found,
             ...(typeof p.detail === 'string' ? { detail: p.detail } : {}),
+            ...(p.auth !== undefined ? { auth: p.auth } : {}),
+            ...(typeof p.authDetail === 'string' ? { authDetail: p.authDetail } : {}),
+            ...(p.fix !== undefined ? { fix: p.fix } : {}),
           }));
           // `probed` distinguishes "probe ran, nothing found" from
           // "no probe ran at all" — the latter must not render as
           // "none detected" (issue #278 follow-up).
           this.providersChecked = provRes.probed !== false;
+          this.setupChatModel =
+            'chatModel' in provRes &&
+            typeof provRes.chatModel === 'object' &&
+            provRes.chatModel !== null
+              ? (provRes.chatModel as SetupChatModel)
+              : undefined;
         }
       }
       if (reposRes !== null && reposRes.ok && 'roots' in reposRes && 'repos' in reposRes) {
@@ -1898,6 +1935,7 @@ export class DesktopApp {
         repos: this.setupRepos,
         providersChecked: this.providersChecked,
         reposChecked: this.reposChecked,
+        ...(this.setupChatModel !== undefined ? { chatModel: this.setupChatModel } : {}),
         daemonOnline: this.state.snapshot().daemonStatus === 'connected',
       }),
     );

@@ -40,6 +40,29 @@ export interface SetupProvider {
   readonly id: string;
   readonly found: boolean;
   readonly detail?: string;
+  /**
+   * Best-effort sign-in state (issue #294) — `undefined` when the
+   * daemon predates the field; absent state renders honestly as
+   * "couldn't check sign-in".
+   */
+  readonly auth?: 'signed-in' | 'found-not-signed-in' | 'auth-failing' | 'unknown';
+  /** Plain-language failure reason for `auth-failing` rows. */
+  readonly authDetail?: string;
+  /** The provider's fix recipe — drives the row's action button. */
+  readonly fix?: {
+    readonly kind: 'run-command' | 'store-key' | 'set-env';
+    readonly label: string;
+    readonly detail: string;
+  };
+}
+
+/** Secretary chat-model readiness, as reported by `query-providers`. */
+export interface SetupChatModel {
+  readonly configured: boolean;
+  readonly keySource: 'env' | 'vault' | 'none';
+  readonly state:
+    'ok' | 'auth-failing' | 'misconfigured' | 'unreachable' | 'unknown' | 'unconfigured';
+  readonly detail?: string;
 }
 
 export interface SetupViewInput {
@@ -59,6 +82,8 @@ export interface SetupViewInput {
   readonly providersChecked: boolean;
   /** Same honesty flag for the repo-roots query. */
   readonly reposChecked: boolean;
+  /** Chat-model readiness — absent on daemons that predate the field. */
+  readonly chatModel?: SetupChatModel;
   /** Whether the daemon is reachable — offline facts can't be re-checked. */
   readonly daemonOnline: boolean;
 }
@@ -69,12 +94,12 @@ const PROVIDER_LABELS: Record<string, string> = {
   codex: 'Codex',
   devin: 'Devin',
   gemini: 'Gemini CLI',
-  agy: 'Antigravity',
+  antigravity: 'Antigravity',
   all: 'Provider detection',
 };
 
 /** Display order for known ids; unknown ids append in probe order. */
-const PROVIDER_ORDER = ['claude-code', 'codex', 'devin', 'gemini', 'agy'];
+const PROVIDER_ORDER = ['claude-code', 'codex', 'devin', 'gemini', 'antigravity'];
 
 /** Plain display name for a provider id — shared with the chat context line. */
 export function providerLabel(id: string): string {
@@ -144,18 +169,71 @@ function renderWelcome(input: SetupViewInput): RenderTree[] {
   ];
 }
 
+/**
+ * Plain-language sign-in state for an installed provider (issue #294).
+ * `signed-in` is honestly hedged — credentials on disk can still be
+ * dead until a real failure says so.
+ */
+function authHint(p: SetupProvider): string {
+  switch (p.auth) {
+    case 'signed-in':
+      return 'looks signed in — credentials are on this machine';
+    case 'found-not-signed-in':
+      return 'installed but not signed in';
+    case 'auth-failing':
+      return `sign-in is failing${p.authDetail !== undefined ? ` — ${p.authDetail}` : ''}`;
+    case undefined:
+      return 'installed; sign-in happens inside the app itself';
+    case 'unknown':
+      // A classified non-auth failure (network/quota/missing) leaves real
+      // detail behind — show it instead of pretending nothing happened.
+      return p.authDetail !== undefined
+        ? `installed — last check reported a problem: ${p.authDetail}`
+        : 'installed; sign-in happens inside the app itself';
+  }
+}
+
 function renderApps(input: SetupViewInput): RenderTree[] {
   const sorted = [...input.providers].sort(
     (a, b) => providerOrder(a.id) - providerOrder(b.id) || Number(b.found) - Number(a.found),
   );
-  const rows: RenderTree[] = sorted.map((p) =>
-    el('SetupItem', { color: p.found ? 'success' : 'muted' }, [
+  const rows: RenderTree[] = sorted.map((p) => {
+    const children: RenderTree[] = [
       el('SetupItemName', {}, [`${providerLabel(p.id)} — ${p.found ? 'found' : 'not found'}`]),
-      el('SetupItemHint', {}, [
-        p.found ? 'installed; sign-in happens inside the app itself' : skipHint(p.detail),
-      ]),
-    ]),
-  );
+      el('SetupItemHint', {}, [p.found ? authHint(p) : skipHint(p.detail)]),
+    ];
+    // A provider that needs sign-in gets its own action button —
+    // `setup:signin:<id>` opens the provider's native login in a visible
+    // terminal via the daemon. Only on `found` rows: a missing binary
+    // can't run its own login command.
+    if (
+      p.found &&
+      p.fix !== undefined &&
+      (p.auth === 'found-not-signed-in' || p.auth === 'auth-failing')
+    ) {
+      if (p.fix.kind === 'run-command') {
+        children.push(
+          el('SetupItemAction', {}, [
+            el('Button', { variant: 'primary', command: `setup:signin:${p.id}` }, [p.fix.label]),
+          ]),
+        );
+      } else {
+        // set-env/store-key: there is no button to press — the fix is
+        // the instruction itself, so render it as text, not a verb.
+        children.push(el('SetupItemHint', {}, [`${p.fix.label}: ${p.fix.detail}`]));
+      }
+    }
+    const color = !p.found
+      ? 'muted'
+      : p.auth === 'found-not-signed-in' ||
+          p.auth === 'auth-failing' ||
+          (p.auth === 'unknown' && p.authDetail !== undefined)
+        ? 'warn'
+        : p.auth === 'signed-in'
+          ? 'success'
+          : 'muted';
+    return el('SetupItem', { color }, children);
+  });
   const body: RenderTree[] = [
     el('SetupStepTitle', {}, ['Check your coding apps']),
     el('SetupStepBody', {}, [
@@ -188,6 +266,49 @@ function renderApps(input: SetupViewInput): RenderTree[] {
   } else {
     body.push(el('SetupList', {}, rows));
   }
+  // Chat-model row (issue #294): Florina's own brain needs a key too —
+  // surface it whenever the daemon answered, even with zero providers
+  // found. `navto:prefs` deep-links the API-keys card.
+  const chat = input.chatModel;
+  // `chatModelStatus` doesn't depend on the provider probe — render it
+  // whenever the daemon answered, even when providers weren't checked.
+  if (input.daemonOnline && chat !== undefined) {
+    const chatChildren: RenderTree[] = [
+      el('SetupItemName', {}, ['Florina’s chat brain — ' + chatStateLabel(chat)]),
+      el('SetupItemHint', {}, [chat.detail !== undefined ? chat.detail : chatHintFor(chat)]),
+    ];
+    // The key CTA shows only when a key could actually fix it:
+    // auth-failing (key rejected), or unknown+no-key (worth storing
+    // one before first use). 'misconfigured' needs the env var the
+    // detail names; 'unreachable' is connectivity; 'unconfigured'
+    // needs env vars + restart. No nag for a working keyless model.
+    if (chat.state === 'auth-failing' || (chat.state === 'unknown' && chat.keySource === 'none')) {
+      chatChildren.push(
+        el('SetupItemAction', {}, [
+          el('Button', { variant: 'primary', command: 'navto:prefs' }, ['Add a model key']),
+        ]),
+      );
+    }
+    body.push(
+      el('SetupList', {}, [
+        el(
+          'SetupItem',
+          {
+            color:
+              chat.state === 'ok'
+                ? 'success'
+                : chat.state === 'auth-failing' ||
+                    chat.state === 'misconfigured' ||
+                    chat.state === 'unconfigured' ||
+                    chat.keySource === 'none'
+                  ? 'warn'
+                  : 'muted',
+          },
+          chatChildren,
+        ),
+      ]),
+    );
+  }
   body.push(
     actionsRow([
       el('Button', { variant: 'primary', command: 'setup:next' }, ['Continue']),
@@ -196,6 +317,46 @@ function renderApps(input: SetupViewInput): RenderTree[] {
     ]),
   );
   return body;
+}
+
+/** One-line label for the chat-model row — honest about evidence. */
+function chatStateLabel(chat: SetupChatModel): string {
+  switch (chat.state) {
+    case 'ok':
+      return 'working';
+    case 'auth-failing':
+      return 'its key is being rejected';
+    case 'misconfigured':
+      return 'a setting it needs is missing';
+    case 'unreachable':
+      return 'can’t reach its model service';
+    case 'unconfigured':
+      return 'not set up';
+    default:
+      return 'set up but untested';
+  }
+}
+
+function chatHintFor(chat: SetupChatModel): string {
+  if (chat.state === 'unconfigured') {
+    // No connector exists at all — a stored key alone changes nothing.
+    // Name the env vars + restart instead of pointing at the vault.
+    return (
+      'no chat model is configured — set FLORINA_LITELLM_URL and FLORINA_MODEL ' +
+      'on the helper (see docs/INSTALL.md), restart it, then add a key below'
+    );
+  }
+  if (chat.state === 'misconfigured') {
+    // A config-class turn failure (missing env var etc.) — the detail
+    // names it; a key is NOT the fix.
+    return 'check the error above — it names the missing setting; set it and restart the helper';
+  }
+  if (chat.state === 'auth-failing' || chat.keySource === 'none') {
+    return 'needs a model API key — store it once in Settings';
+  }
+  const source =
+    chat.keySource === 'vault' ? 'key stored in Florina’s vault' : 'key from the environment';
+  return `key source: ${source}`;
 }
 
 function renderFolder(input: SetupViewInput): RenderTree[] {
