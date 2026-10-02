@@ -33,6 +33,24 @@ export interface SecretsVaultServiceOptions {
    * inspection/retry. MUST NOT throw.
    */
   readonly onJournalFailure?: (err: unknown, row: Event) => void;
+  /**
+   * Vault-local audit ledger (issue #292): called on every capture and
+   * delete with metadata only (`name`, `scope`, timestamp — NEVER the
+   * value). The event journal only audits task-scoped operations (its
+   * schema requires task+session FKs); user-scope operations from the
+   * `secrets-*` commands have no such context, so the composition root
+   * wires this sink to an append-only file. MUST NOT throw — the caller
+   * wraps invocations defensively.
+   */
+  readonly auditSink?: (entry: VaultAuditEntry) => void;
+}
+
+/** One vault-audit ledger entry (metadata only — never a value). */
+export interface VaultAuditEntry {
+  readonly action: 'secret_captured' | 'secret_revoked';
+  readonly name: string;
+  readonly scope: SecretScope;
+  readonly at: string;
 }
 
 export interface CaptureSecretInput {
@@ -60,6 +78,7 @@ export class SecretsVaultService {
   private readonly eventJournal?: EventJournalPort;
   private readonly eventBus?: EventPublisherPort;
   private readonly onJournalFailure?: (err: unknown, row: Event) => void;
+  private readonly auditSink?: (entry: VaultAuditEntry) => void;
   private readonly now: () => string;
 
   constructor(options: SecretsVaultServiceOptions) {
@@ -67,6 +86,7 @@ export class SecretsVaultService {
     this.eventJournal = options.eventJournal;
     this.eventBus = options.eventBus;
     this.onJournalFailure = options.onJournalFailure;
+    this.auditSink = options.auditSink;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -110,8 +130,18 @@ export class SecretsVaultService {
 
     const metadata = await this.vault.getSecretMetadata(input.name);
     if (!metadata) {
-      throw new Error(`Failed to retrieve stored secret metadata for ${input.name}`);
+      // Honest about the partial commit: the write already landed, so a
+      // bare "failed" would mislead the user into retrying/storing twice.
+      throw new Error(
+        `Secret "${input.name}" was written but its metadata could not be read back — ` +
+          'check `keys list` before retrying to avoid a duplicate write.',
+      );
     }
+
+    // Vault-local audit ledger (issue #292): every capture is recorded —
+    // metadata only. Complements the task-scoped journal path below,
+    // which only fires when task/session context exists.
+    this.emitVaultAudit({ action: 'secret_captured', name: input.name, scope: input.scope });
 
     // DEC-012 Audit log: journal capture event if valid task/session context is present
     if (input.context?.taskId && input.context?.sessionId) {
@@ -178,6 +208,12 @@ export class SecretsVaultService {
       const val = await this.vault.getSecretValue(secret.name);
       if (val !== null) {
         const envKey = scope.envVarName ?? toEnvVarName(secret.name);
+        // The injection boundary enforces the denylist on the FINAL env
+        // name — a derived name (secret named `path` → PATH) bypasses
+        // wire-level validation, so it is checked here too (issue #292).
+        if (injectionEnvVarError(envKey) !== null) {
+          continue;
+        }
         injections[envKey] = val;
         injectedNames.push(secret.name);
       }
@@ -217,7 +253,17 @@ export class SecretsVaultService {
     name: string,
     context?: { taskId?: EntityId; sessionId?: EntityId },
   ): Promise<boolean> {
+    // Fetch scope before the delete so the audit entry records real
+    // provenance, not an empty scope.
+    const prior = await this.vault.getSecretMetadata(name);
     const deleted = await this.vault.deleteSecret(name);
+    if (deleted) {
+      this.emitVaultAudit({
+        action: 'secret_revoked',
+        name,
+        scope: prior?.scope ?? {},
+      });
+    }
     if (deleted && context?.taskId && context?.sessionId) {
       const timestamp = this.now();
       const message = `Secret "${name}" deleted/revoked from vault`;
@@ -275,6 +321,22 @@ export class SecretsVaultService {
   }
 
   /**
+   * Emit a vault-audit ledger entry (issue #292). The sink is expected to
+   * be non-throwing; a throwing sink is contained anyway — a provenance
+   * write failure must never break the vault operation it records.
+   */
+  private emitVaultAudit(entry: Omit<VaultAuditEntry, 'at'>): void {
+    if (this.auditSink === undefined) {
+      return;
+    }
+    try {
+      this.auditSink({ ...entry, at: this.now() });
+    } catch {
+      /* audit must never break vault operations */
+    }
+  }
+
+  /**
    * Defensive audit event recording. Safely inserts into eventJournal
    * and broadcasts onto eventBus without bubbling unhandled exceptions
    * if foreign key constraints or uncommitted context IDs fail.
@@ -325,6 +387,67 @@ function randomId(): string {
 function toEnvVarName(name: string): string {
   const sanitized = name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
   return /^[0-9]/.test(sanitized) ? `_${sanitized}` : sanitized;
+}
+
+/**
+ * Env vars whose injection would subvert the spawned process or its
+ * traffic — loader paths, shell startup hooks, interpreter knobs, proxy
+ * and CA overrides (issue #292). Checked case-insensitively at BOTH the
+ * capture surface and the injection boundary so no path bypasses it.
+ */
+const DENIED_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'PATH',
+  'HOME',
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'NODE_EXTRA_CA_CERTS',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'LD_AUDIT',
+  'LD_DEBUG',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'BASH_ENV',
+  'ENV',
+  'PROMPT_COMMAND',
+  'PS1',
+  'PS2',
+  'PS3',
+  'PS4',
+  'PYTHONPATH',
+  'PYTHONSTARTUP',
+  'PYTHONINSPECT',
+  'RUBYOPT',
+  'RUBYLIB',
+  'PERL5OPT',
+  'PERL5DB',
+  'GIT_SSH_COMMAND',
+  'GIT_SSH',
+  'JAVA_TOOL_OPTIONS',
+  '_JAVA_OPTIONS',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'SSL_CERT_FILE',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+]);
+
+const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Validate a target env-var name for secret injection. Returns a readable
+ * error, or null when the name is safe to inject. Shared by the command
+ * surface (capture-time rejection) and resolveInjections (final-name
+ * enforcement so derived names can't bypass the denylist).
+ */
+export function injectionEnvVarError(name: string): string | null {
+  if (!ENV_VAR_NAME_PATTERN.test(name)) {
+    return `envVarName '${name}' must match [A-Za-z_][A-Za-z0-9_]*`;
+  }
+  if (DENIED_ENV_VAR_NAMES.has(name.toUpperCase())) {
+    return `envVarName '${name}' is a loader/shell/proxy variable and cannot be injected`;
+  }
+  return null;
 }
 
 /**

@@ -985,6 +985,9 @@ export class DesktopApp {
       this.handleDesktopSettingsCommand(m.cmd, m.id);
       return;
     }
+    if (typeof m.cmd === 'string' && (await this.handleKeysCommand(m.cmd, m.id))) {
+      return;
+    }
     if (typeof m.cmd === 'string' && m.cmd.startsWith('setup:')) {
       await this.handleSetupCommand(m.cmd, m.id);
       return;
@@ -1612,6 +1615,90 @@ export class DesktopApp {
     this.dictation?.setSessionLanguage(next.dictationLanguage);
     ack({ ok: true });
     this.replayVoiceConfig();
+  }
+
+  /**
+   * API-keys verbs (issue #292). `keyset:<json>` stores a secret in the
+   * daemon vault via `secrets-set`; `keysdel:<name>` deletes via
+   * `secrets-delete`; `keylist` returns `secrets-list` verbatim. Values
+   * travel only inside the daemon-bound command — nothing is journaled
+   * locally, and the response carries metadata only. Returns `false` for
+   * commands this family does not own.
+   */
+  private async handleKeysCommand(raw: string, id: unknown): Promise<boolean> {
+    const ack = (res: { ok: boolean; error?: string }): void => {
+      try {
+        this.bridge.sendToRenderer('command:result', { id, res });
+      } catch {
+        /* bridge disposed mid-flight — nowhere to report */
+      }
+    };
+    const send = async (command: Parameters<typeof this.sendCommand>[0]): Promise<Response> =>
+      this.sendCommand(command).catch((e: unknown): Response => ({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+    try {
+      if (raw === 'keylist') {
+        ack(await send({ kind: 'secrets-list' }));
+        return true;
+      }
+      if (raw.startsWith('keysdel:')) {
+        let name: string;
+        try {
+          name = decodeURIComponent(raw.slice('keysdel:'.length));
+        } catch {
+          ack({ ok: false, error: 'malformed keysdel payload' });
+          return true;
+        }
+        ack(await send({ kind: 'secrets-delete', name }));
+        return true;
+      }
+      if (raw.startsWith('keyset:')) {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(decodeURIComponent(raw.slice('keyset:'.length)));
+        } catch {
+          ack({ ok: false, error: 'malformed keyset payload' });
+          return true;
+        }
+        if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+          ack({ ok: false, error: 'keyset payload must be an object' });
+          return true;
+        }
+        const p = payload as Record<string, unknown>;
+        if (typeof p['name'] !== 'string' || p['name'].trim() === '') {
+          ack({ ok: false, error: 'name is required' });
+          return true;
+        }
+        if (typeof p['value'] !== 'string' || p['value'] === '') {
+          ack({ ok: false, error: 'value is required' });
+          return true;
+        }
+        const scope: Record<string, string> = {};
+        if (typeof p['provider'] === 'string' && p['provider'] !== '')
+          scope['provider'] = p['provider'];
+        if (typeof p['projectId'] === 'string' && p['projectId'] !== '')
+          scope['projectId'] = p['projectId'];
+        if (typeof p['envVarName'] === 'string' && p['envVarName'] !== '')
+          scope['envVarName'] = p['envVarName'];
+        ack(
+          await send({
+            kind: 'secrets-set',
+            name: p['name'].trim(),
+            value: p['value'],
+            ...(Object.keys(scope).length > 0 ? { scope } : {}),
+          }),
+        );
+        return true;
+      }
+      return false;
+    } catch (err) {
+      // Last-resort: a throwing send/parse path must still ack the
+      // renderer — a pending command promise must never leak unresolved.
+      ack({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      return true;
+    }
   }
 
   /**

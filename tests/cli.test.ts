@@ -154,6 +154,21 @@ function uniqueDbPath(): string {
   );
 }
 
+/**
+ * A db path inside its own mkdtemp — required for tests that actually
+ * start a daemon: the daemon's secrets vault lives beside the db file
+ * (issue #292), so a bare tmpdir dbPath would litter `secrets.enc`,
+ * `credentials/`, and `secrets.audit.jsonl` into the shared tempdir root.
+ * `secretsCredentialBackend: 'file'` keeps the test off the real OS
+ * keychain.
+ */
+function isolatedDbPath(): { dbPath: string; dir: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'florina-cli-test-'));
+  return { dbPath: path.join(dir, 'florina.db'), dir };
+}
+
+const HERMETIC_SECRETS = { secretsCredentialBackend: 'file' as const };
+
 /* ================================================================== *
  * Argument parsing
  * ================================================================== */
@@ -430,12 +445,14 @@ describe('DaemonRunner', () => {
 
   it('start and stop a real in-process daemon', async () => {
     const pidFile = uniquePidFile();
+    const { dbPath } = isolatedDbPath();
     const runner = new DaemonRunner({
       pidFile,
       lockfile: uniqueLockfile(),
-      dbPath: uniqueDbPath(),
+      dbPath,
       port: 0,
       mcpPort: 0, // OS-assigned port
+      ...HERMETIC_SECRETS,
     });
     const pid = await runner.start();
     expect(pid).toBe(process.pid);
@@ -475,12 +492,14 @@ describe('DaemonRunner', () => {
 
   it('readPid returns the written pid after start', async () => {
     const pidFile = uniquePidFile();
+    const { dbPath } = isolatedDbPath();
     const runner = new DaemonRunner({
       pidFile,
       lockfile: uniqueLockfile(),
-      dbPath: uniqueDbPath(),
+      dbPath,
       port: 0,
       mcpPort: 0,
+      ...HERMETIC_SECRETS,
     });
     await runner.start();
     expect(runner.readPid()).toBe(process.pid);
