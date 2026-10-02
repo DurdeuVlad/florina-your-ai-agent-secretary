@@ -135,6 +135,14 @@ export interface AgentStartedEvent extends SupervisorEventBase {
    * reconstructed after the fact.
    */
   executionBrief?: ExecutionBrief;
+  /**
+   * The Florina Method contract version this dispatch ran under (issue
+   * #288) — journaled so the guarantee a run was bound to is recorded,
+   * not reconstructed. Absent on events predating the feature and when
+   * no adapter dispatch occurred; the literal `'disabled'` records an
+   * explicit opt-out dispatch.
+   */
+  methodVersion?: string;
 }
 
 /**
@@ -866,6 +874,9 @@ function validateAgentStarted(value: Record<string, unknown>, problems: string[]
     (typeof value['executionBrief'] !== 'object' || value['executionBrief'] === null)
   ) {
     problems.push('AgentStarted: optional field "executionBrief" must be an object.');
+  }
+  if (value['methodVersion'] !== undefined && !isString(value['methodVersion'])) {
+    problems.push('AgentStarted: optional field "methodVersion" must be a string.');
   }
 }
 

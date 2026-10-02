@@ -150,6 +150,15 @@ export interface DaemonOptions {
    */
   readonly allowedCommands?: readonly string[];
   /**
+   * `florina.method.enabled` (issue #288) — when `false`, dispatched
+   * prompts are sent without the Florina Method contract block and
+   * `AgentStarted` journals the opt-out honestly. Default on. Reached
+   * via `FLORINA_METHOD_ENABLED=0|false|off` on `florina daemon`.
+   * Governs delegated dispatch only — the Secretary's own chat prompt
+   * is governed by the `systemPrompt` composition seam instead.
+   */
+  readonly methodEnabled?: boolean;
+  /**
    * Remote capacity pools (DEC-036): child daemons registered in the
    * adapter registry under `provider@host` ids so the router treats
    * them as provider capacity.
@@ -212,6 +221,7 @@ export class FlorinaDaemon extends EventEmitter {
     allowedCommands?: readonly string[];
     remoteProviders?: NonNullable<DaemonOptions['remoteProviders']>;
     chatModel?: DaemonOptions['chatModel'];
+    methodEnabled: boolean;
   };
   private state: DaemonState = 'stopped';
   private server: WebSocketControlPlaneServer | null = null;
@@ -257,6 +267,7 @@ export class FlorinaDaemon extends EventEmitter {
       repoRootsPath:
         options.repoRootsPath ?? path.join(os.homedir(), '.florina', 'repo-roots.json'),
       installSignalHandlers: options.installSignalHandlers ?? true,
+      methodEnabled: options.methodEnabled !== false,
       ...(options.ideasDir !== undefined ? { ideasDir: options.ideasDir } : {}),
       ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
       ...(options.allowedCommands !== undefined
@@ -664,6 +675,8 @@ export class FlorinaDaemon extends EventEmitter {
         chatMessageSink: (message) => {
           this.stream?.broadcast({ type: 'chat:message', message });
         },
+        // Florina Method (issue #288): `florina.method.enabled` opt-out.
+        methodEnabled: this.options.methodEnabled,
         onShutdown: () => {
           void this.stop();
         },
@@ -709,6 +722,7 @@ export class FlorinaDaemon extends EventEmitter {
         eventBus: this.bus,
         journal: repos.events,
         capsuleStore: repos.capsules,
+        methodEnabled: this.options.methodEnabled,
       });
 
       // Wire the manager MCP surface (DEC-018, issue #63): an HTTP

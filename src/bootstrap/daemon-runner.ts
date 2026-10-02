@@ -139,6 +139,11 @@ export class DaemonRunner {
       // rejects unauthenticated commands. Surfaces read the same file.
       ...(this.authTokenDir !== null ? { authToken: ensureLocalAuthToken(this.authTokenDir) } : {}),
       ...(chatModel !== undefined ? { chatModel } : {}),
+      // florina.method.enabled (#288): opt out of the dispatch-time
+      // contract prepend with FLORINA_METHOD_ENABLED=0|false|off.
+      methodEnabled: !['0', 'false', 'off', 'no', 'disabled'].includes(
+        (process.env['FLORINA_METHOD_ENABLED'] ?? '').toLowerCase().trim(),
+      ),
     });
     await this.daemon.start();
     this.writePid(process.pid);

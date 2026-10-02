@@ -78,3 +78,27 @@ STANDING RULES — always on:
 export function renderFlorinaContract(): string {
   return FLORINA_CONTRACT;
 }
+
+const CONTRACT_HEADER_RE =
+  /^You are running under the Florina Method \((florina-method\/\d+\.\d+)\)/;
+
+/**
+ * The contract version a prompt is bound by, or `undefined` when it
+ * does not lead with a contract block. Version-aware on purpose: a
+ * prompt carrying an *older* contract still reports that version, so
+ * journaled dispatch records name what the run was actually bound to.
+ */
+export function contractVersionOf(prompt: string): string | undefined {
+  return CONTRACT_HEADER_RE.exec(prompt)?.[1];
+}
+
+/**
+ * Prepend the contract block to a prompt destined for a delegated agent
+ * (issue #288). Idempotent *for leading blocks*: a prompt that already
+ * leads with a contract of any version (e.g. a failover briefing) is
+ * returned unchanged so both prepend sites can apply it without
+ * duplicating — a block buried mid-prompt does not count.
+ */
+export function withFlorinaContract(prompt: string): string {
+  return contractVersionOf(prompt) === undefined ? `${FLORINA_CONTRACT}\n\n${prompt}` : prompt;
+}
