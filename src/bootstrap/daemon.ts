@@ -588,6 +588,40 @@ export class FlorinaDaemon extends EventEmitter {
         onSessionEnd: async (taskId, sessionId) => {
           await rollup.rollUpSession(taskId, sessionId);
         },
+        // Scoped secret injection at spawn time (issue #293). Resolved
+        // lazily at session start — the vault service is constructed
+        // later in this method, so the closure dereferences it at call
+        // time. No vault (or an unwired one) → no injections. A vault
+        // read failure degrades to no injection rather than breaking the
+        // dispatch — but it is surfaced as an attention item so a vault
+        // outage is never indistinguishable from "no matching secrets".
+        secretEnvResolver: async (ctx) => {
+          const service = this.secretsVaultService;
+          if (service === null) {
+            return undefined;
+          }
+          try {
+            return await service.resolveInjections({
+              taskId: ctx.taskId,
+              sessionId: ctx.sessionId,
+              provider: ctx.provider,
+              projectId: ctx.projectId,
+            });
+          } catch (err) {
+            try {
+              this.attentionAggregator?.reportJournalFailure({
+                source: 'secrets-injection',
+                error: `secret resolution failed for task ${ctx.taskId}: ${err instanceof Error ? err.message : String(err)} — dispatch proceeds without injected secrets`,
+                // No retained write to replay — retryable:false keeps the
+                // card honest (a Retry verb would be a no-op).
+                retryable: false,
+              });
+            } catch {
+              /* the failure sink must never break dispatch */
+            }
+            return undefined;
+          }
+        },
       });
 
       // Idea ledger + Brief pipeline (DEC-033, issue #69): ledgers live
@@ -835,7 +869,22 @@ export class FlorinaDaemon extends EventEmitter {
         const { ChatService } = await import('../core/application/use-cases/chat/chat-service.js');
         const chatService = new ChatService({
           store: repos.chatMessages,
-          connector: new LiteLLMConnector(this.options.chatModel),
+          // The connector resolves its API key per request (issue #293):
+          // a key stored in the secrets vault (env var `FLORINA_LITELLM_KEY`
+          // / `OPENAI_API_KEY`, or provider `litellm`/`openai` scope) is
+          // picked up without a daemon restart and takes precedence over
+          // the env-configured key — storing a fresh key is how the user
+          // remediates a dead one.
+          connector: new LiteLLMConnector({
+            ...this.options.chatModel,
+            apiKeyResolver: () =>
+              this.secretsVaultService === null
+                ? Promise.resolve(null)
+                : this.secretsVaultService.resolveProviderCredential({
+                    envVarNames: ['FLORINA_LITELLM_KEY', 'OPENAI_API_KEY'],
+                    providers: ['litellm', 'openai'],
+                  }),
+          }),
           commandApi: this.commandApi,
           onMessage: (message) => {
             this.stream?.broadcast({ type: 'chat:message', message });

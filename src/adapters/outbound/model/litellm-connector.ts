@@ -56,6 +56,17 @@ export interface LiteLLMConnectorOptions {
   /** Optional proxy key, sent as `Authorization: Bearer`. */
   readonly apiKey?: string;
   /**
+   * Per-request credential resolver (issue #293). Invoked on every
+   * {@link complete} call so a secret stored in the vault takes effect
+   * without restarting the daemon. A resolved value takes precedence
+   * over the static {@link apiKey} — the stored secret is the user's
+   * most recent explicit credential input (typically set because the
+   * env key failed); when the resolver returns `undefined`, the static
+   * key is used. A throwing resolver degrades to the static key rather
+   * than failing the request.
+   */
+  readonly apiKeyResolver?: () => Promise<string | undefined | null>;
+  /**
    * Optional `reasoning_effort` sent verbatim in the request body. Some
    * models (e.g. `gpt-5.6-luna`) reject function tools on chat completions
    * unless this is set — typically to `'none'`.
@@ -139,6 +150,7 @@ export class LiteLLMConnector implements ModelPort {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly apiKey: string | undefined;
+  private readonly apiKeyResolver: LiteLLMConnectorOptions['apiKeyResolver'];
   private readonly reasoningEffort: string | undefined;
   private readonly doFetch: typeof fetch;
 
@@ -146,6 +158,7 @@ export class LiteLLMConnector implements ModelPort {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.model = options.model;
     this.apiKey = options.apiKey;
+    this.apiKeyResolver = options.apiKeyResolver;
     this.reasoningEffort = options.reasoningEffort;
     const f = options.fetch ?? globalThis.fetch;
     if (f === undefined) {
@@ -157,8 +170,9 @@ export class LiteLLMConnector implements ModelPort {
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
     const url = `${this.baseUrl}/v1/chat/completions`;
     const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (this.apiKey !== undefined) {
-      headers.authorization = `Bearer ${this.apiKey}`;
+    const apiKey = (await this.resolveApiKey()) ?? this.apiKey;
+    if (apiKey !== undefined) {
+      headers.authorization = `Bearer ${apiKey}`;
     }
     const body: Record<string, unknown> = {
       model: this.model,
@@ -226,5 +240,22 @@ export class LiteLLMConnector implements ModelPort {
               totalTokens: wire.usage.total_tokens,
             },
     };
+  }
+
+  /**
+   * Consult the per-request credential resolver (issue #293). Resolver
+   * failures degrade to `undefined` so a vault hiccup cannot fail the
+   * model call — the static key (if any) remains as fallback.
+   */
+  private async resolveApiKey(): Promise<string | undefined> {
+    if (this.apiKeyResolver === undefined) {
+      return undefined;
+    }
+    try {
+      const resolved = await this.apiKeyResolver();
+      return resolved === null ? undefined : resolved;
+    } catch {
+      return undefined;
+    }
   }
 }

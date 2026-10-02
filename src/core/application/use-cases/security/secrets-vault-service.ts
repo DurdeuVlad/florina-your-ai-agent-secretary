@@ -47,10 +47,32 @@ export interface SecretsVaultServiceOptions {
 
 /** One vault-audit ledger entry (metadata only — never a value). */
 export interface VaultAuditEntry {
-  readonly action: 'secret_captured' | 'secret_revoked';
+  readonly action: 'secret_captured' | 'secret_revoked' | 'secret_resolved' | 'secret_denied';
   readonly name: string;
   readonly scope: SecretScope;
   readonly at: string;
+  /**
+   * Consumer/dispatch context for resolution entries (issue #293).
+   * `secret_resolved` is emitted when a value is read out for a consumer
+   * — dispatch env or a named consumer like the chat model. The ledger
+   * says "resolved for", not "injected into": adapters that cannot apply
+   * per-run env (connect-time spawns, remote transports) may drop the
+   * vars, and the audit record must not assert an event that did not
+   * provably occur.
+   */
+  readonly context?: {
+    readonly taskId?: EntityId;
+    readonly sessionId?: EntityId;
+    readonly projectId?: EntityId;
+    readonly provider?: string;
+  };
+  /**
+   * On `secret_denied` entries: the env var the injection was refused
+   * for (recorded because a denylisted target is usually reachable only
+   * via a derived name — `name: 'path'` denies PATH — so the auditor
+   * should not have to re-derive it).
+   */
+  readonly targetEnvVar?: string;
 }
 
 export interface CaptureSecretInput {
@@ -183,7 +205,7 @@ export class SecretsVaultService {
   async resolveInjections(context: ResolveInjectionsContext): Promise<Record<string, string>> {
     const allMetadata = await this.vault.listSecretMetadata();
     const injections: Record<string, string> = {};
-    const injectedNames: string[] = [];
+    const injected: { name: string; scope: SecretScope }[] = [];
 
     // Sort secrets ascending by scope specificity so that more specific scopes
     // (e.g. project+provider or project-specific) override broader ones (e.g. global)
@@ -211,35 +233,50 @@ export class SecretsVaultService {
         // The injection boundary enforces the denylist on the FINAL env
         // name — a derived name (secret named `path` → PATH) bypasses
         // wire-level validation, so it is checked here too (issue #292).
-        if (injectionEnvVarError(envKey) !== null) {
+        const denyReason = injectionEnvVarError(envKey);
+        if (denyReason !== null) {
+          // A refused injection is a security-relevant audit event — the
+          // ledger records the attempt, the target var, and the dispatch
+          // context (issue #293).
+          this.emitVaultAudit({
+            action: 'secret_denied',
+            name: secret.name,
+            scope,
+            targetEnvVar: envKey,
+            context: {
+              taskId: context.taskId,
+              sessionId: context.sessionId,
+              projectId: context.projectId,
+              provider: context.provider,
+            },
+          });
           continue;
         }
         injections[envKey] = val;
-        injectedNames.push(secret.name);
+        injected.push({ name: secret.name, scope });
       }
     }
 
-    // DEC-012 Audit log: record injection event without exposing values
-    if (injectedNames.length > 0 && context.taskId && context.sessionId) {
-      const timestamp = this.now();
-      const message = `Injected ${injectedNames.length} scoped secret(s): ${injectedNames.join(', ')}`;
-      this.recordAuditEvent(
-        {
-          id: `event_${randomId()}`,
+    // Provenance (issue #293): resolution runs before the session row
+    // exists (adapter-first dispatch — no DB mutation before a run
+    // starts), so the event journal's session FK cannot be satisfied
+    // here. The vault-local ledger records `secret_resolved` with the
+    // dispatch context instead — and says "resolved for", not "injected
+    // into": transports that cannot apply per-run env may drop the vars,
+    // and the audit trail must not assert an event it cannot verify.
+    // Metadata only — never values.
+    for (const entry of injected) {
+      this.emitVaultAudit({
+        action: 'secret_resolved',
+        name: entry.name,
+        scope: entry.scope,
+        context: {
           taskId: context.taskId,
           sessionId: context.sessionId,
-          timestamp,
-          kind: 'AgentProgress',
-          payload: {
-            message,
-            action: 'secret_injected',
-            secretNames: injectedNames,
-            projectId: context.projectId,
-            provider: context.provider,
-          },
+          projectId: context.projectId,
+          provider: context.provider,
         },
-        message,
-      );
+      });
     }
 
     return injections;
@@ -318,6 +355,66 @@ export class SecretsVaultService {
    */
   async listSecrets(): Promise<readonly SecretMetadata[]> {
     return this.vault.listSecretMetadata();
+  }
+
+  /**
+   * Resolve the best stored credential value for a named consumer (issue
+   * #293) — e.g. the Secretary chat model looking for
+   * `FLORINA_LITELLM_KEY`/`OPENAI_API_KEY` or a `litellm`-scoped secret.
+   *
+   * A secret matches when its scope's `envVarName` (or the env var derived
+   * from its name) is in `envVarNames`, or its `provider` is in
+   * `providers`. Scope restrictions are hard constraints: project-scoped
+   * secrets never feed a global consumer, and a `provider`-scoped secret
+   * only resolves when that provider is on the caller's list — a
+   * `claude-code` grant cannot leak into the chat model. When several
+   * secrets match, the most recently updated wins — the user's newest
+   * credential input reflects current intent.
+   *
+   * Returns the decrypted value, or `null` when nothing matches or the
+   * match is expired. A resolved read is recorded in the vault-local
+   * audit ledger (metadata only, never the value).
+   */
+  async resolveProviderCredential(match: {
+    readonly envVarNames?: readonly string[];
+    readonly providers?: readonly string[];
+  }): Promise<string | null> {
+    const envNames = new Set(match.envVarNames ?? []);
+    const providers = new Set(match.providers ?? []);
+    const allMetadata = await this.vault.listSecretMetadata();
+    const candidates = allMetadata
+      // A project-scoped secret must never feed a global consumer.
+      .filter((m) => m.scope.projectId === undefined)
+      // Provider scope is a restriction, not just a label: a secret
+      // granted to `claude-code` must not resolve for the chat model.
+      // `providers` therefore acts as a constraint — a set provider must
+      // be on the consumer's list — not an alternate match key alone.
+      .filter((m) => m.scope.provider === undefined || providers.has(m.scope.provider))
+      .filter((m) => {
+        if (m.scope.provider !== undefined && providers.has(m.scope.provider)) {
+          return true;
+        }
+        // Match on the declared env var OR the derived one — a secret
+        // named `openai-api-key` injects as OPENAI_API_KEY for agent envs,
+        // so the credential resolver honors the same name mapping.
+        return (
+          (m.scope.envVarName !== undefined && envNames.has(m.scope.envVarName)) ||
+          envNames.has(toEnvVarName(m.name))
+        );
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    for (const candidate of candidates) {
+      const value = await this.vault.getSecretValue(candidate.name);
+      if (value !== null) {
+        this.emitVaultAudit({
+          action: 'secret_resolved',
+          name: candidate.name,
+          scope: candidate.scope,
+        });
+        return value;
+      }
+    }
+    return null;
   }
 
   /**
@@ -423,10 +520,23 @@ const DENIED_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'PERL5DB',
   'GIT_SSH_COMMAND',
   'GIT_SSH',
+  // git-config injection (issue #293): GIT_CONFIG_* can redirect
+  // core.hooksPath or alias commands — code exec inside the agent's own
+  // worktree. COMSPEC/PATHEXT/CDPATH redirect Windows shell resolution;
+  // SSH_AUTH_SOCK hands an agent the user's ssh-agent.
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG_COUNT',
+  'COMSPEC',
+  'PATHEXT',
+  'CDPATH',
+  'SSH_AUTH_SOCK',
   'JAVA_TOOL_OPTIONS',
   '_JAVA_OPTIONS',
   'HTTP_PROXY',
   'HTTPS_PROXY',
+  'ALL_PROXY',
   'SSL_CERT_FILE',
   'REQUESTS_CA_BUNDLE',
   'CURL_CA_BUNDLE',

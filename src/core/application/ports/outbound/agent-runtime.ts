@@ -29,6 +29,12 @@ export interface SessionConfig {
   readonly agentId: string;
   /** Working directory (worktree) the agent runs in. */
   readonly workingDir: string;
+  /**
+   * Project the task belongs to (DEC-004). Scopes secret injection at
+   * spawn time (issue #293) — secrets granted to a different project are
+   * never injected into this run.
+   */
+  readonly projectId?: string;
   /** The objective delegated to the agent. */
   readonly objective: string;
   /** Optional model identifier the agent should use. */
@@ -46,6 +52,12 @@ export interface SessionConfig {
   /**
    * Environment variables injected into the agent session (e.g. from secrets vault,
    * issue #172). Keys and values injected at spawn time without leaking to journals.
+   * Honored by adapters that spawn a local process per run (claude-code,
+   * agy); adapters whose process is spawned at `connect()` (ACP, PTY) or
+   * that drive a separately-managed runtime (Codex app-server WebSocket,
+   * remote APIs) cannot apply per-run env and ignore it. Values are never
+   * forwarded off-machine — the remote federation adapter does not carry
+   * them into delegated payloads.
    */
   readonly env?: Readonly<Record<string, string>>;
 }

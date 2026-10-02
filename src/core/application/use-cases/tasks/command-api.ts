@@ -1854,6 +1854,7 @@ export class CommandApi {
         sessionId,
         agentId: cmd.agentId,
         workingDir: cmd.sessionConfig.workingDir,
+        projectId: task.projectId,
         objective: dispatchedPrompt,
         model: cmd.sessionConfig.model,
         autonomyLevel: cmd.sessionConfig.autonomyLevel,
