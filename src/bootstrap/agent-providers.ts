@@ -366,6 +366,14 @@ const CREDENTIAL_EVIDENCE: Readonly<
        * and may delete the file after a successful keychain write).
        */
       readonly darwinKeychain?: string;
+      /**
+       * Windows Credential Manager generic target holding the
+       * credential (win32 only — verified live: agy stores its OAuth
+       * token as `gemini:antigravity`, reported by agy's own log as
+       * `authenticated via keyring`). Probed via `cmdkey /list:<target>`
+       * — existence only, the secret is never read.
+       */
+      readonly winCredTarget?: string;
     }
   >
 > = {
@@ -383,8 +391,24 @@ const CREDENTIAL_EVIDENCE: Readonly<
     ],
     envVars: ['GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS'],
   },
-  devin: { files: [], envVars: ['DEVIN_API_KEY'] },
-  // antigravity (agy) has no documented local credential path — unknown.
+  devin: {
+    // `devin auth status` prints this exact path on Windows; the XDG and
+    // macOS equivalents are the conventional locations for the same CLI.
+    files: [
+      'AppData/Roaming/devin/credentials.toml',
+      '.config/devin/credentials.toml',
+      'Library/Application Support/devin/credentials.toml',
+    ],
+    envVars: ['DEVIN_API_KEY'],
+  },
+  antigravity: {
+    // agy keeps its OAuth token in the OS keyring, not a file — on
+    // Windows it's the `gemini:antigravity` generic credential.
+    files: [],
+    envVars: [],
+    winCredTarget: 'gemini:antigravity',
+    darwinKeychain: 'gemini:antigravity',
+  },
 };
 
 /**
@@ -416,6 +440,7 @@ export function makeCredentialProbe(
   // few seconds, which beats stalling every command on the socket.
   const KEYCHAIN_TTL_MS = 5000;
   const keychainCache = new Map<string, { at: number; signal: 'present' | 'absent' | 'unknown' }>();
+  const winCredCache = new Map<string, { at: number; signal: 'present' | 'absent' | 'unknown' }>();
   return (providerId) => {
     const evidence = CREDENTIAL_EVIDENCE[providerId];
     if (evidence === undefined) return 'unknown';
@@ -461,10 +486,47 @@ export function makeCredentialProbe(
       const signal = keychainCache.get(service)?.signal;
       if (signal === 'unknown') return 'unknown';
     }
-    // 'absent' is only honest when we know where credentials would
-    // live — a provider with no known credential file (devin stores its
-    // auth who-knows-where) must degrade to 'unknown', not falsely
-    // claim "not signed in".
-    return evidence.files.length === 0 ? 'unknown' : 'absent';
+    // Windows Credential Manager — `cmdkey /list:<target>` exits 0 only
+    // when the entry exists. Existence-only like the keychain probe;
+    // brief cache for the same synchronous-block reason.
+    if (platform === 'win32' && evidence.winCredTarget !== undefined) {
+      const target = evidence.winCredTarget;
+      const cached = winCredCache.get(target);
+      if (cached !== undefined && nowMs() - cached.at < KEYCHAIN_TTL_MS) {
+        if (cached.signal === 'present') return 'present';
+      } else {
+        const res = run('cmdkey', [`/list:${target}`], {
+          timeout: 1500,
+          encoding: 'utf8',
+        });
+        // cmdkey exits 0 for BOTH hits and misses — the stdout body is
+        // the verdict: `Target:` line = present, `* NONE *` = absent.
+        // Only an unparseable/failed run is 'unknown'.
+        const out = String(res.stdout ?? '');
+        const signal =
+          res.status === 0 && /Target:/.test(out)
+            ? 'present'
+            : res.status === 0 && /\*\s*NONE\s*\*/.test(out)
+              ? 'absent'
+              : 'unknown';
+        winCredCache.set(target, { at: nowMs(), signal });
+        if (signal === 'present') return 'present';
+        if (signal === 'unknown') return 'unknown';
+      }
+      const signal = winCredCache.get(target)?.signal;
+      if (signal === 'unknown') return 'unknown';
+    }
+    // 'absent' is only honest when an evidence source was actually
+    // consultable on THIS platform — files/env vars always, keychain on
+    // darwin, Credential Manager on win32. A provider with no usable
+    // source here (e.g. agy on Linux: keyring is libsecret there, which
+    // we don't probe) must degrade to 'unknown', not falsely claim
+    // "not signed in".
+    const consultable =
+      evidence.files.length > 0 ||
+      evidence.envVars.length > 0 ||
+      (platform === 'darwin' && evidence.darwinKeychain !== undefined) ||
+      (platform === 'win32' && evidence.winCredTarget !== undefined);
+    return consultable ? 'absent' : 'unknown';
   };
 }

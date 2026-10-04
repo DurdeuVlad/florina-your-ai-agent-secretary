@@ -506,17 +506,77 @@ describe('makeCredentialProbe (#294)', () => {
     expect(probe('claude-code')).toBe('present');
   });
 
-  it('reports unknown for providers with no known credential evidence', () => {
-    const probe = makeCredentialProbe({ env: {}, homeDir: home });
+  it('reports unknown for providers with no usable credential evidence on this platform', () => {
+    // antigravity's only known evidence is the OS keyring — on Linux we
+    // don't probe libsecret, so the honest verdict is 'unknown', not a
+    // false "not signed in". (On win32/darwin the keyring IS consulted.)
+    const probe = makeCredentialProbe({ env: {}, homeDir: home, platform: 'linux' });
     expect(probe('antigravity')).toBe('unknown');
   });
 
-  it('honestly degrades to unknown (not absent) when only env-var evidence exists', () => {
+  it('devin: credentials.toml counts as evidence (real path per `devin auth status`)', () => {
+    // `devin auth status` prints "Credentials path:
+    // %APPDATA%\devin\credentials.toml" — verified live on Windows.
     const probe = makeCredentialProbe({ env: {}, homeDir: home });
-    expect(probe('devin')).toBe('unknown');
+    expect(probe('devin')).toBe('absent'); // known location, no file
+    fs.mkdirSync(path.join(home, 'AppData', 'Roaming', 'devin'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'AppData', 'Roaming', 'devin', 'credentials.toml'), '');
+    expect(probe('devin')).toBe('present');
     expect(makeCredentialProbe({ env: { DEVIN_API_KEY: 'x' }, homeDir: home })('devin')).toBe(
       'present',
     );
+  });
+
+  it('win32 cmdkey probe: `* NONE *` (exit 0) is absent, Target line is present, garbage is unknown', () => {
+    // Live-verified semantics: `cmdkey /list:<target>` exits 0 for both
+    // hits and misses — the verdict lives in the stdout body.
+    const found = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'win32',
+      spawnFn: (() => ({
+        status: 0,
+        stdout: 'Target: gemini:antigravity\n  Type: Generic\n  User: antigravity\n',
+      })) as never,
+    });
+    expect(found('antigravity')).toBe('present');
+
+    const missing = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'win32',
+      spawnFn: (() => ({
+        status: 0,
+        stdout: 'Currently stored credentials:\n\n* NONE *\n',
+      })) as never,
+    });
+    expect(missing('antigravity')).toBe('absent');
+
+    const errored = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'win32',
+      spawnFn: (() => ({ status: 1, stdout: '', stderr: 'bad parameters' })) as never,
+    });
+    expect(errored('antigravity')).toBe('unknown');
+  });
+
+  it('cmdkey probe never reads a credential value — existence only', () => {
+    const calls: string[][] = [];
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'win32',
+      spawnFn: ((_cmd: string, args: string[]) => {
+        calls.push(args);
+        return { status: 0, stdout: 'Target: x\n' };
+      }) as never,
+    });
+    expect(probe('antigravity')).toBe('present');
+    for (const args of calls) {
+      // Only `/list:<target>` — never an operation that returns the secret.
+      for (const a of args) expect(a).toMatch(/^\/list:/);
+    }
   });
 
   it('on darwin, a keychain item counts as evidence — file absence alone is not a miss', () => {
@@ -1285,6 +1345,7 @@ describe('launchVisibleTerminal (#294)', () => {
     const res = await launchVisibleTerminal('codex login', {
       platform: 'linux',
       spawnFn: goodSpawn,
+      resolveFn: () => true,
     });
     expect(res.ok).toBe(true);
     expect(res.detail).toContain('codex login');
@@ -1303,6 +1364,7 @@ describe('launchVisibleTerminal (#294)', () => {
     const bad = await launchVisibleTerminal('codex login', {
       platform: 'linux',
       spawnFn: badSpawn,
+      resolveFn: () => true,
     });
     expect(bad.ok).toBe(false);
     expect(bad.detail).toContain('run `codex login` yourself');
@@ -1331,6 +1393,7 @@ describe('launchVisibleTerminal (#294)', () => {
     const denied = await launchVisibleTerminal('codex login', {
       platform: 'darwin',
       spawnFn: mkChild('exit1'),
+      resolveFn: () => true,
       timeoutMs: 200,
     });
     expect(denied.ok).toBe(false);
@@ -1339,6 +1402,7 @@ describe('launchVisibleTerminal (#294)', () => {
     const ok = await launchVisibleTerminal('codex login', {
       platform: 'darwin',
       spawnFn: mkChild('exit0'),
+      resolveFn: () => true,
       timeoutMs: 200,
     });
     expect(ok.ok).toBe(true);
@@ -1348,6 +1412,7 @@ describe('launchVisibleTerminal (#294)', () => {
     const timedOut = await launchVisibleTerminal('codex login', {
       platform: 'darwin',
       spawnFn: mkChild('hang'),
+      resolveFn: () => true,
       timeoutMs: 50,
     });
     expect(timedOut.ok).toBe(true);
@@ -1371,6 +1436,7 @@ describe('launchVisibleTerminal (#294)', () => {
     const res = await launchVisibleTerminal('codex login', {
       platform: 'linux',
       spawnFn: hangs,
+      resolveFn: () => true,
       timeoutMs: 30,
     });
     expect(res.ok).toBe(false);
@@ -1379,6 +1445,55 @@ describe('launchVisibleTerminal (#294)', () => {
     expect(calls.filter((c) => c === 'on:error')).toHaveLength(4);
     expect(calls.filter((c) => c === 'unref')).toHaveLength(4);
     expect(calls.filter((c) => c === 'kill:SIGKILL')).toHaveLength(4);
+  });
+
+  it('refuses before spawning when the payload executable is not on PATH', async () => {
+    const { launchVisibleTerminal } =
+      await import('../src/adapters/outbound/platform/terminal-launcher.js');
+    // Live-proof gap (#294): `florina auth codex` on a machine without the
+    // codex CLI opened a window whose only content was "'codex' is not
+    // recognized". The launcher must preflight the executable and refuse
+    // with honest install instructions instead of authoring a dead window.
+    const spawnCalls: string[] = [];
+    const spawnSpy = ((cmd: string) => {
+      spawnCalls.push(cmd);
+      return { once: () => undefined, off: () => undefined, unref: () => undefined };
+    }) as never;
+    for (const platform of ['win32', 'darwin', 'linux'] as const) {
+      const res = await launchVisibleTerminal('codex login', {
+        platform,
+        spawnFn: spawnSpy,
+        resolveFn: () => false,
+      });
+      expect(res.ok).toBe(false);
+      expect(res.detail).toContain('`codex`');
+      expect(res.detail).toContain("isn't installed or isn't on PATH");
+      expect(res.detail).toContain('codex login');
+    }
+    // No terminal process was ever attempted on any platform.
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it('a quoted leading executable is resolved without its quotes', async () => {
+    const { launchVisibleTerminal } =
+      await import('../src/adapters/outbound/platform/terminal-launcher.js');
+    const seen: string[] = [];
+    const res = await launchVisibleTerminal('"C:\\tools dir\\codex.exe" login', {
+      platform: 'linux',
+      spawnFn: (() => ({
+        once: () => undefined,
+        off: () => undefined,
+        on: () => undefined,
+        unref: () => undefined,
+      })) as never,
+      resolveFn: (exe) => {
+        seen.push(exe);
+        return false;
+      },
+      timeoutMs: 30,
+    });
+    expect(res.ok).toBe(false);
+    expect(seen).toEqual(['C:\\tools dir\\codex.exe']);
   });
 });
 

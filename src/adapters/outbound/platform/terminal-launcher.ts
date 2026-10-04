@@ -12,7 +12,7 @@
  * terminal exists we can't observe the command inside it — `detail`
  * says exactly what was asked, not that sign-in succeeded.
  */
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 
 export interface TerminalLaunchResult {
   readonly ok: boolean;
@@ -24,8 +24,39 @@ export interface TerminalLauncherDeps {
   readonly platform?: NodeJS.Platform;
   /** Injectable for tests — production uses node:child_process.spawn. */
   readonly spawnFn?: typeof spawn;
+  /**
+   * Injectable for tests — production resolves the command's executable
+   * on PATH (`where` on Windows, `which` elsewhere). A terminal window
+   * whose payload command doesn't exist only shows the user a raw
+   * "not recognized" error, so we refuse before opening anything.
+   */
+  readonly resolveFn?: (executable: string) => boolean;
   /** Race window for the spawn/error verdict. */
   readonly timeoutMs?: number;
+}
+
+/**
+ * The executable a payload command starts with: first whitespace token,
+ * or the quoted token when the command opens with `"` (spaced paths).
+ * Returns null when nothing parseable is present.
+ */
+function leadingExecutable(command: string): string | null {
+  const trimmed = command.trim();
+  if (trimmed === '') return null;
+  if (trimmed.startsWith('"')) {
+    const end = trimmed.indexOf('"', 1);
+    return end > 1 ? trimmed.slice(1, end) : null;
+  }
+  return trimmed.split(/\s+/, 1)[0] ?? null;
+}
+
+function defaultResolve(executable: string, platform: NodeJS.Platform): boolean {
+  const probe = platform === 'win32' ? 'where.exe' : 'which';
+  try {
+    return spawnSync(probe, [executable], { stdio: 'ignore' }).status === 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -123,8 +154,22 @@ export async function launchVisibleTerminal(
 ): Promise<TerminalLaunchResult> {
   const platform = deps.platform ?? process.platform;
   const run = deps.spawnFn ?? spawn;
+  const resolve = deps.resolveFn ?? ((exe: string): boolean => defaultResolve(exe, platform));
   const timeoutMs = deps.timeoutMs ?? 2000;
   const options: SpawnOptions = { detached: true, stdio: 'ignore', windowsHide: false };
+
+  // Preflight: a terminal whose payload command isn't on PATH opens a
+  // window that only prints "not recognized" — refuse honestly instead
+  // of presenting a failure we authored as progress.
+  const exe = leadingExecutable(command);
+  if (exe !== null && !resolve(exe)) {
+    return {
+      ok: false,
+      detail:
+        `\`${exe}\` isn't installed or isn't on PATH — install it first ` +
+        `(see the provider's own docs), then run \`${command}\` yourself`,
+    };
+  }
 
   let child: ChildProcess;
   let launchedDetail: string;

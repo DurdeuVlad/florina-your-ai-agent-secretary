@@ -437,7 +437,7 @@ export function formatContextHealth(snapshots: readonly ContextHealthSnapshot[])
 function authStateLabel(state: string | undefined): { text: string; color: (t: string) => string } {
   switch (state) {
     case 'signed-in':
-      return { text: 'signed in (credentials on disk)', color: GREEN };
+      return { text: 'signed in (stored credentials found)', color: GREEN };
     case 'found-not-signed-in':
       return { text: 'installed but not signed in', color: YELLOW };
     case 'auth-failing':
