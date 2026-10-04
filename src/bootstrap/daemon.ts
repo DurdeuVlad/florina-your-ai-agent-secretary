@@ -863,6 +863,7 @@ export class FlorinaDaemon extends EventEmitter {
         // terminal (issue #294) — the spawn stays at the composition
         // boundary; core never touches child_process.
         terminalLauncher: (command) => launchVisibleTerminal(command),
+        platform: process.platform,
         // Chat-model readiness (issue #294): configured/key-source/state
         // computed live — a vault key stored mid-run is seen immediately.
         chatModelStatus: async () => {

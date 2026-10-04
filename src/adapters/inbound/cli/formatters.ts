@@ -466,7 +466,11 @@ export function formatProviderReadiness(
   } else {
     for (const p of providers) {
       if (!p.found) {
-        lines.push(`    ${p.id}: ${GRAY('not installed')} ${GRAY(`— ${p.detail ?? ''}`)}`);
+        const installHint =
+          p.installable === true ? ` ${GRAY(`— fix: florina install ${p.id}`)}` : '';
+        lines.push(
+          `    ${p.id}: ${GRAY('not installed')} ${GRAY(`— ${p.detail ?? ''}`)}${installHint}`,
+        );
         continue;
       }
       const { text, color } = authStateLabel(p.auth);

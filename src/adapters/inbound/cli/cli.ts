@@ -55,6 +55,7 @@ import type {
   SecretsDeleteResponse,
   ProvidersResponse,
   SigninProviderResponse,
+  InstallProviderResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
 import type { TaskState } from '../../../core/domain/enums.js';
 import type {
@@ -184,6 +185,8 @@ Commands:
   auth                        Show provider sign-in state (re-checks now)
   auth <provider>             Open the provider's sign-in flow (or print
                               the exact fix); use 'chat' for the model key
+  install <provider>          Install a missing provider CLI (asks you
+                              first; runs the official installer)
   prune <taskId>              Prune the worktree for a task
   voice [--api-key <key>]     Start a voice session (push-to-talk)
       [--litellm-url <url>]   LiteLLM proxy for Florina-loop tools
@@ -266,6 +269,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdKeys(ctx);
     case 'auth':
       return cmdAuth(ctx);
+    case 'install':
+      return cmdInstall(ctx);
     case 'prune':
       return cmdPrune(ctx);
     case 'voice':
@@ -745,7 +750,8 @@ async function cmdAuth(ctx: CommandContext): Promise<CommandResult> {
       message:
         'Sign-in state per provider (re-checked now):\n' +
         formatProviderReadiness(providers, probed, chatModel) +
-        'Run `florina auth <provider>` to open a provider’s sign-in, or ' +
+        'Run `florina auth <provider>` to open a provider’s sign-in, ' +
+        '`florina install <provider>` to install a missing CLI, or ' +
         '`florina keys set <name>` to store an API key.\n',
     };
   }
@@ -772,6 +778,31 @@ async function cmdAuth(ctx: CommandContext): Promise<CommandResult> {
       ? 'Note: this provider already looked healthy — a fresh sign-in is still fine.\n'
       : '';
   return { exitCode: 0, message: `${already}${r.detail ?? r.fix?.detail ?? 'Done.'}\n` };
+}
+
+/**
+ * `florina install <provider>` (live-proof follow-up): run the
+ * provider's verified official installer in a visible terminal — the
+ * typed verb IS the consent; nothing installs without the user asking.
+ */
+async function cmdInstall(ctx: CommandContext): Promise<CommandResult> {
+  const [providerId] = ctx.args.positionals;
+  if (providerId === undefined) {
+    return { exitCode: 1, message: 'Usage: florina install <provider>\n' };
+  }
+  const status = await ctx.deps.runner.status();
+  if (!status.running) {
+    return {
+      exitCode: 1,
+      message: 'Florina daemon is not running — start it first (`florina start`).\n',
+    };
+  }
+  const res = await sendCommand(ctx.deps.client, { kind: 'install-provider', providerId });
+  const r = res as InstallProviderResponse;
+  if (!res.ok) {
+    return { exitCode: 1, message: `${r.error ?? 'Install could not be started.'}\n` };
+  }
+  return { exitCode: 0, message: `${r.detail ?? 'Done.'}\n` };
 }
 
 /* --- prune --- */

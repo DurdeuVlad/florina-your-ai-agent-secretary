@@ -54,6 +54,11 @@ export interface SetupProvider {
     readonly label: string;
     readonly detail: string;
   };
+  /**
+   * On `found:false` rows only: a verified official installer exists
+   * for this platform — gate for the Install button (never a dead one).
+   */
+  readonly installable?: boolean;
 }
 
 /** Secretary chat-model readiness, as reported by `query-providers`. */
@@ -222,6 +227,19 @@ function renderApps(input: SetupViewInput): RenderTree[] {
         // the instruction itself, so render it as text, not a verb.
         children.push(el('SetupItemHint', {}, [`${p.fix.label}: ${p.fix.detail}`]));
       }
+    }
+    // Not-found rows offer Install only when the daemon verified an
+    // official installer exists for this OS (`installable`) — a dead
+    // button is worse than none. The verb is the consent: the installer
+    // runs in a visible terminal, never silently.
+    if (!p.found && p.installable === true) {
+      children.push(
+        el('SetupItemAction', {}, [
+          el('Button', { variant: 'secondary', command: `setup:install:${p.id}` }, [
+            `Install ${providerLabel(p.id)}`,
+          ]),
+        ]),
+      );
     }
     const color = !p.found
       ? 'muted'

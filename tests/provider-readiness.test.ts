@@ -22,6 +22,8 @@ import {
   ProviderReadiness,
   classifyFailureText,
   providerFixIds,
+  providerInstaller,
+  providerInstallerIds,
 } from '../src/core/application/use-cases/readiness/provider-readiness.js';
 import {
   AGY_ADAPTER_ID,
@@ -38,6 +40,7 @@ import type {
   InboxResponse,
   ProvidersResponse,
   SigninProviderResponse,
+  InstallProviderResponse,
   TaskStore,
   SessionStore,
   Response,
@@ -319,6 +322,26 @@ describe('ProviderReadiness (#294)', () => {
       expect(r.fixFor(id), `missing fix recipe for ${id}`).toBeDefined();
     }
     expect(r.fixFor('agy')).toBeUndefined(); // binary name ≠ adapter id
+  });
+
+  it('every INSTALLERS key is a real adapter id, and installer commands are verified-official only', () => {
+    const realIds = [CLAUDE_HOOKS_ADAPTER_ID, CODEX_ADAPTER_ID, AGY_ADAPTER_ID, 'devin', 'gemini'];
+    for (const id of providerInstallerIds()) {
+      expect(realIds, `installer recipe for unknown provider ${id}`).toContain(id);
+    }
+    // No installer for 'chat-model' — the model needs a key, not a CLI.
+    expect(providerInstaller('chat-model', 'win32')).toBeNull();
+    // npm installs resolve on all three platforms; script installers are
+    // win32-verified only — unverified platforms return null, never a guess.
+    for (const platform of ['win32', 'darwin', 'linux'] as const) {
+      expect(providerInstaller('codex', platform)?.command).toBe('npm i -g @openai/codex');
+    }
+    expect(providerInstaller('devin', 'linux')).toBeNull();
+    expect(providerInstaller('devin', 'darwin')).toBeNull();
+    expect(providerInstaller('devin', 'win32')?.command).toContain('static.devin.ai');
+    expect(providerInstaller('antigravity', 'win32')?.command).toContain('antigravity.google');
+    // An id nobody knows gets nothing — no orphan recipes, no guesses.
+    expect(providerInstaller('not-a-provider', 'win32')).toBeNull();
   });
 
   it('sanitize redacts non-sk- credential shapes and control chars', () => {
@@ -923,6 +946,124 @@ describe('CommandApi readiness surfaces (#294)', () => {
     expect(res.detail).toContain('FLORINA_LITELLM_URL');
     expect(res.detail).toContain('florina keys set openai-api-key');
   });
+
+  it('install-provider: verified installer launches; unverified platform gives manual instructions', async () => {
+    const launches: string[] = [];
+    const api = new CommandApi({
+      ...fixtureDeps,
+      platform: 'win32',
+      providerAttachment: () => ({
+        attached: [],
+        skipped: [{ id: 'codex', reason: 'not found' }],
+      }),
+      terminalLauncher: (command) => {
+        launches.push(command);
+        return Promise.resolve({ ok: true, detail: `opened ${command}` });
+      },
+    });
+    const res = (await api.execute({
+      kind: 'install-provider',
+      providerId: 'codex',
+    })) as InstallProviderResponse;
+    expect(res.ok).toBe(true);
+    expect(res.launched).toBe(true);
+    expect(launches).toEqual(['npm i -g @openai/codex']);
+    expect(res.detail).toContain('official');
+    // Provider attachment is a startup snapshot — the detail must say a
+    // restart is needed before the new binary is visible, or the user
+    // re-checks and thinks the install failed.
+    expect(res.detail).toContain('restart florina');
+    expect(res.detail).toContain('florina auth codex');
+
+    // devin has NO verified installer on linux — never a guessed command.
+    const manual = await new CommandApi({
+      ...fixtureDeps,
+      platform: 'linux',
+      providerAttachment: () => ({
+        attached: [],
+        skipped: [{ id: 'devin', reason: 'not found' }],
+      }),
+      terminalLauncher: () => Promise.resolve({ ok: true, detail: 'should not run' }),
+    }).execute({ kind: 'install-provider', providerId: 'devin' });
+    expect((manual as InstallProviderResponse).ok).toBe(false);
+    expect((manual as InstallProviderResponse).error).toContain('no verified installer');
+    expect((manual as InstallProviderResponse).error).toContain('provider’s own docs');
+  });
+
+  it('install-provider: chat-model is a key not an install; attached providers short-circuit to sign-in', async () => {
+    const api = new CommandApi({
+      ...fixtureDeps,
+      platform: 'win32',
+      providerAttachment: () => ({
+        attached: [{ id: 'codex' }],
+        skipped: [],
+      }),
+      terminalLauncher: () => Promise.resolve({ ok: true, detail: 'x' }),
+    });
+    const chat = (await api.execute({
+      kind: 'install-provider',
+      providerId: 'chat-model',
+    })) as InstallProviderResponse;
+    expect(chat.ok).toBe(false);
+    expect(chat.error).toContain('florina keys set openai-api-key');
+
+    const already = (await api.execute({
+      kind: 'install-provider',
+      providerId: 'codex',
+    })) as InstallProviderResponse;
+    expect(already.ok).toBe(false);
+    expect(already.error).toContain('already installed');
+    expect(already.error).toContain('florina auth codex');
+  });
+
+  it('signin-provider on a missing provider names the install verb when one exists', async () => {
+    const api = new CommandApi({
+      ...fixtureDeps,
+      platform: 'win32',
+      providerAttachment: () => ({
+        attached: [],
+        skipped: [{ id: 'codex', reason: 'not found' }],
+      }),
+      providerReadiness: new ProviderReadiness(),
+    });
+    const res = (await api.execute({
+      kind: 'signin-provider',
+      providerId: 'codex',
+    })) as SigninProviderResponse;
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('florina install codex');
+  });
+
+  it('query-providers marks skipped rows installable only when a verified installer exists', async () => {
+    const api = new CommandApi({
+      ...fixtureDeps,
+      platform: 'win32',
+      providerAttachment: () => ({
+        attached: [{ id: 'claude-code' }],
+        skipped: [
+          { id: 'codex', reason: 'not found' },
+          { id: 'antigravity', reason: 'not found' },
+        ],
+      }),
+    });
+    const res = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+    const byId = Object.fromEntries(res.providers.map((p) => [p.id, p]));
+    expect(byId['codex']?.installable).toBe(true);
+    expect(byId['antigravity']?.installable).toBe(true); // verified win32 installer
+    expect(byId['claude-code']?.installable).toBeUndefined(); // attached rows never carry it
+
+    // Same skipped row on a platform with no verified devin installer:
+    const linux = new CommandApi({
+      ...fixtureDeps,
+      platform: 'linux',
+      providerAttachment: () => ({
+        attached: [],
+        skipped: [{ id: 'devin', reason: 'not found' }],
+      }),
+    });
+    const res2 = (await linux.execute({ kind: 'query-providers' })) as ProvidersResponse;
+    expect(res2.providers[0].installable).toBeUndefined();
+  });
 });
 
 /* ================================================================== *
@@ -1065,6 +1206,63 @@ describe('florina auth CLI (#294)', () => {
     expect(errWritten).toContain('codex');
     expect(errWritten).toContain('chat-model');
   });
+
+  it('`install codex` sends install-provider and prints the daemon detail', async () => {
+    const sent: Command[] = [];
+    const deps = cliWith({
+      'install-provider': {
+        ok: true,
+        providerId: 'codex',
+        launched: true,
+        detail: 'opens a terminal running the official Codex install (npm)',
+      },
+    });
+    const originalSend = deps.client.send.bind(deps.client);
+    deps.client.send = ((command: Command) => {
+      sent.push(command);
+      return originalSend(command);
+    }) as typeof deps.client.send;
+    const code = await runCli(['install', 'codex'], deps);
+    expect(code).toBe(0);
+    expect(sent.map((c) => c.kind)).toEqual(['install-provider']);
+    expect(sent[0]).toMatchObject({ providerId: 'codex' });
+    expect(written).toContain('official Codex install');
+  });
+
+  it('`install` without an id exits 1 with usage; daemon errors propagate honestly', async () => {
+    const code1 = await runCli(['install'], cliWith({}));
+    expect(code1).toBe(1);
+    expect(errWritten).toContain('Usage: florina install');
+
+    const deps = cliWith({
+      'install-provider': {
+        ok: false,
+        providerId: 'devin',
+        error: 'no verified installer for "devin" on this platform',
+      },
+    });
+    const code2 = await runCli(['install', 'devin'], deps);
+    expect(code2).toBe(1);
+    expect(errWritten).toContain('no verified installer');
+  });
+
+  it('`status`/`auth` shows the install fix on skipped rows that are installable', async () => {
+    const deps = cliWith({
+      'query-providers': {
+        ok: true,
+        probed: true,
+        providers: [
+          { id: 'codex', found: false, detail: 'not found', installable: true },
+          { id: 'devin', found: false, detail: 'not found' },
+        ],
+      },
+    });
+    const code = await runCli(['status'], deps);
+    expect(code).toBe(0);
+    expect(written).toContain('florina install codex');
+    // No install hint on rows the daemon didn't mark installable.
+    expect(written).not.toContain('florina install devin');
+  });
 });
 
 /* ================================================================== *
@@ -1171,6 +1369,26 @@ describe('desktop setup view — provider sign-in rows (#294)', () => {
     );
     expect(allCommands(tree)).not.toContain('setup:signin:codex');
     expect(allText(tree)).not.toContain('Sign in to Codex');
+  });
+
+  it('a not-found row offers Install only when the daemon marked it installable', () => {
+    const installable = renderSetupView(
+      setupInput({
+        providers: [{ id: 'codex', found: false, detail: 'not found', installable: true }],
+      }),
+    );
+    expect(allCommands(installable)).toContain('setup:install:codex');
+    expect(allText(installable)).toContain('Install Codex');
+
+    // No verified installer → no button — a dead button is worse than none.
+    const notInstallable = renderSetupView(
+      setupInput({
+        providers: [{ id: 'devin', found: false, detail: 'not found' }],
+      }),
+    );
+    expect(allCommands(notInstallable).filter((c) => c.startsWith('setup:install:'))).toHaveLength(
+      0,
+    );
   });
 
   it('a set-env fix renders instructions, not a sign-in button', () => {

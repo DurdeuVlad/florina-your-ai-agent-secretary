@@ -70,6 +70,7 @@ import type {
 import {
   providerFixFor,
   providerFixIds,
+  providerInstaller,
   sanitizeFailureText,
 } from '../readiness/provider-readiness.js';
 import type {
@@ -633,6 +634,19 @@ export interface SigninProviderCommand {
 }
 
 /**
+ * install-provider (live-proof follow-up to #294): run the provider's
+ * *verified official* installer in a new visible terminal — consent is
+ * the explicit command itself; Florina never installs anything without
+ * the user asking, and never substitutes a guessed command for a
+ * verified one (`providerInstaller` returns null on unverified
+ * platforms → manual instructions, not a dead window).
+ */
+export interface InstallProviderCommand {
+  readonly kind: 'install-provider';
+  readonly providerId: string;
+}
+
+/**
  * Create a pull request for a task's branch (issue #27).
  *
  * Invoked by the side-by-side digest & diff viewer's "Create PR" action. The
@@ -774,7 +788,8 @@ export type Command =
   | SecretsSetCommand
   | SecretsListCommand
   | SecretsDeleteCommand
-  | SigninProviderCommand;
+  | SigninProviderCommand
+  | InstallProviderCommand;
 
 /** Ordered list of all valid command `kind` discriminants. */
 export const COMMAND_KINDS: readonly string[] = [
@@ -825,6 +840,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'secrets-list',
   'secrets-delete',
   'signin-provider',
+  'install-provider',
 ] as const;
 
 /* ================================================================== *
@@ -1089,6 +1105,12 @@ export interface ProviderStatusView {
   readonly authDetail?: string;
   /** How to fix a not-signed-in or auth-failing provider, when known. */
   readonly fix?: ProviderFix;
+  /**
+   * On `found:false` rows only: a verified official installer exists for
+   * this platform (`install-provider` can run it). Surfaces render an
+   * Install action only when this is true — never a dead button.
+   */
+  readonly installable?: boolean;
 }
 
 /**
@@ -1177,6 +1199,18 @@ export interface SigninProviderResponse {
   readonly providerId: string;
   readonly launched?: boolean;
   readonly fix?: ProviderFix;
+  readonly detail?: string;
+  readonly error?: string;
+}
+
+/**
+ * install-provider response. `launched` is true only when a visible
+ * terminal running the verified installer actually opened.
+ */
+export interface InstallProviderResponse {
+  readonly ok: boolean;
+  readonly providerId: string;
+  readonly launched?: boolean;
   readonly detail?: string;
   readonly error?: string;
 }
@@ -1335,6 +1369,7 @@ export type Response =
   | SecretsListResponse
   | SecretsDeleteResponse
   | SigninProviderResponse
+  | InstallProviderResponse
   | UnknownCommandResponse;
 
 /* ================================================================== *
@@ -1562,6 +1597,13 @@ export interface CommandApiDeps {
    */
   readonly terminalLauncher?: (command: string) => Promise<{ ok: boolean; detail: string }>;
   /**
+   * Host platform (live-proof installer follow-up). Core can't read
+   * `process.platform` — the composition root injects it so
+   * `install-provider` can pick the verified per-OS installer. Absent →
+   * installers resolve as unverified → manual instructions.
+   */
+  readonly platform?: string;
+  /**
    * Secretary conversation store (issue #157). When wired, `chat-send` /
    * `chat-read` / `chat-clear` are served; when absent they fail cleanly.
    */
@@ -1649,6 +1691,7 @@ export class CommandApi {
   private readonly providerReadiness?: ProviderReadiness;
   private readonly chatModelStatus?: CommandApiDeps['chatModelStatus'];
   private readonly terminalLauncher?: CommandApiDeps['terminalLauncher'];
+  private readonly platform?: CommandApiDeps['platform'];
   private readonly methodEnabled: boolean;
   private readonly chatStore?: ChatMessageRepositoryPort;
   private readonly chatMessageSink?: (message: ConversationMessage) => void;
@@ -1689,6 +1732,7 @@ export class CommandApi {
     this.providerReadiness = deps.providerReadiness;
     this.chatModelStatus = deps.chatModelStatus;
     this.terminalLauncher = deps.terminalLauncher;
+    this.platform = deps.platform;
     this.chatStore = deps.chatStore;
     this.chatMessageSink = deps.chatMessageSink;
     this.methodEnabled = deps.methodEnabled !== false;
@@ -1777,6 +1821,8 @@ export class CommandApi {
         return this.handleQueryProviders();
       case 'signin-provider':
         return this.handleSigninProvider(command);
+      case 'install-provider':
+        return this.handleInstallProvider(command);
       case 'list-tasks':
         return this.handleListTasks(command);
       case 'prune-worktree':
@@ -2629,6 +2675,11 @@ export class CommandApi {
         id: p.id,
         found: false,
         detail: p.reason,
+        // An Install action is only honest when we actually have a
+        // verified installer for this OS — 'installable' is the gate.
+        ...(this.platform !== undefined && providerInstaller(p.id, this.platform) !== null
+          ? { installable: true }
+          : {}),
       })),
     ];
     return { ok: true, providers, probed: true, ...(chatModel ? { chatModel } : {}) };
@@ -2650,12 +2701,19 @@ export class CommandApi {
     // installed — short-circuit before the recipe even resolves.
     const skipped = this.providerAttachment?.()?.skipped.some((p) => p.id === providerId);
     if (skipped === true) {
+      // When a verified installer exists on this platform, name the
+      // explicit-consent verb instead of a bare "go read the docs".
+      const installer =
+        this.platform !== undefined ? providerInstaller(providerId, this.platform) : null;
       return {
         ok: false,
         providerId,
         error:
-          `"${providerId}" isn't installed on this machine — install it first ` +
-          '(the provider’s own docs), then sign in',
+          installer !== null
+            ? `"${providerId}" isn't installed on this machine — ` +
+              `run \`florina install ${providerId}\` to install it, then sign in`
+            : `"${providerId}" isn't installed on this machine — install it first ` +
+              '(the provider’s own docs), then sign in',
       };
     }
     // A standing failure changes the recipe — config-class yields the
@@ -2735,12 +2793,100 @@ export class CommandApi {
         detail: `couldn't open a terminal (${errorMessage(err)}) — run \`${command}\` yourself`,
       };
     }
+    // Launch refused (e.g. the recipe's executable isn't on PATH) — when a
+    // verified installer exists, name the consent verb instead of leaving
+    // the user at "install it first" with no next step.
+    let detail = launched.detail;
+    if (!launched.ok && this.platform !== undefined) {
+      const installer = providerInstaller(providerId, this.platform);
+      if (installer !== null) {
+        detail += ` — or run \`florina install ${providerId}\` and I'll open the official installer`;
+      }
+    }
     return {
       ok: true,
       providerId,
       launched: launched.ok,
       fix,
-      detail: launched.detail,
+      detail,
+    };
+  }
+
+  /**
+   * install-provider: launch the provider's *verified official*
+   * installer in a visible terminal — the explicit command is the
+   * consent, and the window makes the install observable (we never
+   * background-mutate the user's machine). No verified command on this
+   * platform → manual instructions, never a guessed one. Providers
+   * already installed short-circuit to the sign-in verb.
+   */
+  private async handleInstallProvider(
+    cmd: InstallProviderCommand,
+  ): Promise<InstallProviderResponse> {
+    if (typeof cmd.providerId !== 'string' || cmd.providerId.trim() === '') {
+      return { ok: false, providerId: '', error: 'providerId is required' };
+    }
+    const providerId = cmd.providerId.trim();
+    if (providerId === 'chat-model') {
+      return {
+        ok: false,
+        providerId,
+        error:
+          'the chat model needs an API key, not an install — run ' +
+          '`florina keys set openai-api-key`, or use Settings → API keys in the app',
+      };
+    }
+    // Already installed → installing again is at best a no-op; point at
+    // the sign-in verb which is what the user actually wants next.
+    if (this.providerAttachment?.()?.attached.some((p) => p.id === providerId) === true) {
+      return {
+        ok: false,
+        providerId,
+        error: `"${providerId}" is already installed — run \`florina auth ${providerId}\` to sign in`,
+      };
+    }
+    const installer =
+      this.platform !== undefined ? providerInstaller(providerId, this.platform) : null;
+    if (installer === null) {
+      const known = providerFixIds().join(', ');
+      return {
+        ok: false,
+        providerId,
+        error:
+          `no verified installer for "${providerId}" on this platform — install it ` +
+          `yourself (the provider’s own docs), then run \`florina auth ${providerId}\` ` +
+          `(providers with sign-in recipes: ${known})`,
+      };
+    }
+    if (this.terminalLauncher === undefined) {
+      return {
+        ok: true,
+        providerId,
+        launched: false,
+        detail: `run \`${installer.command}\` in a terminal — this daemon can't open one for you`,
+      };
+    }
+    let launched: { ok: boolean; detail: string };
+    try {
+      launched = await this.terminalLauncher(installer.command);
+    } catch (err) {
+      launched = {
+        ok: false,
+        detail: `couldn't open a terminal (${errorMessage(err)}) — run \`${installer.command}\` yourself`,
+      };
+    }
+    return {
+      ok: true,
+      providerId,
+      launched: launched.ok,
+      // Provider attachment is a startup snapshot — ANY completed
+      // install stays invisible to this daemon until restart. Say so on
+      // every success instead of implying an immediate re-probe wins.
+      detail: launched.ok
+        ? `${installer.detail}. When it finishes, restart florina ` +
+          `(\`florina stop\`, then \`florina start\`) so it sees the new command, ` +
+          `then run \`florina auth ${providerId}\``
+        : launched.detail,
     };
   }
 

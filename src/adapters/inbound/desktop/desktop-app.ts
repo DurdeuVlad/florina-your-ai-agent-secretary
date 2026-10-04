@@ -1790,6 +1790,31 @@ export class DesktopApp {
       }
       return;
     }
+    if (raw.startsWith('setup:install:')) {
+      // Provider install (live-proof follow-up to #294): the daemon runs
+      // the provider's verified official installer in a visible
+      // terminal — the click is the consent. Afterwards re-pull the
+      // facts so the row reflects what the probe now sees.
+      const providerId = raw.slice('setup:install:'.length);
+      const res = await this.sendCommand({ kind: 'install-provider', providerId }).catch(
+        (e: unknown) => ({
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+      if (res.ok) {
+        await this.refreshSetup();
+        ack({
+          ok: true,
+          ...((res as { detail?: string }).detail !== undefined
+            ? { detail: (res as { detail?: string }).detail }
+            : {}),
+        });
+      } else {
+        ack({ ok: false, error: (res as { error?: string }).error ?? 'install failed to start' });
+      }
+      return;
+    }
     if (raw === 'setup:mode:packaged' || raw === 'setup:mode:source') {
       this.installMode = raw === 'setup:mode:packaged' ? 'packaged' : 'source';
       this.pushSetup();
@@ -1876,6 +1901,7 @@ export class DesktopApp {
             ...(p.auth !== undefined ? { auth: p.auth } : {}),
             ...(typeof p.authDetail === 'string' ? { authDetail: p.authDetail } : {}),
             ...(p.fix !== undefined ? { fix: p.fix } : {}),
+            ...(p.installable === true ? { installable: true } : {}),
           }));
           // `probed` distinguishes "probe ran, nothing found" from
           // "no probe ran at all" — the latter must not render as
