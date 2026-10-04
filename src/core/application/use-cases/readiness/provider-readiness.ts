@@ -292,8 +292,8 @@ const FIXES: Readonly<Record<string, ProviderFix>> = {
   devin: {
     kind: 'run-command',
     label: 'Sign in to Devin',
-    command: 'devin login',
-    detail: 'opens a terminal running `devin login` — follow the prompts there',
+    command: 'devin auth login',
+    detail: 'opens a terminal running `devin auth login` — follow the prompts there',
   },
   antigravity: {
     kind: 'run-command',
