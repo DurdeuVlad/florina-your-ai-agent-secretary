@@ -314,6 +314,120 @@ const FIXES: Readonly<Record<string, ProviderFix>> = {
 };
 
 /* ------------------------------------------------------------------ *
+ * Installer table — verified official install commands only
+ * ------------------------------------------------------------------ */
+
+/**
+ * An installer recipe we can offer when the provider CLI isn't found.
+ * `command` runs in a *visible* terminal (the user watches their own
+ * machine run the official installer — consent is the explicit verb,
+ * never silent background package mutation). `null` on a platform we
+ * haven't verified an official command for → the caller prints manual
+ * instructions instead of guessing.
+ *
+ * Every entry was verified against the provider's official install docs
+ * or exercised live during the #294 proof session.
+ */
+export interface ProviderInstaller {
+  readonly label: string;
+  readonly command: string;
+  readonly detail: string;
+}
+
+const INSTALLERS: Readonly<
+  Record<string, Readonly<Partial<Record<string, ProviderInstaller | null>>>>
+> = {
+  'claude-code': {
+    win32: {
+      label: 'Install Claude Code',
+      command: 'npm i -g @anthropic-ai/claude-code',
+      detail: 'opens a terminal running the official Claude Code install (npm)',
+    },
+    darwin: {
+      label: 'Install Claude Code',
+      command: 'npm i -g @anthropic-ai/claude-code',
+      detail: 'opens a terminal running the official Claude Code install (npm)',
+    },
+    linux: {
+      label: 'Install Claude Code',
+      command: 'npm i -g @anthropic-ai/claude-code',
+      detail: 'opens a terminal running the official Claude Code install (npm)',
+    },
+  },
+  codex: {
+    win32: {
+      label: 'Install Codex',
+      command: 'npm i -g @openai/codex',
+      detail: 'opens a terminal running the official Codex install (npm)',
+    },
+    darwin: {
+      label: 'Install Codex',
+      command: 'npm i -g @openai/codex',
+      detail: 'opens a terminal running the official Codex install (npm)',
+    },
+    linux: {
+      label: 'Install Codex',
+      command: 'npm i -g @openai/codex',
+      detail: 'opens a terminal running the official Codex install (npm)',
+    },
+  },
+  gemini: {
+    win32: {
+      label: 'Install Gemini CLI',
+      command: 'npm i -g @google/gemini-cli',
+      detail: 'opens a terminal running the official Gemini CLI install (npm)',
+    },
+    darwin: {
+      label: 'Install Gemini CLI',
+      command: 'npm i -g @google/gemini-cli',
+      detail: 'opens a terminal running the official Gemini CLI install (npm)',
+    },
+    linux: {
+      label: 'Install Gemini CLI',
+      command: 'npm i -g @google/gemini-cli',
+      detail: 'opens a terminal running the official Gemini CLI install (npm)',
+    },
+  },
+  devin: {
+    // Official Windows installer (docs.devin.ai/cli — verified live):
+    // a PowerShell script that downloads the CLI AND auto-launches its
+    // login prompt at the end — install and sign-in are one journey.
+    win32: {
+      label: 'Install the Devin CLI',
+      command: 'powershell -NoProfile -Command "irm https://static.devin.ai/cli/setup.ps1 | iex"',
+      detail:
+        'opens a terminal running Devin’s official installer — it will also walk you through sign-in when it finishes',
+    },
+    // macOS/Linux: docs show a curl installer but we haven't verified
+    // the exact URL on this codebase's supported set — manual guidance.
+    darwin: null,
+    linux: null,
+  },
+  antigravity: {
+    // Official Windows installer (antigravity.google/docs/cli — verified
+    // live): registers %LOCALAPPDATA%\agy\bin on the user PATH.
+    win32: {
+      label: 'Install the Antigravity CLI',
+      command:
+        'powershell -NoProfile -Command "irm https://antigravity.google/cli/install.ps1 | iex"',
+      detail: 'opens a terminal running Antigravity’s official installer',
+    },
+    darwin: null,
+    linux: null,
+  },
+};
+
+/** The verified installer for a provider on this platform, or null. */
+export function providerInstaller(providerId: string, platform: string): ProviderInstaller | null {
+  return INSTALLERS[providerId]?.[platform] ?? null;
+}
+
+/** Provider ids that carry a verified installer recipe (INSTALLERS key set). */
+export function providerInstallerIds(): readonly string[] {
+  return Object.keys(INSTALLERS);
+}
+
+/* ------------------------------------------------------------------ *
  * Service
  * ------------------------------------------------------------------ */
 
