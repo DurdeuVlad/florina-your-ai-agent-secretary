@@ -151,11 +151,39 @@ describe('provider manifest — safety invariants', () => {
       expect(Object.isFrozen(m.installers)).toBe(true);
       expect(Object.isFrozen(m.signIn)).toBe(true);
       if (m.extraCandidates) expect(Object.isFrozen(m.extraCandidates)).toBe(true);
+      // New spec fields (#302) freeze with the rest — an unfrozen array
+      // could be mutated under the derived tables.
+      if (m.credentialEvidence.xdgDataFiles)
+        expect(Object.isFrozen(m.credentialEvidence.xdgDataFiles)).toBe(true);
+      if (m.credentialEvidence.unprobeablePlatforms)
+        expect(Object.isFrozen(m.credentialEvidence.unprobeablePlatforms)).toBe(true);
     }
   });
 
+  it('unix beyond-PATH candidates pin the documented install locations (#302)', () => {
+    // Deleting a candidate silently breaks the daemon's PATH-stale
+    // refresh for a real install location — pin them.
+    const candidates = (id: string, platform: 'darwin' | 'linux'): readonly string[] =>
+      (perPlatform(providerManifest(id)?.extraCandidates, platform) ?? []).flatMap((s) =>
+        s.kind === 'path' ? [s.path] : [],
+      );
+    expect(candidates('devin', 'darwin')).toContain('{home}/.local/bin/devin');
+    expect(candidates('devin', 'linux')).toContain('{home}/.local/bin/devin');
+    expect(candidates('antigravity', 'darwin')).toContain('{home}/.local/bin/agy');
+    expect(candidates('antigravity', 'linux')).toContain('{home}/.local/bin/agy');
+    expect(candidates('antigravity', 'darwin')).toContain('/opt/homebrew/bin/agy');
+  });
+
   it('credential evidence is existence-metadata only — files, env names, keyring targets', () => {
-    const ALLOWED_KEYS = new Set(['files', 'envVars', 'darwinKeychain', 'winCredTarget']);
+    const ALLOWED_KEYS = new Set([
+      'files',
+      'xdgDataFiles',
+      'envVars',
+      'darwinKeychain',
+      'darwinKeychainAccount',
+      'winCredTarget',
+      'unprobeablePlatforms',
+    ]);
     for (const m of PROVIDER_MANIFESTS) {
       const ev = m.credentialEvidence;
       for (const key of Object.keys(ev)) {

@@ -26,7 +26,7 @@
 import { type ChildProcess, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join, normalize } from 'node:path';
+import { delimiter, isAbsolute, join, normalize } from 'node:path';
 import { connect as netConnect, createServer } from 'node:net';
 
 import {
@@ -584,6 +584,16 @@ export function makeCredentialProbe(
     for (const rel of evidence.files) {
       if (existsSync(join(home, ...rel.split('/')))) return 'present';
     }
+    // Per the XDG spec, a non-absolute XDG_DATA_HOME must be ignored —
+    // an empty or relative value would otherwise resolve CWD-relative.
+    const xdgEnv = env['XDG_DATA_HOME'];
+    const xdgBase =
+      xdgEnv !== undefined && xdgEnv !== '' && isAbsolute(xdgEnv)
+        ? xdgEnv
+        : join(home, '.local', 'share');
+    for (const rel of evidence.xdgDataFiles ?? []) {
+      if (existsSync(join(xdgBase, ...rel.split('/')))) return 'present';
+    }
     for (const name of evidence.envVars) {
       if (env[name] !== undefined && env[name] !== '') return 'present';
     }
@@ -592,23 +602,29 @@ export function makeCredentialProbe(
     // existence only — the password never enters daemon memory.
     if (platform === 'darwin' && evidence.darwinKeychain !== undefined) {
       const service = evidence.darwinKeychain;
-      const cached = keychainCache.get(service);
+      const account = evidence.darwinKeychainAccount;
+      // Cache key must keep the two fields unambiguously separate —
+      // 'a b'/undefined vs 'a'/'b' would otherwise collide.
+      const cacheKey = JSON.stringify([service, account ?? null]);
+      const cached = keychainCache.get(cacheKey);
       if (cached !== undefined && nowMs() - cached.at < KEYCHAIN_TTL_MS) {
         if (cached.signal === 'present') return 'present';
       } else {
-        const res = run('security', ['find-generic-password', '-s', service], {
+        const args = ['find-generic-password', '-s', service];
+        if (account !== undefined) args.push('-a', account);
+        const res = run('security', args, {
           timeout: 1500,
           encoding: 'utf8',
         });
         if (res.status === 0) {
-          keychainCache.set(service, { at: nowMs(), signal: 'present' });
+          keychainCache.set(cacheKey, { at: nowMs(), signal: 'present' });
           return 'present';
         }
         // `security` exits 44 for "item not found" — a definitive miss;
         // cache it too so a locked-but-empty keychain doesn't spam the
         // loop. Any other failure can't prove absence → 'unknown',
         // cached the same way.
-        keychainCache.set(service, {
+        keychainCache.set(cacheKey, {
           at: nowMs(),
           signal: res.status === 44 ? 'absent' : 'unknown',
         });
@@ -620,7 +636,7 @@ export function makeCredentialProbe(
         }
       }
       // Cached non-present: honor a definitive 'absent', else 'unknown'.
-      const signal = keychainCache.get(service)?.signal;
+      const signal = keychainCache.get(cacheKey)?.signal;
       if (signal === 'unknown') return 'unknown';
     }
     // Windows Credential Manager — `cmdkey /list:<target>` exits 0 only
@@ -653,17 +669,21 @@ export function makeCredentialProbe(
       const signal = winCredCache.get(target)?.signal;
       if (signal === 'unknown') return 'unknown';
     }
-    // 'absent' is only honest when an evidence source was actually
-    // consultable on THIS platform — files/env vars always, keychain on
-    // darwin, Credential Manager on win32. A provider with no usable
-    // source here (e.g. agy on Linux: keyring is libsecret there, which
-    // we don't probe) must degrade to 'unknown', not falsely claim
-    // "not signed in".
+    // 'absent' is only honest when every credential store the provider
+    // can use on THIS platform was consulted — files/env vars always,
+    // keychain on darwin, Credential Manager on win32. A provider whose
+    // primary store is unprobeable here (agy on Linux: Secret Service
+    // via D-Bus has no service-name lookup CLI) must degrade to
+    // 'unknown', not falsely claim "not signed in" — though a fallback
+    // file/env hit above already returned 'present'.
+    const unprobeableHere = evidence.unprobeablePlatforms?.includes(platform) === true;
     const consultable =
-      evidence.files.length > 0 ||
-      evidence.envVars.length > 0 ||
-      (platform === 'darwin' && evidence.darwinKeychain !== undefined) ||
-      (platform === 'win32' && evidence.winCredTarget !== undefined);
+      !unprobeableHere &&
+      (evidence.files.length > 0 ||
+        (evidence.xdgDataFiles?.length ?? 0) > 0 ||
+        evidence.envVars.length > 0 ||
+        (platform === 'darwin' && evidence.darwinKeychain !== undefined) ||
+        (platform === 'win32' && evidence.winCredTarget !== undefined));
     return consultable ? 'absent' : 'unknown';
   };
 }

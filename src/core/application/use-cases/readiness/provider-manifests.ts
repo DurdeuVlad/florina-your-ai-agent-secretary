@@ -139,12 +139,34 @@ export type ProviderTransport =
 export interface CredentialEvidenceSpec {
   /** Home-relative paths ('/'-separated — the probe joins them). */
   readonly files: readonly string[];
+  /**
+   * Paths relative to `$XDG_DATA_HOME` (falling back to
+   * `~/.local/share`) — CLIs that follow the XDG base-dir spec, e.g.
+   * devin's `credentials.toml` at `$XDG_DATA_HOME/devin/…` on macOS and
+   * Linux alike.
+   */
+  readonly xdgDataFiles?: readonly string[];
   /** Provider-blessed environment variables that carry a credential. */
   readonly envVars: readonly string[];
   /** macOS Keychain service holding the credential (darwin only). */
   readonly darwinKeychain?: string;
+  /**
+   * macOS Keychain account within the service — probed via
+   * `security find-generic-password -s <service> -a <account>`. A
+   * service name alone over-reports (any other item under the same
+   * service counts as evidence).
+   */
+  readonly darwinKeychainAccount?: string;
   /** Windows Credential Manager generic target (win32 only). */
   readonly winCredTarget?: string;
+  /**
+   * Platforms whose primary credential store we cannot generically
+   * probe (e.g. Linux Secret Service via D-Bus — there is no
+   * service-name CLI lookup). On these platforms a miss is honest
+   * `unknown`, never a false `absent` — file/env hits still report
+   * `present`.
+   */
+  readonly unprobeablePlatforms?: readonly string[];
 }
 
 /** One provider's complete declarative spec — the ONLY place it's defined. */
@@ -181,6 +203,10 @@ export interface ProviderManifest {
  * The registry — one entry per provider, nothing else needed
  * ------------------------------------------------------------------ */
 
+// `npm view` verified each package publishes exactly the bin name the
+// manifest probes for (`claude`, `codex`, `gemini`) with no `os`
+// restriction — the cross-platform `default` installer claim is
+// metadata-backed, not assumed (issue #302).
 const NPM = {
   claude: 'npm i -g @anthropic-ai/claude-code',
   codex: 'npm i -g @openai/codex',
@@ -317,7 +343,8 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
         executable: 'devin',
         extraCandidates: {
           // The Devin desktop app bundles the CLI — usable headlessly even
-          // when the standalone CLI isn't on PATH.
+          // when the standalone CLI isn't on PATH. The official unix
+          // installer lands at ~/.local/bin/devin (docs.devin.ai/cli).
           win32: [
             {
               kind: 'path',
@@ -329,20 +356,27 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
               kind: 'path',
               path: '/Applications/Devin.app/Contents/Resources/app/extensions/windsurf/devin/bin/devin',
             },
+            { kind: 'path', path: '{home}/.local/bin/devin' },
+            // brew install --cask devin-cli → $HOMEBREW_PREFIX/bin/devin
+            { kind: 'path', path: '/opt/homebrew/bin/devin' },
+            { kind: 'path', path: '/usr/local/bin/devin' },
           ],
+          linux: [{ kind: 'path', path: '{home}/.local/bin/devin' }],
         },
         transport: { kind: 'acp', args: ['acp'] },
-        notFoundDetail: '`devin` CLI not found (PATH or Devin app bundle)',
+        notFoundDetail: '`devin` CLI not found (PATH, ~/.local/bin, or Devin app bundle)',
         credentialEvidence: {
-          // `devin auth status` prints this exact path on Windows; the XDG
-          // and macOS equivalents are the conventional locations for the
-          // same CLI (unverified — parity issue #302).
-          files: [
-            'AppData/Roaming/devin/credentials.toml',
-            '.config/devin/credentials.toml',
-            'Library/Application Support/devin/credentials.toml',
-          ],
-          envVars: ['DEVIN_API_KEY'],
+          // docs.devin.ai/cli/enterprise/devin-auth: `devin auth login`
+          // writes credentials.toml to %APPDATA%\devin on Windows and to
+          // $XDG_DATA_HOME/devin (default ~/.local/share/devin) on macOS
+          // AND Linux — the same XDG path on both; ~/Library/Application
+          // Support is NOT used. (`devin auth status` prints the path.)
+          files: ['AppData/Roaming/devin/credentials.toml'],
+          xdgDataFiles: ['devin/credentials.toml'],
+          // WINDSURF_API_KEY is the documented ACP credential var
+          // (docs.devin.ai/cli/reference/commands); DEVIN_API_KEY is the
+          // REST-API var third-party adapters report the CLI honoring.
+          envVars: ['DEVIN_API_KEY', 'WINDSURF_API_KEY'],
         },
         signIn: {
           kind: 'run-command',
@@ -350,7 +384,8 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
           // Verified live: `devin login` is parsed as a PATH argument — the
           // real subcommand is `devin auth login`.
           command: 'devin auth login',
-          detail: 'opens a terminal running `devin auth login` — follow the prompts there',
+          detail:
+            'opens a terminal running `devin auth login` — follow the prompts there (SSH/headless: `devin auth login --force-manual-token-flow`)',
         },
         installers: {
           // Official Windows installer (verified live): downloads the CLI
@@ -363,8 +398,20 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
             detail:
               'opens a terminal running Devin’s official installer — it will also walk you through sign-in when it finishes',
           },
-          darwin: null,
-          linux: null,
+          // docs.devin.ai/cli — official script; installs to ~/.local/bin.
+          // Explicit cells, not `default`: the script exits "Unsupported
+          // platform" on OSes beyond macOS/Linux (WSL counts as Linux).
+          darwin: {
+            label: 'Install the Devin CLI',
+            command: 'curl -fsSL https://cli.devin.ai/install.sh | bash',
+            detail:
+              'opens a terminal running Devin’s official installer (macOS alternative: brew install --cask devin-cli)',
+          },
+          linux: {
+            label: 'Install the Devin CLI',
+            command: 'curl -fsSL https://cli.devin.ai/install.sh | bash',
+            detail: 'opens a terminal running Devin’s official installer (covers WSL too)',
+          },
         },
       },
       {
@@ -375,12 +422,21 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
         // different install and is NOT evidence this CLI exists.
         executable: 'agy',
         extraCandidates: {
-          // The official Windows installer registers
-          // %LOCALAPPDATA%\agy\bin on the USER PATH — but a running
+          // Official installers register the binary on PATH — a running
           // daemon's env is a startup snapshot and never sees the new
-          // entry. Probe the real path directly so `florina install
-          // antigravity` resolves without a restart (issue #301).
+          // entry, so probe the real locations directly (issue #301).
+          // win32: %LOCALAPPDATA%\agy\bin (live-verified). unix: the
+          // install.sh script lands at ~/.local/bin/agy; the brew cask
+          // (`brew install --cask antigravity-cli`) lands at the arm64
+          // homebrew prefix.
           win32: [{ kind: 'path', path: '{localAppData}/agy/bin/agy.exe' }],
+          darwin: [
+            { kind: 'path', path: '{home}/.local/bin/agy' },
+            // brew install --cask antigravity-cli → $HOMEBREW_PREFIX/bin/agy
+            { kind: 'path', path: '/opt/homebrew/bin/agy' },
+            { kind: 'path', path: '/usr/local/bin/agy' },
+          ],
+          linux: [{ kind: 'path', path: '{home}/.local/bin/agy' }],
         },
         transport: { kind: 'stream-json' },
         notFoundDetail:
@@ -388,15 +444,26 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
           'inside the Antigravity IDE app folder. Once installed, either put it on PATH or ' +
           'set FLORINA_AGY_CMD to its path.',
         credentialEvidence: {
-          // agy keeps its OAuth token in the OS keyring, not a file — on
-          // Windows it's the `gemini:antigravity` generic credential
-          // (verified live; agy's own log reports "authenticated via
-          // keyring"). The darwin service name is an assumption pending
-          // #302's real-Mac check.
-          files: [],
+          // agy keeps its OAuth token in the OS keyring — the vendored
+          // go-keyring in the binary uses service `gemini`, account
+          // `antigravity` on every platform: rendered `gemini:antigravity`
+          // in Windows Credential Manager (verified live), svce=gemini /
+          // acct=antigravity in the macOS login keychain (upstream issue
+          // evidence — pending a real-Mac check). SSH/headless sessions
+          // (and GEMINI_FORCE_FILE_STORAGE) fall back to a file under
+          // ~/.gemini — probe-able on every OS. Linux's primary store is
+          // Secret Service over D-Bus — no generic existence probe, so a
+          // miss there stays 'unknown', never a false "not signed in".
+          files: ['.gemini/antigravity-cli/antigravity-oauth-token'],
+          // Deliberately no envVars: agy documents GEMINI_API_KEY and the
+          // enterprise ADC path (AGY_ADC_AUTH+GOOGLE_APPLICATION_CREDENTIALS)
+          // but both only count when settings.json opts in — presence alone
+          // is not evidence, and the spec can't express compound conditions.
           envVars: [],
           winCredTarget: 'gemini:antigravity',
-          darwinKeychain: 'gemini:antigravity',
+          darwinKeychain: 'gemini',
+          darwinKeychainAccount: 'antigravity',
+          unprobeablePlatforms: ['linux'],
         },
         signIn: {
           kind: 'run-command',
@@ -413,8 +480,21 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
               'powershell -NoProfile -Command "irm https://antigravity.google/cli/install.ps1 | iex"',
             detail: 'opens a terminal running Antigravity’s official installer',
           },
-          darwin: null,
-          linux: null,
+          // antigravity.google/docs/cli/install — official script, lands
+          // at ~/.local/bin/agy. Explicit cells, not `default`: only
+          // macOS/Linux are documented (brew cask exists on macOS as an
+          // alternative).
+          darwin: {
+            label: 'Install the Antigravity CLI',
+            command: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+            detail:
+              'opens a terminal running Antigravity’s official installer (macOS alternative: brew install --cask antigravity-cli)',
+          },
+          linux: {
+            label: 'Install the Antigravity CLI',
+            command: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+            detail: 'opens a terminal running Antigravity’s official installer',
+          },
         },
       },
     ] as ProviderManifest[]
