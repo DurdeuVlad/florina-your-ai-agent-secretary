@@ -109,6 +109,8 @@ before the pilot counts as resolved.
 
 ## 7. Status
 
-**Blocked — needs human participants.** Session infrastructure (this brief)
-is ready. Open decisions from the issue: recruitment owner, consent record
-keeping, and sample count confirmation.
+**Blocked — needs human participants.** Session infrastructure is ready:
+this brief plus `docs/pilot/session-materials.md` (disposable sandbox
+spec, per-participant evidence sheet, session checklist). Open decisions
+from the issue: recruitment owner, consent record keeping, and sample
+count confirmation.
