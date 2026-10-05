@@ -30,6 +30,7 @@ import * as path from 'node:path';
 import {
   AgentRepository,
   ApprovalRepository,
+  AttentionInboxSnapshotRepository,
   AttentionItemRepository,
   CapabilityGrantRepository,
   ChatMessageRepository,
@@ -66,7 +67,11 @@ import { CommandApi } from '../core/application/use-cases/tasks/command-api.js';
 import { TaskStateMachine } from '../core/application/use-cases/tasks/task-lifecycle.js';
 import { SessionManager } from '../core/application/use-cases/tasks/session-manager.js';
 import { MetricsCollector } from '../core/application/use-cases/metrics.js';
-import { AttentionInbox } from '../core/application/use-cases/attention/attention-inbox.js';
+import {
+  AttentionInbox,
+  type AttentionInboxSnapshot,
+} from '../core/application/use-cases/attention/attention-inbox.js';
+import { reconcileJournalFailureItems } from '../core/application/use-cases/attention/journal-failure-reconcile.js';
 import {
   AttentionAggregator,
   type ApprovalGate,
@@ -103,6 +108,7 @@ import {
 } from '../adapters/outbound/credentials/os-credential-vault.js';
 import { SecretsVaultService } from '../core/application/use-cases/security/secrets-vault-service.js';
 import type { SecretsVaultPort } from '../core/application/ports/outbound/secrets-vault.js';
+import type { AttentionInboxStorePort } from '../core/application/ports/outbound/repositories.js';
 import { FlorinaMcpHttpServer } from '../adapters/inbound/mcp/http-server.js';
 import { managerServiceFactory } from './mcp-server.js';
 import type { SupervisorEvent } from '../core/domain/events.js';
@@ -239,6 +245,20 @@ export interface DaemonEvents {
  * await daemon.stop();
  * ```
  */
+/**
+ * Coalescing window for attention-inbox snapshot saves (issue #272):
+ * the leading mutation persists immediately, a burst lands one
+ * trailing write this many milliseconds after the window opens.
+ */
+const INBOX_SAVE_DEBOUNCE_MS = 250;
+
+/**
+ * How many Resolved items the persisted inbox snapshot retains (issue
+ * #272). Resolved items are audit history, not live state — capping
+ * the tail keeps the single-row blob bounded on long-lived installs.
+ */
+const MAX_PERSISTED_RESOLVED_ITEMS = 100;
+
 export class FlorinaDaemon extends EventEmitter {
   private readonly options: {
     port: number;
@@ -266,6 +286,12 @@ export class FlorinaDaemon extends EventEmitter {
   private bus: EventBus | null = null;
   private stream: EventStream | null = null;
   private attentionInbox: AttentionInbox | null = null;
+  /** Trailing-edge debounce timer for inbox snapshot saves (issue #272). */
+  private inboxSaveTimer: NodeJS.Timeout | null = null;
+  /** Whether a mutation arrived while the debounce window was open. */
+  private inboxSaveDirty = false;
+  /** The inbox snapshot store (issue #272); set while the daemon runs. */
+  private attentionInboxSnapshots: AttentionInboxStorePort<AttentionInboxSnapshot> | null = null;
   private metricsCollector: MetricsCollector | null = null;
   private attentionAggregator: AttentionAggregator | null = null;
   private worktreeManager: GitWorktreeAdapter | null = null;
@@ -443,7 +469,35 @@ export class FlorinaDaemon extends EventEmitter {
       // Wire the typed Command API (issue #33). The CommandApi shares the
       // same EventBus, storage repositories, and worktree manager as the
       // legacy ControlPlaneApi so both surfaces operate on identical state.
-      this.attentionInbox = new AttentionInbox();
+      // Restore the attention inbox from its durable snapshot (issue
+      // #272): an in-memory-only inbox loses every item on restart —
+      // critically the `JournalFailure` cards whose retained `writes[]`
+      // are the ONLY copy of journal rows that never landed. Then hook
+      // persistence so every successful mutation rewrites the snapshot.
+      const inboxSnapshot = repos.attentionInboxSnapshots.load();
+      try {
+        this.attentionInbox =
+          inboxSnapshot !== null ? AttentionInbox.restore(inboxSnapshot) : new AttentionInbox();
+      } catch {
+        // A snapshot that passed load()'s validation but still fails to
+        // restore must not wedge boot — an empty inbox is the pre-#272
+        // baseline, a crashed daemon is worse.
+        this.attentionInbox = new AttentionInbox();
+      }
+      this.attentionInboxSnapshots = repos.attentionInboxSnapshots;
+      this.attentionInbox.setMutationObserver(() => this.scheduleInboxSave());
+      // Reconcile restored JournalFailure cards: retained rows that
+      // landed while the daemon was down drop out of writes[]; a
+      // fully-landed card resolves instead of re-offering a Retry with
+      // nothing to do.
+      const reconciled = reconcileJournalFailureItems(this.attentionInbox, repos.events);
+      if (reconciled.landed > 0 || reconciled.resolved > 0) {
+        console.error(
+          `[florina] restored attention inbox: ${reconciled.landed} retained writes ` +
+            `already landed, ${reconciled.resolved} cards resolved, ` +
+            `${reconciled.surviving} still failing`,
+        );
+      }
       this.metricsCollector = new MetricsCollector({
         inboxSizeProvider: () => this.attentionInbox?.size ?? 0,
         attentionItemsPendingProvider: () => this.attentionInbox?.pendingCount ?? 0,
@@ -1070,6 +1124,70 @@ export class FlorinaDaemon extends EventEmitter {
   }
 
   /**
+   * Persist the attention inbox snapshot now (issue #272).
+   *
+   * Resolved items accumulate forever — bound the persisted tail so a
+   * long-lived install doesn't rewrite an unbounded history blob on
+   * every mutation. A failed save must not break the inbox — but
+   * silent is not honest (same rule as the journal writer's onError
+   * sink): nothing listens to 'error' in production, so the failure
+   * also goes to stderr.
+   */
+  private saveInboxSnapshot(): void {
+    if (this.attentionInbox === null || this.attentionInboxSnapshots === null) return;
+    try {
+      this.attentionInboxSnapshots.save(
+        this.attentionInbox.snapshot({ maxResolved: MAX_PERSISTED_RESOLVED_ITEMS }),
+      );
+    } catch (err) {
+      try {
+        if (this.listenerCount('error') > 0) this.emit('error', err);
+      } catch {
+        /* a throwing 'error' listener is contained too */
+      }
+      console.error(
+        `[florina] attention inbox snapshot save failed: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Leading + trailing debounce for inbox snapshot saves: the first
+   * mutation persists immediately (a crash loses nothing before it), a
+   * burst coalesces into one trailing write instead of one fsync per
+   * mutation (a JournalFailure storm is exactly when this matters).
+   */
+  private scheduleInboxSave(): void {
+    this.inboxSaveDirty = true;
+    if (this.inboxSaveTimer !== null) return;
+    this.inboxSaveDirty = false;
+    this.saveInboxSnapshot();
+    this.inboxSaveTimer = setTimeout(() => {
+      this.inboxSaveTimer = null;
+      if (this.inboxSaveDirty) {
+        this.inboxSaveDirty = false;
+        this.saveInboxSnapshot();
+      }
+    }, INBOX_SAVE_DEBOUNCE_MS);
+    this.inboxSaveTimer.unref();
+  }
+
+  /** Clear the debounce timer and land any pending save (shutdown path). */
+  private flushInboxSave(): void {
+    if (this.inboxSaveTimer !== null) {
+      clearTimeout(this.inboxSaveTimer);
+      this.inboxSaveTimer = null;
+    }
+    if (this.inboxSaveDirty) {
+      this.inboxSaveDirty = false;
+      this.saveInboxSnapshot();
+    }
+    this.attentionInbox?.setMutationObserver(undefined);
+    this.attentionInboxSnapshots = null;
+  }
+
+  /**
    * Collect a {@link HealthStatus} snapshot. Throws if the daemon is not
    * running.
    */
@@ -1115,6 +1233,7 @@ export class FlorinaDaemon extends EventEmitter {
       capabilityGrants: new CapabilityGrantRepository(raw),
       briefs: new BriefRepository(raw),
       chatMessages: new ChatMessageRepository(raw),
+      attentionInboxSnapshots: new AttentionInboxSnapshotRepository(raw),
     };
   }
 
@@ -1277,6 +1396,10 @@ export class FlorinaDaemon extends EventEmitter {
       await this.server.stop();
       this.server = null;
     }
+    // Flush any debounced inbox snapshot write before the db close
+    // cleanup runs (issue #272): a mutation inside the debounce window
+    // must still land durably on shutdown.
+    this.flushInboxSave();
     // Run remaining cleanups (db close, lock release) in reverse order.
     while (this.cleanups.length > 0) {
       const cleanup = this.cleanups.pop();
