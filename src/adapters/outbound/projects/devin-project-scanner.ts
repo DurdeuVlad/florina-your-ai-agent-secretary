@@ -35,7 +35,15 @@ export function decodeWorkspaceUri(uri: string): string {
       // platform — on POSIX, fileURLToPath leaves it as `/x:/...`,
       // which is a meaningless path. Strip the leading slash the same
       // way the URL-parse fallback below does (#284).
-      return fileURLToPath(uri).replace(/\\/g, '/').replace(/^\/([a-zA-Z]:)/, '$1');
+      const decoded = fileURLToPath(uri).replace(/\\/g, '/').replace(/^\/([a-zA-Z]:)/, '$1');
+      // `file://host/share` is a network path: POSIX fileURLToPath
+      // drops the host entirely (`/share`), while win32 yields the
+      // UNC `\\host\share`. Reattach it so both agree (#284).
+      const host = new URL(uri).hostname;
+      if (host !== '' && host !== 'localhost' && !decoded.startsWith('//')) {
+        return `//${host}${decoded}`;
+      }
+      return decoded;
     } catch {
       try {
         const parsed = new URL(uri);
