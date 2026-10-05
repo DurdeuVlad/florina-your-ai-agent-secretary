@@ -313,6 +313,7 @@ describe('ProviderReadiness (#294)', () => {
       'devin', // acp-adapter id
       'gemini', // acp-adapter id
       'copilot', // acp-adapter id
+      'opencode', // acp-adapter id
     ];
     // Every FIXES key must be a real registered id or the synthetic
     // 'chat-model' row — no orphan recipes.
@@ -334,6 +335,7 @@ describe('ProviderReadiness (#294)', () => {
       'devin',
       'gemini',
       'copilot',
+      'opencode',
     ];
     for (const id of providerInstallerIds()) {
       expect(realIds, `installer recipe for unknown provider ${id}`).toContain(id);
@@ -399,6 +401,7 @@ describe('ProviderReadiness (#294)', () => {
         'curl -fsSL https://antigravity.google/cli/install.sh | bash',
       ],
       copilot: ['npm i -g @github/copilot', 'npm i -g @github/copilot', 'npm i -g @github/copilot'],
+      opencode: ['npm i -g opencode-ai', 'npm i -g opencode-ai', 'npm i -g opencode-ai'],
     });
   });
 
@@ -874,6 +877,34 @@ describe('makeCredentialProbe (#294)', () => {
       })('gemini'),
     ).toBe('present');
   });
+
+  it('opencode: an existing opencode.db makes a bare miss unknown, never absent (#304)', () => {
+    // OpenCode v2 stores `auth login` credentials inside opencode.db —
+    // which is created on FIRST LAUNCH whether or not it ever holds a
+    // credential row (verified live). Its existence proves nothing, but
+    // a credential could hide inside it — so the honest miss is
+    // 'unknown', not "not signed in".
+    const homeDb = path.join(home, '.local', 'share', 'opencode');
+    fs.mkdirSync(homeDb, { recursive: true });
+    fs.writeFileSync(path.join(homeDb, 'opencode.db'), '');
+    const probe = makeCredentialProbe({ env: {}, homeDir: home });
+    expect(probe('opencode')).toBe('unknown');
+    // And without the db the verdict is the ordinary consultable miss.
+    fs.rmSync(path.join(homeDb, 'opencode.db'));
+    expect(makeCredentialProbe({ env: {}, homeDir: home })('opencode')).toBe('absent');
+  });
+
+  it('opencode: real credential evidence still wins over the uncertain db (#304)', () => {
+    const dir = path.join(home, '.local', 'share', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'opencode.db'), '');
+    fs.writeFileSync(path.join(dir, 'auth.json'), '{}');
+    expect(makeCredentialProbe({ env: {}, homeDir: home })('opencode')).toBe('present');
+    // A model-provider key in the env is positive evidence too.
+    expect(makeCredentialProbe({ env: { OPENAI_API_KEY: 'x' }, homeDir: home })('opencode')).toBe(
+      'present',
+    );
+  });
 });
 
 /* ================================================================== *
@@ -1029,6 +1060,40 @@ describe('CommandApi readiness surfaces (#294)', () => {
     expect(byId['claude-code']?.fix?.kind).toBe('run-command');
     expect(res.chatModel?.state).toBe('ok');
     expect(res.chatModel?.keySource).toBe('vault');
+  });
+
+  it('an inconclusive auth probe still offers the sign-in recipe — unknown is not a dead end (#304)', async () => {
+    const readiness = new ProviderReadiness({
+      credsProbe: () => 'unknown',
+    });
+    const api = new CommandApi({
+      ...fixtureDeps,
+      providerAttachment: () => ({
+        attached: [{ id: 'opencode' }],
+        skipped: [],
+      }),
+      providerReadiness: readiness,
+    });
+    const res = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+    expect(res.providers[0].auth).toBe('unknown');
+    expect(res.providers[0].fix?.kind).toBe('run-command');
+    expect(res.providers[0].fix?.command).toBe('opencode auth login');
+  });
+
+  it('a standing non-auth failure does NOT get the sign-in recipe — wrong advice (#304)', async () => {
+    // recordFailure with a network error → 'unknown' state, but "sign
+    // in" cannot remediate ECONNREFUSED — the row must not offer it.
+    const readiness = new ProviderReadiness({ credsProbe: () => 'unknown' });
+    readiness.recordFailure('opencode', 'fetch failed — ECONNREFUSED');
+    const api = new CommandApi({
+      ...fixtureDeps,
+      providerAttachment: () => ({ attached: [{ id: 'opencode' }], skipped: [] }),
+      providerReadiness: readiness,
+    });
+    const res = (await api.execute({ kind: 'query-providers' })) as ProvidersResponse;
+    expect(res.providers[0].auth).toBe('unknown');
+    expect(res.providers[0].fix).toBeUndefined();
+    expect(res.providers[0].authDetail).toContain('ECONNREFUSED');
   });
 
   it('a dispatch failure classifies the provider and raises one attention card', async () => {
@@ -1801,6 +1866,50 @@ describe('launchVisibleTerminal (#294)', () => {
     });
     expect(bad.ok).toBe(false);
     expect(bad.detail).toContain('run `codex login` yourself');
+  });
+
+  it('default resolver existence-checks explicit paths instead of consulting PATH (#304)', async () => {
+    // A provider resolved via a beyond-PATH candidate arrives as an
+    // absolute path — `where`/`which` would lie about it. The real
+    // resolver must check the filesystem: existing → launch proceeds,
+    // missing → honest refusal (and spawn is never attempted).
+    const { launchVisibleTerminal } =
+      await import('../src/adapters/outbound/platform/terminal-launcher.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'florina-launch-'));
+    const real = path.join(dir, 'provider-cli.cmd');
+    fs.writeFileSync(real, 'x');
+    const spawned: string[] = [];
+    const goodSpawn = (() => {
+      const listeners: Record<string, (() => void)[]> = {};
+      return {
+        once: (e: string, cb: () => void) => {
+          (listeners[e] ??= []).push(cb);
+          if (e === 'spawn') setImmediate(cb);
+          return undefined;
+        },
+        off: () => undefined,
+        unref: () => undefined,
+      };
+    }) as never;
+    const trackingSpawn = ((bin: string) => {
+      spawned.push(bin);
+      return goodSpawn();
+    }) as never;
+
+    const ok = await launchVisibleTerminal(`"${real}" login`, {
+      platform: 'win32',
+      spawnFn: trackingSpawn,
+    });
+    expect(ok.ok).toBe(true);
+    expect(spawned.length).toBeGreaterThan(0);
+
+    const missing = await launchVisibleTerminal(`"${path.join(dir, 'gone.cmd')}" login`, {
+      platform: 'win32',
+      spawnFn: trackingSpawn,
+    });
+    expect(missing.ok).toBe(false);
+    expect(missing.detail).toContain("isn't installed");
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it('on darwin, spawning osascript is NOT success — the exit verdict decides', async () => {

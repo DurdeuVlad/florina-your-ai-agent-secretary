@@ -2656,7 +2656,15 @@ export class CommandApi {
       return {
         auth,
         ...(auth !== 'signed-in' && failure !== undefined ? { authDetail: failure.detail } : {}),
-        ...(auth === 'found-not-signed-in' || auth === 'auth-failing'
+        // The sign-in recipe attaches whenever the state could be a
+        // credential gap — including 'unknown' from an inconclusive probe
+        // (unprobeable store, uncertain file). But when a STANDING
+        // failure of a class sign-in can't fix (network/quota/missing)
+        // is what produced 'unknown', offering "sign in" is wrong advice.
+        ...(auth !== 'signed-in' &&
+        (failure === undefined ||
+          failure.failureClass === 'auth' ||
+          failure.failureClass === 'config')
           ? (() => {
               // Pass the standing failure's class+detail — a config-class
               // failure yields the set-env recipe, not a sign-in button.

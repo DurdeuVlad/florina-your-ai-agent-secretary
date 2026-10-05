@@ -15,7 +15,7 @@
  *                 it per run (codex, Tier A)
  *   acp         → {@link AcpAdapter} with the manifest's args
  *                 (e.g. devin `acp`, gemini `--experimental-acp`,
- *                 copilot `--acp` — Tier C)
+ *                 copilot `--acp`, opencode `acp` — Tier C)
  *   stream-json → {@link AgyAdapter} headless (antigravity, Tier D)
  *
  * Per-provider command overrides (`FLORINA_<PROVIDER>_CMD`) are
@@ -557,6 +557,40 @@ const CREDENTIAL_EVIDENCE: Readonly<Record<string, CredentialEvidenceSpec>> =
  * filesystem without a daemon restart. `spawnFn`/`platform` are
  * injectable so the keychain path is testable off-darwin.
  */
+/**
+ * Rewrite a sign-in/install recipe's leading executable to the path the
+ * daemon actually resolved for that provider. A provider attached via a
+ * beyond-PATH candidate is invisible to `where`/`which`, so launching
+ * the bare recipe command would open a terminal that can't find the
+ * binary (or be refused by the launcher's preflight). Non-provider
+ * commands and unresolved providers pass through verbatim. The resolved
+ * path is quoted — it may contain spaces; trailing args pass through.
+ */
+export function resolveProviderCommand(
+  command: string,
+  attached: readonly AttachedProvider[],
+): string {
+  const trimmed = command.trim();
+  const quoted = trimmed.startsWith('"');
+  const exe = quoted
+    ? trimmed.slice(1, trimmed.indexOf('"', 1))
+    : (trimmed.split(/\s+/, 1)[0] ?? '');
+  if (exe === '') return command;
+  const manifest = PROVIDER_MANIFESTS.find((m) => m.executable === exe);
+  if (manifest === undefined) return command;
+  const provider = attached.find((p) => p.id === manifest.id);
+  if (provider === undefined || provider.command === exe) return command;
+  // A resolved path carrying shell-significant characters can't be
+  // quoted safely for every terminal we spawn — cmd.exe expands %VAR%
+  // even inside quotes, and POSIX sh expands $ and backticks inside
+  // double quotes. Declining the rewrite is the honest move: the bare
+  // recipe then gets the launcher's normal PATH preflight instead of a
+  // mangled command line.
+  if (/["$`%!]/.test(provider.command)) return command;
+  const rest = quoted ? trimmed.slice(exe.length + 2) : trimmed.slice(exe.length);
+  return `"${provider.command}"${rest}`;
+}
+
 export function makeCredentialProbe(
   deps: {
     env?: NodeJS.ProcessEnv;
@@ -718,8 +752,19 @@ export function makeCredentialProbe(
     // 'unknown', not falsely claim "not signed in" — though a fallback
     // file/env hit above already returned 'present'.
     const unprobeableHere = evidence.unprobeablePlatforms?.includes(platform) === true;
+    // 'uncertain' paths sit between evidence and noise: their existence
+    // can't prove a sign-in, but it means a credential could be hiding
+    // where the probe can't read (OpenCode keeps credentials inside
+    // opencode.db, which exists from first launch either way). A miss
+    // with an uncertain store present is 'unknown', never 'absent'.
+    const uncertainSeen =
+      (evidence.uncertainFiles ?? []).some((rel) => existsSync(join(home, ...rel.split('/')))) ||
+      (evidence.uncertainXdgDataFiles ?? []).some((rel) =>
+        existsSync(join(xdgBase, ...rel.split('/'))),
+      );
     const consultable =
       !unprobeableHere &&
+      !uncertainSeen &&
       (evidence.files.length > 0 ||
         (evidence.xdgDataFiles?.length ?? 0) > 0 ||
         evidence.envVars.length > 0 ||

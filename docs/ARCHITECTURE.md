@@ -128,6 +128,13 @@ temporary compatibility surfaces, not the public API.
 | Gemini CLI        | `gemini --experimental-acp` (ACP); `-p --output-format stream-json` | C / D | none → 429 detection + session-file token sums                                          | `--continue`                    |
 | Antigravity `agy` | `agy -p --output-format stream-json`                                | D     | none → reactive                                                                         | `--continue` / `--conversation` |
 | Copilot CLI       | `copilot --acp` (ACP/JSON-RPC stdio, public preview)                | C     | none documented → reactive                                                              | `--resume=<id>` / `--continue`  |
+| OpenCode          | `opencode acp` (ACP/JSON-RPC stdio)                                 | C     | none documented → reactive                                                              | `opencode run --session <id>`   |
+
+OpenCode credential caveat: v2 stores `auth login` tokens inside
+`opencode.db`, which exists from first launch whether or not it holds a
+credential row — so an installed-but-unprobed OpenCode reports sign-in
+"unknown" (not "signed in", not "not signed in") until `auth.json` or a
+model-provider env var gives positive evidence.
 
 Non-TTY caveat for `agy`: stdout is gated on `isatty()` (upstream bug) — a PTY
 bridge is required for headless capture. That is an I/O shim over structured

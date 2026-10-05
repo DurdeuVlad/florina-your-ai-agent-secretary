@@ -185,6 +185,17 @@ export interface CredentialEvidenceSpec {
    * `present`.
    */
   readonly unprobeablePlatforms?: readonly string[];
+  /**
+   * Home-relative paths whose existence makes a credential *miss*
+   * inconclusive — 'unknown' instead of 'absent'. For stores whose
+   * content an existence probe cannot read: OpenCode v2 keeps
+   * credentials inside `opencode.db`, but the file exists from first
+   * launch whether or not it holds a credential row — so its presence
+   * can never prove a sign-in AND can never disprove one either.
+   */
+  readonly uncertainFiles?: readonly string[];
+  /** XDG-data-relative variant of {@link uncertainFiles}. */
+  readonly uncertainXdgDataFiles?: readonly string[];
 }
 
 /** One provider's complete declarative spec — the ONLY place it's defined. */
@@ -222,14 +233,17 @@ export interface ProviderManifest {
  * ------------------------------------------------------------------ */
 
 // `npm view` verified each package publishes exactly the bin name the
-// manifest probes for (`claude`, `codex`, `gemini`) with no `os`
-// restriction — the cross-platform `default` installer claim is
-// metadata-backed, not assumed (issue #302).
+// manifest probes for (`claude`, `codex`, `gemini`, `copilot`,
+// `opencode`). `opencode-ai` declares os/cpu restrictions (darwin/
+// linux/win32 × arm64/x64) — it must NOT hang off `default`; explicit
+// cells live on its entry. The others publish unrestricted packages.
+// (issue #302/#304 — claims are metadata-backed, not assumed)
 const NPM = {
   claude: 'npm i -g @anthropic-ai/claude-code',
   codex: 'npm i -g @openai/codex',
   gemini: 'npm i -g @google/gemini-cli',
   copilot: 'npm i -g @github/copilot',
+  opencode: 'npm i -g opencode-ai',
 } as const;
 
 /**
@@ -598,6 +612,108 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
             label: 'Install GitHub Copilot CLI',
             command: NPM.copilot,
             detail: 'opens a terminal running npm — the official Copilot CLI installer',
+          },
+        },
+      },
+      {
+        // OpenCode — opencode.ai/docs. `opencode acp` is a real ACP v1
+        // server over stdio (starts a private in-process server, no
+        // port), so the generic AcpAdapter carries it.
+        id: 'opencode',
+        docsUrl: 'https://opencode.ai/docs/',
+        envOverride: 'FLORINA_OPENCODE_CMD',
+        executable: 'opencode',
+        extraCandidates: {
+          // The install script prefers $OPENCODE_INSTALL_DIR →
+          // $XDG_BIN_DIR → ~/bin → ~/.opencode/bin; brew lands in the
+          // brew prefix; npm in the global prefix; scoop/choco shims in
+          // their dirs — all documented beyond-PATH homes.
+          win32: [
+            { kind: 'path', path: '{home}/.opencode/bin/opencode.exe' },
+            { kind: 'path', path: '{home}/scoop/shims/opencode.exe' },
+            { kind: 'path', path: '{home}/AppData/Roaming/npm/opencode.cmd' },
+          ],
+          default: [
+            { kind: 'path', path: '{home}/.opencode/bin/opencode' },
+            { kind: 'path', path: '{home}/bin/opencode' },
+          ],
+          darwin: [
+            { kind: 'path', path: '{home}/.opencode/bin/opencode' },
+            { kind: 'path', path: '{home}/bin/opencode' },
+            { kind: 'path', path: '/opt/homebrew/bin/opencode' },
+            { kind: 'path', path: '/usr/local/bin/opencode' },
+          ],
+          linux: [
+            { kind: 'path', path: '{home}/.opencode/bin/opencode' },
+            { kind: 'path', path: '{home}/bin/opencode' },
+            { kind: 'path', path: '/home/linuxbrew/.linuxbrew/bin/opencode' },
+            { kind: 'path', path: '/usr/local/bin/opencode' },
+          ],
+        },
+        transport: { kind: 'acp', args: ['acp'] },
+        notFoundDetail:
+          '`opencode` CLI not found on PATH (also checked ~/.opencode/bin, ' +
+          '~/bin, and brew/scoop/npm dirs). Install it, put it on PATH, or ' +
+          'set FLORINA_OPENCODE_CMD to its path.',
+        credentialEvidence: {
+          // OpenCode is model-key auth: `opencode auth login` stores
+          // provider keys in ~/.local/share/opencode/auth.json (v1) —
+          // on Windows the same path under %USERPROFILE%. v2 migrates
+          // credentials into opencode.db, which we deliberately do NOT
+          // list: it is created on every launch (verified live — a bare
+          // `opencode acp` handshake creates it), so existence is not
+          // credential evidence. A v2-db-only sign-in under-reports to
+          // 'absent', which self-heals via `florina auth opencode`.
+          // Provider keys are also honored natively as env vars
+          // (models.dev list) — a present key is real capability
+          // evidence.
+          files: ['.local/share/opencode/auth.json'],
+          xdgDataFiles: ['opencode/auth.json'],
+          // v2 credentials live in opencode.db — created on every
+          // launch (verified live), so its existence is not evidence;
+          // but since the db MIGHT hold a credential row we cannot see,
+          // its presence makes an otherwise-empty probe 'unknown'
+          // instead of a false "not signed in".
+          uncertainFiles: ['.local/share/opencode/opencode.db'],
+          uncertainXdgDataFiles: ['opencode/opencode.db'],
+          envVars: [
+            'ANTHROPIC_API_KEY',
+            'OPENAI_API_KEY',
+            'GOOGLE_GENERATIVE_AI_API_KEY',
+            'GEMINI_API_KEY',
+            'OPENROUTER_API_KEY',
+          ],
+        },
+        signIn: {
+          kind: 'run-command',
+          label: 'Sign in to OpenCode',
+          command: 'opencode auth login',
+          detail:
+            'opens a terminal running `opencode auth login` — pick your model ' +
+            'provider and paste its API key there (the picker needs a real terminal)',
+        },
+        installers: {
+          // `opencode-ai` publishes only os=[darwin,linux,win32] ×
+          // cpu=[arm64,x64] binaries — `default` would falsely claim
+          // freebsd/android/ia32 coverage (npm EBADPLATFORMs there), so
+          // explicit cells per the file's restricted-coverage
+          // convention. curl script / brew tap / scoop are documented
+          // alternatives; npm is the single honest pick since Florina
+          // already requires Node ≥ 22.
+          win32: {
+            label: 'Install OpenCode',
+            command: NPM.opencode,
+            detail: 'opens a terminal running npm — the official OpenCode installer',
+          },
+          darwin: {
+            label: 'Install OpenCode',
+            command: NPM.opencode,
+            detail: 'opens a terminal running npm — the official OpenCode installer',
+          },
+          linux: {
+            label: 'Install OpenCode',
+            command: NPM.opencode,
+            detail: 'opens a terminal running npm — the official OpenCode installer',
           },
         },
       },

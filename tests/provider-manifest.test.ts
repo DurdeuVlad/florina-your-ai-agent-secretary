@@ -70,6 +70,7 @@ describe('provider manifest — id integrity', () => {
       'devin',
       AGY_ADAPTER_ID,
       'copilot',
+      'opencode',
     ].sort();
     expect([...providerManifestIds()].sort()).toEqual(adapterIds);
   });
@@ -158,6 +159,10 @@ describe('provider manifest — safety invariants', () => {
         expect(Object.isFrozen(m.credentialEvidence.xdgDataFiles)).toBe(true);
       if (m.credentialEvidence.unprobeablePlatforms)
         expect(Object.isFrozen(m.credentialEvidence.unprobeablePlatforms)).toBe(true);
+      if (m.credentialEvidence.uncertainFiles)
+        expect(Object.isFrozen(m.credentialEvidence.uncertainFiles)).toBe(true);
+      if (m.credentialEvidence.uncertainXdgDataFiles)
+        expect(Object.isFrozen(m.credentialEvidence.uncertainXdgDataFiles)).toBe(true);
     }
   });
 
@@ -184,6 +189,8 @@ describe('provider manifest — safety invariants', () => {
       'winCredTargets',
       'winCredTargetPatterns',
       'unprobeablePlatforms',
+      'uncertainFiles',
+      'uncertainXdgDataFiles',
     ]);
     for (const m of PROVIDER_MANIFESTS) {
       const ev = m.credentialEvidence;
@@ -443,6 +450,29 @@ describe('provider manifest — the real registry is load-bearing', () => {
     // `copilot --acp` (stdio ACP server) was verified live — the args
     // reach `new AcpAdapter({args})` verbatim via the transport arm.
     expect(providerManifest('copilot')?.transport).toEqual({ kind: 'acp', args: ['--acp'] });
+  });
+
+  it('opencode declares `opencode acp` — its documented ACP subcommand (#304)', () => {
+    expect(providerManifest('opencode')?.transport).toEqual({ kind: 'acp', args: ['acp'] });
+  });
+
+  it("executables are unique, and a run-command recipe never leads with ANOTHER provider's exe", () => {
+    // `resolveProviderCommand` rewrites a recipe's leading token to the
+    // daemon-resolved path via `m.executable === exe` first-wins — a
+    // shared executable would rewrite to the wrong binary, and a recipe
+    // written `~/bin/opencode …` or `npx opencode …` would silently
+    // bypass the beyond-PATH fix. Pin the shape it depends on.
+    const exes = PROVIDER_MANIFESTS.map((m) => m.executable);
+    expect(new Set(exes).size).toBe(exes.length);
+    for (const m of PROVIDER_MANIFESTS) {
+      if (m.signIn.kind !== 'run-command' || m.signIn.command === undefined) continue;
+      const lead = m.signIn.command.trim().replace(/^"/, '').split(/\s+/, 1)[0];
+      const owner = PROVIDER_MANIFESTS.find((o) => o.executable === lead);
+      expect(
+        owner === undefined || owner.id === m.id,
+        `${m.id}: signIn command "${m.signIn.command}" leads with ${owner?.id ?? 'nobody'}'s executable`,
+      ).toBe(true);
+    }
   });
 
   it('manifest files list sanity — referenced evidence paths look like real paths', () => {

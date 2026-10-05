@@ -13,6 +13,8 @@
  * says exactly what was asked, not that sign-in succeeded.
  */
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 
 export interface TerminalLaunchResult {
   readonly ok: boolean;
@@ -51,6 +53,12 @@ function leadingExecutable(command: string): string | null {
 }
 
 function defaultResolve(executable: string, platform: NodeJS.Platform): boolean {
+  // A path the caller already resolved (absolute, or containing a
+  // separator) is existence-checked directly — `where`/`which` search
+  // PATH only and would lie about a known-good absolute path.
+  if (isAbsolute(executable) || executable.includes('/') || executable.includes('\\')) {
+    return existsSync(executable);
+  }
   const probe = platform === 'win32' ? 'where.exe' : 'which';
   try {
     return spawnSync(probe, [executable], { stdio: 'ignore' }).status === 0;
