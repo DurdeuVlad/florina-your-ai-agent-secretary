@@ -29,35 +29,35 @@ export interface DevinProjectScannerOptions {
 }
 
 export function decodeWorkspaceUri(uri: string): string {
-  if (uri.startsWith('file://')) {
+  if (!uri.startsWith('file://')) {
+    return uri;
+  }
+  try {
+    const parsed = new URL(uri);
+    // `file://host/share` is a network path — checked FIRST because
+    // POSIX fileURLToPath throws on a non-localhost host
+    // (ERR_INVALID_FILE_URL_HOST) while win32 yields `\\host\share`.
+    // `//host/share` is the agreed decoded form on every platform (#284).
+    const host = parsed.hostname;
+    if (host !== '' && host !== 'localhost') {
+      return `//${host}${decodeURIComponent(parsed.pathname).replace(/\\/g, '/')}`;
+    }
     try {
       // A `file:///x:/` URI encodes a Windows drive path on every
       // platform — on POSIX, fileURLToPath leaves it as `/x:/...`,
       // which is a meaningless path. Strip the leading slash the same
-      // way the URL-parse fallback below does (#284).
-      const decoded = fileURLToPath(uri).replace(/\\/g, '/').replace(/^\/([a-zA-Z]:)/, '$1');
-      // `file://host/share` is a network path: POSIX fileURLToPath
-      // drops the host entirely (`/share`), while win32 yields the
-      // UNC `\\host\share`. Reattach it so both agree (#284).
-      const host = new URL(uri).hostname;
-      if (host !== '' && host !== 'localhost' && !decoded.startsWith('//')) {
-        return `//${host}${decoded}`;
-      }
-      return decoded;
+      // way the fallback below does (#284).
+      return fileURLToPath(uri).replace(/\\/g, '/').replace(/^\/([a-zA-Z]:)/, '$1');
     } catch {
-      try {
-        const parsed = new URL(uri);
-        let pathName = decodeURIComponent(parsed.pathname);
-        if (/^\/[a-zA-Z]:/.test(pathName)) {
-          pathName = pathName.slice(1);
-        }
-        return pathName.replace(/\\/g, '/');
-      } catch {
-        return uri;
+      let pathName = decodeURIComponent(parsed.pathname);
+      if (/^\/[a-zA-Z]:/.test(pathName)) {
+        pathName = pathName.slice(1);
       }
+      return pathName.replace(/\\/g, '/');
     }
+  } catch {
+    return uri;
   }
-  return uri;
 }
 
 export class DevinProjectScanner implements ProviderProjectScannerPort {
