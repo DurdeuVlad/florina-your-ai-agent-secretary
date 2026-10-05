@@ -2,6 +2,13 @@ appId: com.florina.app
 productName: Florina
 copyright: Copyright © 2024 Florina contributors
 
+# package.json `main` is the library barrel (dist/index.js) — npm consumers
+# need it — but Electron must boot the desktop composition root. Override the
+# packaged app's entry here; without this the installer produces an app that
+# silently exits on launch.
+extraMetadata:
+  main: dist/bootstrap/desktop.js
+
 # Build output goes to release/ (not dist/ which is tsc output).
 directories:
   output: release

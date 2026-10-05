@@ -24,28 +24,32 @@ canonical mapping. Tokens, not hex values, are the API.
 
 ### 1.1 Color
 
-Rebuilt for #180 to a warmer, Codex/ChatGPT-desktop-caliber neutral scale.
-`accent` was deliberately kept distinct from `green` (an earlier pass tried a
-green accent and it collided visually with the "verified" status color —
-priority and status must never share a hue).
+Rebuilt for #180 to a warmer, Codex/ChatGPT-desktop-caliber neutral scale;
+rebranded to a lavender accent (`accent` = `purple`). Purple carries the
+dev-tool convention (Stripe/Sentry/GitHub/Heroku) while `amber` keeps its
+exclusive "needs you" semantics — attention and interactivity stay
+hue-separated. `blue` was demoted to a supporting token (Medium/info rung of
+the severity ladder). `green`/`red` keep exclusive status semantics —
+priority and status must never share a hue.
 
-| Token             | Hex       | Use                                      |
-| ----------------- | --------- | ---------------------------------------- |
-| `bg`              | `#0b0b0c` | app background                           |
-| `surface`         | `#131315` | sidebar, chrome                          |
-| `panel`           | `#1c1c1f` | cards                                    |
-| `panel-raised`    | `#232327` | hovered/active card, popovers            |
-| `border`          | `#2d2d31` | hairlines only — never decorative boxes  |
-| `text`            | `#ececf1` | primary copy                             |
-| `muted`           | `#93939d` | metadata, timestamps, secondary copy     |
-| `accent`          | `#4f8dff` | links, focused items, primary buttons    |
-| `accent-contrast` | `#071022` | text/icons rendered on top of `accent`   |
-| `green`           | `#3fb984` | verified, connected, completed-ok        |
-| `amber`           | `#e3a94a` | approval required, parked, elevated risk |
-| `red`             | `#ef5959` | critical, failed, sandbox violation      |
-| `orange`          | `#e2814f` | degraded context, dirty worktree         |
-| `purple`          | `#a98af0` | digests, reviewed/accepted               |
-| `slate`           | `#7d7d87` | idle/stale — intentionally quiet         |
+| Token             | Hex       | Use                                        |
+| ----------------- | --------- | ------------------------------------------ |
+| `bg`              | `#0e0a16` | app background — violet-black              |
+| `surface`         | `#151022` | sidebar, chrome                            |
+| `panel`           | `#1d1730` | cards                                      |
+| `panel-raised`    | `#261e3f` | hovered/active card, popovers              |
+| `border`          | `#342b4e` | hairlines only — never decorative boxes    |
+| `text`            | `#eeecf5` | primary copy                               |
+| `muted`           | `#9b93b3` | metadata, timestamps, secondary copy       |
+| `accent`          | `#a98af0` | brand hue: primary buttons, focus, links   |
+| `accent-contrast` | `#1a1028` | text/icons rendered on top of `accent`     |
+| `green`           | `#3fb984` | verified, connected, completed-ok          |
+| `amber`           | `#e3a94a` | approval required, parked, elevated risk   |
+| `red`             | `#ef5959` | critical, failed, sandbox violation        |
+| `orange`          | `#e2814f` | degraded context, dirty worktree           |
+| `purple`          | `#a98af0` | digests, reviewed/accepted (= accent)      |
+| `slate`           | `#847d99` | idle/stale — intentionally quiet           |
+| `blue`            | `#4f8dff` | Medium/info severity — supporting hue only |
 
 Elevation/shape tokens introduced alongside the palette:
 

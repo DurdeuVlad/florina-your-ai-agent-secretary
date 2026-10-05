@@ -54,6 +54,7 @@ const ICONS = {
   'power-off': '⏻',
   'mic-on': '🎙',
   speaker: '🔊',
+  key: '🔑',
 };
 
 const TAG_CLASS = {
@@ -164,6 +165,7 @@ const TAG_CLASS = {
   SetupItem: 'setup-item',
   SetupItemName: 'setup-item-name',
   SetupItemHint: 'setup-item-hint',
+  SetupItemAction: 'setup-item-action',
   SetupActions: 'actions',
   SetupResumeRow: 'setup-resume',
 };

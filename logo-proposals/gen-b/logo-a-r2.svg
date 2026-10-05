@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Florina — Confluence r2 (app palette)</title>
+  <rect width="512" height="512" rx="110" fill="#1C1C1F"/>
+  <g fill="none" stroke="#ECECF1" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M244 108 V334"/>
+    <path d="M152 132 V176 L244 262"/>
+    <path d="M360 214 H308 L244 262"/>
+    <path d="M208 400 H316"/>
+  </g>
+  <rect x="218" y="334" width="52" height="52" rx="8" fill="#E3A94A"/>
+</svg>

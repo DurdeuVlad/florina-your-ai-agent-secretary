@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Florina mark — Filter Bloom</title>
+  <rect x="32" y="32" width="448" height="448" rx="104" fill="#38594B"/>
+  <g fill="#F2EEE6">
+    <rect x="184" y="200" width="144" height="36" rx="18"/>
+    <rect x="216" y="260" width="88" height="36" rx="18"/>
+    <rect x="242" y="308" width="28" height="84" rx="14"/>
+    <path d="M270 350 Q307 344 314 308 Q277 314 270 350 Z"/>
+  </g>
+  <rect x="152" y="140" width="208" height="36" rx="18" fill="#C65D3B"/>
+</svg>

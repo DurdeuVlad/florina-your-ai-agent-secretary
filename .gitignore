@@ -33,3 +33,6 @@ npm-debug.log*
 
 # Visual QA screenshots (issue #133)
 shots/
+
+# electron-builder output
+release/

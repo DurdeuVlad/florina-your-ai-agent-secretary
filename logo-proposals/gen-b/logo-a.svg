@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Florina — Confluence</title>
+  <rect width="512" height="512" rx="110" fill="#1F2B24"/>
+  <g fill="none" stroke="#F2EDE2" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M172 130 V196 L256 288"/>
+    <path d="M340 130 V196 L256 288"/>
+    <path d="M256 130 V340"/>
+  </g>
+  <rect x="232" y="346" width="48" height="48" rx="12" fill="#E0A43F"/>
+</svg>
