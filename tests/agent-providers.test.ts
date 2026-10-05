@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import {
   attachLocalAgentProviders,
   refreshSkippedProviders,
+  resolveProviderCommand,
 } from '../src/bootstrap/agent-providers.js';
 import type { ChildProcess } from 'node:child_process';
 import { AdapterRegistry } from '../src/adapters/outbound/agents/registry.js';
@@ -80,6 +81,19 @@ describe('attachLocalAgentProviders', () => {
     });
     expect(registry.has('copilot')).toBe(true);
     expect(result.attached.find((p) => p.id === 'copilot')?.command).toContain('copilot');
+    result.dispose();
+  });
+
+  it('opencode resolves on PATH and registers its ACP adapter (#304)', async () => {
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv({ PATH: fakePathDir('opencode') }),
+      platform: 'win32',
+      homeDir: tmp(),
+      localAppData: tmp(),
+    });
+    expect(registry.has('opencode')).toBe(true);
+    expect(result.attached.find((p) => p.id === 'opencode')?.command).toContain('opencode');
     result.dispose();
   });
 
@@ -182,7 +196,15 @@ describe('attachLocalAgentProviders', () => {
       codexSpawner: () => spawn(process.execPath, ['-e', '']),
     });
     expect(registry.list()).toEqual([]);
-    for (const id of ['claude-code', 'codex', 'devin', 'gemini', 'antigravity', 'copilot']) {
+    for (const id of [
+      'claude-code',
+      'codex',
+      'devin',
+      'gemini',
+      'antigravity',
+      'copilot',
+      'opencode',
+    ]) {
       expect(
         result.skipped.find((p) => p.id === id),
         `missing skip for ${id}`,
@@ -452,5 +474,54 @@ describe('refreshSkippedProviders — re-resolve not-found skips without restart
       platform: 'win32',
     });
     expect(next).toBe(first); // nothing retryable — same object, zero work
+  });
+});
+
+describe('resolveProviderCommand — sign-in beyond PATH (#304)', () => {
+  it('rewrites a provider recipe to the daemon-resolved path, quoting spaces', () => {
+    const attached = [{ id: 'copilot', command: 'C:/Users/A B/npm/copilot.cmd' }];
+    expect(resolveProviderCommand('copilot login', attached)).toBe(
+      '"C:/Users/A B/npm/copilot.cmd" login',
+    );
+    // A quoted leading token rewrites the same way.
+    expect(resolveProviderCommand('"copilot" login --with-token', attached)).toBe(
+      '"C:/Users/A B/npm/copilot.cmd" login --with-token',
+    );
+  });
+
+  it('passes through non-provider commands, unresolved providers, and PATH-identical hits', () => {
+    const attached = [{ id: 'opencode', command: '/usr/local/bin/opencode' }];
+    // Not a manifest executable — untouched.
+    expect(resolveProviderCommand('npm i -g opencode-ai', attached)).toBe('npm i -g opencode-ai');
+    // Provider not attached — nothing resolved to substitute.
+    expect(resolveProviderCommand('copilot login', attached)).toBe('copilot login');
+    // Already identical — no pointless quoting churn.
+    expect(
+      resolveProviderCommand('opencode auth login', [{ id: 'opencode', command: 'opencode' }]),
+    ).toBe('opencode auth login');
+    // Empty/blank input is safe.
+    expect(resolveProviderCommand('   ', attached)).toBe('   ');
+  });
+
+  it('never substitutes inside the args — only the leading executable', () => {
+    const attached = [{ id: 'gemini', command: '/opt/gemini' }];
+    expect(resolveProviderCommand('gemini --model gemini login', attached)).toBe(
+      '"/opt/gemini" --model gemini login',
+    );
+  });
+
+  it('declines to rewrite a resolved path carrying shell-significant characters', () => {
+    // cmd.exe expands %VAR% even inside quotes; POSIX sh expands $ and
+    // backticks — a mangled command line is worse than the honest
+    // PATH-preflight refusal the bare recipe will get.
+    for (const weird of [
+      '/opt/we"ird/opencode',
+      '/home/u$er/bin/opencode',
+      'C:\\tool%PATH%\\opencode',
+    ]) {
+      expect(
+        resolveProviderCommand('opencode auth login', [{ id: 'opencode', command: weird }]),
+      ).toBe('opencode auth login');
+    }
   });
 });

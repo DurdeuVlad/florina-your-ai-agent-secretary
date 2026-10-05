@@ -50,6 +50,7 @@ import {
   attachLocalAgentProviders,
   makeCredentialProbe,
   refreshSkippedProviders,
+  resolveProviderCommand,
   type LocalProviderAttachment,
 } from './agent-providers.js';
 import { ProviderReadiness } from '../core/application/use-cases/readiness/provider-readiness.js';
@@ -869,8 +870,14 @@ export class FlorinaDaemon extends EventEmitter {
         providerReadiness: this.providerReadiness ?? undefined,
         // signin-provider launches the provider's own login in a visible
         // terminal (issue #294) — the spawn stays at the composition
-        // boundary; core never touches child_process.
-        terminalLauncher: (command) => launchVisibleTerminal(command),
+        // boundary; core never touches child_process. The command's
+        // leading executable is rewritten to the daemon-resolved path
+        // when it matches a manifest executable: a provider found via a
+        // beyond-PATH candidate (agy under %LOCALAPPDATA%, opencode in
+        // ~/.opencode/bin, …) is invisible to the launcher's PATH
+        // preflight, which would otherwise wrongly refuse sign-in for an
+        // installed provider.
+        terminalLauncher: (command) => this.launchProviderCommand(command),
         platform: process.platform,
         // Chat-model readiness (issue #294): configured/key-source/state
         // computed live — a vault key stored mid-run is seen immediately.
@@ -1333,6 +1340,19 @@ export class FlorinaDaemon extends EventEmitter {
         this.providerRefresh = null;
       });
     return this.providerRefresh;
+  }
+
+  /**
+   * Launch a sign-in recipe's command in a visible terminal. When the
+   * command's leading executable is a manifest provider executable, the
+   * daemon's own resolved path is substituted — a provider attached via
+   * a beyond-PATH candidate is invisible to `where`/`which`, so a bare
+   * command would launch a terminal that can't find the binary (or get
+   * refused outright by the launcher's PATH preflight).
+   */
+  private async launchProviderCommand(command: string): Promise<{ ok: boolean; detail: string }> {
+    const attached = (await this.refreshLocalProviders())?.attached ?? [];
+    return launchVisibleTerminal(resolveProviderCommand(command, attached));
   }
 }
 
