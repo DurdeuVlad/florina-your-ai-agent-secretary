@@ -254,7 +254,7 @@ describe('provider manifest — one entry is sufficient (the #300 contract)', ()
     });
     expect(result.attached).toEqual([]);
     expect(result.skipped).toEqual([
-      { id: 'testprovider', reason: '`node` CLI not found on PATH' },
+      { id: 'testprovider', reason: '`node` CLI not found on PATH', kind: 'not-found' },
     ]);
     result.dispose();
   });

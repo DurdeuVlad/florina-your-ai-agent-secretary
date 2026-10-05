@@ -1573,10 +1573,16 @@ export interface CommandApiDeps {
    * a daemon built without provider attachment); absent dep → the query
    * reports an empty list rather than fabricating readiness.
    */
-  readonly providerAttachment?: () => {
-    readonly attached: readonly { id: string; detail?: string }[];
-    readonly skipped: readonly { id: string; reason: string }[];
-  } | null;
+  readonly providerAttachment?: () =>
+    | {
+        readonly attached: readonly { id: string; detail?: string }[];
+        readonly skipped: readonly { id: string; reason: string }[];
+      }
+    | Promise<{
+        readonly attached: readonly { id: string; detail?: string }[];
+        readonly skipped: readonly { id: string; reason: string }[];
+      } | null>
+    | null;
   /**
    * Provider auth-readiness tracker (issue #294). When wired,
    * `query-providers` rows carry `auth`/`fix` and dispatch failures are
@@ -2619,7 +2625,7 @@ export class CommandApi {
    * sign-in; `unknown` says so honestly.
    */
   private async handleQueryProviders(): Promise<ProvidersResponse> {
-    const attachment = this.providerAttachment?.();
+    const attachment = await this.providerAttachment?.();
     // The chat-model check is best-effort: a failing vault read must
     // never take provider facts down with it.
     let chatModel: ChatModelStatusView | undefined;
@@ -2699,7 +2705,7 @@ export class CommandApi {
     const providerId = cmd.providerId.trim();
     // A sign-in command can't run when the provider's binary isn't
     // installed — short-circuit before the recipe even resolves.
-    const skipped = this.providerAttachment?.()?.skipped.some((p) => p.id === providerId);
+    const skipped = (await this.providerAttachment?.())?.skipped.some((p) => p.id === providerId);
     if (skipped === true) {
       // When a verified installer exists on this platform, name the
       // explicit-consent verb instead of a bare "go read the docs".
@@ -2838,7 +2844,7 @@ export class CommandApi {
     }
     // Already installed → installing again is at best a no-op; point at
     // the sign-in verb which is what the user actually wants next.
-    if (this.providerAttachment?.()?.attached.some((p) => p.id === providerId) === true) {
+    if ((await this.providerAttachment?.())?.attached.some((p) => p.id === providerId) === true) {
       return {
         ok: false,
         providerId,
@@ -2879,13 +2885,15 @@ export class CommandApi {
       ok: true,
       providerId,
       launched: launched.ok,
-      // Provider attachment is a startup snapshot — ANY completed
-      // install stays invisible to this daemon until restart. Say so on
-      // every success instead of implying an immediate re-probe wins.
+      // The next query-providers re-resolves 'not-found' skips live
+      // (issue #301) — `florina status` picks the install up without a
+      // restart. Restart remains the honest fallback for PATH entries
+      // the daemon's stale env can't see and no candidate covers.
       detail: launched.ok
-        ? `${installer.detail}. When it finishes, restart florina ` +
-          `(\`florina stop\`, then \`florina start\`) so it sees the new command, ` +
-          `then run \`florina auth ${providerId}\``
+        ? `${installer.detail}. When it finishes, run \`florina status\` — ` +
+          `florina picks up the new command on its own. Then run ` +
+          `\`florina auth ${providerId}\`. If it still shows as missing, ` +
+          `restart florina (\`florina stop\`, then \`florina start\`)`
         : launched.detail,
     };
   }

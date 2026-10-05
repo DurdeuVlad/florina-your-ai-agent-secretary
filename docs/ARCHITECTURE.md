@@ -136,7 +136,7 @@ stream-json, not Tier E scraping.
 
 Everything Florina knows about a provider lives in **one manifest entry** in
 `src/core/application/use-cases/readiness/provider-manifests.ts`
-(`PROVIDER_MANIFESTS`): id (= adapter id), display name, `docsUrl` audit trail,
+(`PROVIDER_MANIFESTS`): id (= adapter id), `docsUrl` audit trail,
 `FLORINA_*_CMD` env override, executable name, beyond-PATH candidates,
 transport, not-found wording, credential evidence, sign-in recipe, and
 per-platform installers. From that one entry the code derives:
@@ -167,6 +167,15 @@ Safety rules for manifest entries: installers come only from the provider's
 instructions, never a guessed command); sign-in recipes run the provider's own
 command in a _visible_ terminal; credential evidence names files / env vars /
 keyring targets for existence probes — nothing ever reads a secret value.
+
+Attachment is not a once-at-startup snapshot (issue #301): every
+`query-providers` call re-resolves providers previously skipped `not-found`
+via `refreshSkippedProviders` — concurrent queries share one in-flight
+refresh, already-registered ids are never re-attached, and a refresh-spawned
+app-server child composes into the same dispose. A CLI installed mid-run
+appears on the next `florina status`; restart remains only for PATH entries
+the daemon's stale env can't see and no manifest candidate covers (why agy's
+installer dir is also a `win32` candidate).
 
 ## Flow
 
