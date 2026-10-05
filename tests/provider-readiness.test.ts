@@ -30,6 +30,7 @@ import {
   CLAUDE_HOOKS_ADAPTER_ID,
   CODEX_ADAPTER_ID,
 } from '../src/adapters/outbound/agents/index.js';
+import { providerManifestIds } from '../src/core/application/use-cases/readiness/provider-manifests.js';
 import { makeCredentialProbe } from '../src/bootstrap/agent-providers.js';
 import { AttentionInbox } from '../src/attention/attention-inbox.js';
 import { AttentionAggregator } from '../src/attention/attention-aggregator.js';
@@ -331,17 +332,65 @@ describe('ProviderReadiness (#294)', () => {
     }
     // No installer for 'chat-model' — the model needs a key, not a CLI.
     expect(providerInstaller('chat-model', 'win32')).toBeNull();
-    // npm installs resolve on all three platforms; script installers are
-    // win32-verified only — unverified platforms return null, never a guess.
+    // npm installs resolve on all three platforms; the script installers
+    // are docs-verified per platform (#302) — `curl | bash` on unix,
+    // powershell on Windows.
     for (const platform of ['win32', 'darwin', 'linux'] as const) {
       expect(providerInstaller('codex', platform)?.command).toBe('npm i -g @openai/codex');
     }
-    expect(providerInstaller('devin', 'linux')).toBeNull();
-    expect(providerInstaller('devin', 'darwin')).toBeNull();
+    expect(providerInstaller('devin', 'linux')?.command).toBe(
+      'curl -fsSL https://cli.devin.ai/install.sh | bash',
+    );
+    expect(providerInstaller('devin', 'darwin')?.command).toBe(
+      'curl -fsSL https://cli.devin.ai/install.sh | bash',
+    );
     expect(providerInstaller('devin', 'win32')?.command).toContain('static.devin.ai');
     expect(providerInstaller('antigravity', 'win32')?.command).toContain('antigravity.google');
+    expect(providerInstaller('antigravity', 'darwin')?.command).toBe(
+      'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    );
+    expect(providerInstaller('antigravity', 'linux')?.command).toBe(
+      'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    );
     // An id nobody knows gets nothing — no orphan recipes, no guesses.
     expect(providerInstaller('not-a-provider', 'win32')).toBeNull();
+  });
+
+  it('the full provider×platform installer matrix is pinned — no cell drops silently (#302)', () => {
+    // Snapshot every cell: a future edit that changes or drops a
+    // platform coverage fails loudly here. `null` = deliberate manual-
+    // instructions cell; a string = a docs-verified command.
+    const matrix = Object.fromEntries(
+      providerManifestIds().map((id) => [
+        id,
+        (['win32', 'darwin', 'linux'] as const).map(
+          (p) => providerInstaller(id, p)?.command ?? null,
+        ),
+      ]),
+    );
+    expect(matrix).toEqual({
+      'claude-code': [
+        'npm i -g @anthropic-ai/claude-code',
+        'npm i -g @anthropic-ai/claude-code',
+        'npm i -g @anthropic-ai/claude-code',
+      ],
+      codex: ['npm i -g @openai/codex', 'npm i -g @openai/codex', 'npm i -g @openai/codex'],
+      gemini: [
+        'npm i -g @google/gemini-cli',
+        'npm i -g @google/gemini-cli',
+        'npm i -g @google/gemini-cli',
+      ],
+      devin: [
+        'powershell -NoProfile -Command "irm https://static.devin.ai/cli/setup.ps1 | iex"',
+        'curl -fsSL https://cli.devin.ai/install.sh | bash',
+        'curl -fsSL https://cli.devin.ai/install.sh | bash',
+      ],
+      antigravity: [
+        'powershell -NoProfile -Command "irm https://antigravity.google/cli/install.ps1 | iex"',
+        'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+        'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+      ],
+    });
   });
 
   it('sanitize redacts non-sk- credential shapes and control chars', () => {
@@ -529,12 +578,80 @@ describe('makeCredentialProbe (#294)', () => {
     expect(probe('claude-code')).toBe('present');
   });
 
-  it('reports unknown for providers with no usable credential evidence on this platform', () => {
-    // antigravity's only known evidence is the OS keyring — on Linux we
-    // don't probe libsecret, so the honest verdict is 'unknown', not a
-    // false "not signed in". (On win32/darwin the keyring IS consulted.)
+  it('reports unknown for providers whose primary store is unprobeable on this platform', () => {
+    // agy's OAuth token lives in Linux Secret Service over D-Bus — no
+    // generic existence probe. A file/env miss must be honest 'unknown',
+    // never a false "not signed in". (On win32/darwin the keyring IS
+    // consulted.)
     const probe = makeCredentialProbe({ env: {}, homeDir: home, platform: 'linux' });
     expect(probe('antigravity')).toBe('unknown');
+  });
+
+  it('agy on linux: the SSH/headless token file is positive evidence even with the keyring unprobeable', () => {
+    // ~/.gemini/antigravity-cli/antigravity-oauth-token is agy's
+    // documented file fallback (SSH sessions, GEMINI_FORCE_FILE_STORAGE).
+    const probe = makeCredentialProbe({ env: {}, homeDir: home, platform: 'linux' });
+    fs.mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'),
+      '{}',
+    );
+    expect(probe('antigravity')).toBe('present');
+  });
+
+  it('devin resolves credentials.toml under $XDG_DATA_HOME (default ~/.local/share)', () => {
+    // docs.devin.ai/cli/enterprise/devin-auth — the same XDG path on
+    // macOS and Linux; default home-relative probe must NOT claim a
+    // custom-XDG user is unsigned.
+    const xdg = path.join(home, 'custom-xdg');
+    fs.mkdirSync(path.join(xdg, 'devin'), { recursive: true });
+    fs.writeFileSync(path.join(xdg, 'devin', 'credentials.toml'), '');
+    const probe = makeCredentialProbe({
+      env: { XDG_DATA_HOME: xdg },
+      homeDir: home,
+      platform: 'linux',
+    });
+    expect(probe('devin')).toBe('present');
+    // And the conventional default is probed when XDG_DATA_HOME is unset.
+    fs.mkdirSync(path.join(home, '.local', 'share', 'devin'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.local', 'share', 'devin', 'credentials.toml'), '');
+    expect(makeCredentialProbe({ env: {}, homeDir: home, platform: 'darwin' })('devin')).toBe(
+      'present',
+    );
+  });
+
+  it('darwin keychain probe passes -a <account> when the spec names one (agy)', () => {
+    // agy's item is svce=gemini acct=antigravity — probing `-s gemini`
+    // alone would over-report any other gemini-keyed item.
+    const calls: string[][] = [];
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'darwin',
+      spawnFn: ((_cmd: string, args: string[]) => {
+        calls.push(args);
+        return { status: 44 };
+      }) as never,
+    });
+    expect(probe('antigravity')).toBe('absent');
+    expect(calls[0]).toEqual(['find-generic-password', '-s', 'gemini', '-a', 'antigravity']);
+  });
+
+  it('darwin keychain probe omits -a for specs without an account (claude)', () => {
+    // A regression adding `-a` unconditionally would query account ''
+    // and silently break every service-only spec.
+    const calls: string[][] = [];
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'darwin',
+      spawnFn: ((_cmd: string, args: string[]) => {
+        calls.push(args);
+        return { status: 44 };
+      }) as never,
+    });
+    expect(probe('claude-code')).toBe('absent');
+    expect(calls[0]).toEqual(['find-generic-password', '-s', 'Claude Code-credentials']);
   });
 
   it('devin: credentials.toml counts as evidence (real path per `devin auth status`)', () => {
@@ -976,10 +1093,12 @@ describe('CommandApi readiness surfaces (#294)', () => {
     expect(res.detail).toContain('restart florina');
     expect(res.detail).toContain('florina auth codex');
 
-    // devin has NO verified installer on linux — never a guessed command.
+    // devin's script installer has explicit win32/darwin/linux cells and
+    // NO `default` — on freebsd there is nothing verified, so the user
+    // gets manual instructions, never a guessed command.
     const manual = await new CommandApi({
       ...fixtureDeps,
-      platform: 'linux',
+      platform: 'freebsd',
       providerAttachment: () => ({
         attached: [],
         skipped: [{ id: 'devin', reason: 'not found' }],
@@ -1053,10 +1172,11 @@ describe('CommandApi readiness surfaces (#294)', () => {
     expect(byId['antigravity']?.installable).toBe(true); // verified win32 installer
     expect(byId['claude-code']?.installable).toBeUndefined(); // attached rows never carry it
 
-    // Same skipped row on a platform with no verified devin installer:
+    // Same skipped row on a platform with no verified devin installer —
+    // the script cells are explicit per-OS, so freebsd has nothing:
     const linux = new CommandApi({
       ...fixtureDeps,
-      platform: 'linux',
+      platform: 'freebsd',
       providerAttachment: () => ({
         attached: [],
         skipped: [{ id: 'devin', reason: 'not found' }],
