@@ -555,9 +555,9 @@ export class FlorinaDaemon extends EventEmitter {
       // the SessionManager is the sole event publisher (no duplicates).
       this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter());
 
-      // Local provider attachment: probe installed provider CLIs (claude,
-      // codex, devin, gemini, agy) and register their real adapters so
-      // tasks can route to them. Skipped providers are logged to the
+      // Local provider attachment: probe the provider CLIs declared in
+      // PROVIDER_MANIFESTS and register their real adapters so tasks
+      // can route to them. Skipped providers are logged to the
       // journal-free stderr — daemon stdio is detached; the fleet view
       // (adapterRegistry.list()) is the user-visible surface.
       this.acceptingProviderRefresh = true;

@@ -69,6 +69,7 @@ describe('provider manifest — id integrity', () => {
       'gemini',
       'devin',
       AGY_ADAPTER_ID,
+      'copilot',
     ].sort();
     expect([...providerManifestIds()].sort()).toEqual(adapterIds);
   });
@@ -179,9 +180,9 @@ describe('provider manifest — safety invariants', () => {
       'files',
       'xdgDataFiles',
       'envVars',
-      'darwinKeychain',
-      'darwinKeychainAccount',
-      'winCredTarget',
+      'darwinKeychains',
+      'winCredTargets',
+      'winCredTargetPatterns',
       'unprobeablePlatforms',
     ]);
     for (const m of PROVIDER_MANIFESTS) {
@@ -192,8 +193,17 @@ describe('provider manifest — safety invariants', () => {
       for (const f of ev.files) expect(typeof f).toBe('string');
       for (const v of ev.envVars) expect(v).toMatch(/^[A-Z][A-Z0-9_]+$/);
       // A keyring target is a name, never a secret value — bounded length.
-      for (const target of [ev.darwinKeychain, ev.winCredTarget]) {
-        if (target !== undefined) expect(target.length).toBeLessThan(128);
+      for (const target of ev.winCredTargets ?? []) {
+        expect(target.length).toBeLessThan(128);
+      }
+      for (const item of ev.darwinKeychains ?? []) {
+        expect(item.service.length).toBeLessThan(128);
+        expect((item.account ?? '').length).toBeLessThan(128);
+      }
+      // Patterns must be real RegExps — a string/regex-like object
+      // would throw (or silently match nothing) inside the probe.
+      for (const pattern of ev.winCredTargetPatterns ?? []) {
+        expect(pattern).toBeInstanceOf(RegExp);
       }
     }
   });
@@ -427,6 +437,12 @@ describe('provider manifest — the real registry is load-bearing', () => {
         true,
       );
     }
+  });
+
+  it('copilot declares the real ACP flag — a typo’d args list would ship green otherwise (#303)', () => {
+    // `copilot --acp` (stdio ACP server) was verified live — the args
+    // reach `new AcpAdapter({args})` verbatim via the transport arm.
+    expect(providerManifest('copilot')?.transport).toEqual({ kind: 'acp', args: ['--acp'] });
   });
 
   it('manifest files list sanity — referenced evidence paths look like real paths', () => {

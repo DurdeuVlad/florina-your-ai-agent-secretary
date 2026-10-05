@@ -70,6 +70,19 @@ describe('attachLocalAgentProviders', () => {
     expect(result.attached.find((p) => p.id === 'devin')?.command).toBe(devinExe);
   });
 
+  it('copilot resolves on PATH and registers its ACP adapter (#303)', async () => {
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv({ PATH: fakePathDir('copilot') }),
+      platform: 'win32',
+      homeDir: tmp(),
+      localAppData: tmp(),
+    });
+    expect(registry.has('copilot')).toBe(true);
+    expect(result.attached.find((p) => p.id === 'copilot')?.command).toContain('copilot');
+    result.dispose();
+  });
+
   it('spawns a codex app-server and registers codex against its endpoint', async () => {
     const dir = fakePathDir('codex');
     const registry = new AdapterRegistry();
@@ -169,7 +182,7 @@ describe('attachLocalAgentProviders', () => {
       codexSpawner: () => spawn(process.execPath, ['-e', '']),
     });
     expect(registry.list()).toEqual([]);
-    for (const id of ['claude-code', 'codex', 'devin', 'gemini', 'antigravity']) {
+    for (const id of ['claude-code', 'codex', 'devin', 'gemini', 'antigravity', 'copilot']) {
       expect(
         result.skipped.find((p) => p.id === id),
         `missing skip for ${id}`,
