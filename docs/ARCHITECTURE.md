@@ -120,17 +120,53 @@ temporary compatibility surfaces, not the public API.
 
 ## Provider Surfaces
 
-| Provider          | Adapter surface                                          | Tier  | Quota signal                                                                            | Session resume                  |
-| ----------------- | -------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------- | ------------------------------- |
-| Codex             | `codex app-server` JSON-RPC                              | A     | `account/rateLimits/read` → `usedPercent`, `resetsAt` (5h + weekly)                     | thread resume                   |
-| Claude Code       | CLI + lifecycle hooks / Agent SDK                        | B     | statusline `rate_limits` (5h + 7d `resets_at`); `anthropic-ratelimit-unified-*` headers | `--resume`                      |
-| Devin CLI         | `devin acp` (ACP/JSON-RPC stdio); `-p` print mode; hooks | C     | none documented → reactive                                                              | `-c` / `-r` / `/fork`           |
-| Gemini CLI        | `gemini --acp` (ACP); `-p --output-format stream-json`   | C / D | none → 429 detection + session-file token sums                                          | `--continue`                    |
-| Antigravity `agy` | `agy -p --output-format stream-json`                     | D     | none → reactive                                                                         | `--continue` / `--conversation` |
+| Provider          | Adapter surface                                                     | Tier  | Quota signal                                                                            | Session resume                  |
+| ----------------- | ------------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------- | ------------------------------- |
+| Codex             | `codex app-server` JSON-RPC                                         | A     | `account/rateLimits/read` → `usedPercent`, `resetsAt` (5h + weekly)                     | thread resume                   |
+| Claude Code       | CLI + lifecycle hooks / Agent SDK                                   | B     | statusline `rate_limits` (5h + 7d `resets_at`); `anthropic-ratelimit-unified-*` headers | `--resume`                      |
+| Devin CLI         | `devin acp` (ACP/JSON-RPC stdio); `-p` print mode; hooks            | C     | none documented → reactive                                                              | `-c` / `-r` / `/fork`           |
+| Gemini CLI        | `gemini --experimental-acp` (ACP); `-p --output-format stream-json` | C / D | none → 429 detection + session-file token sums                                          | `--continue`                    |
+| Antigravity `agy` | `agy -p --output-format stream-json`                                | D     | none → reactive                                                                         | `--continue` / `--conversation` |
 
 Non-TTY caveat for `agy`: stdout is gated on `isatty()` (upstream bug) — a PTY
 bridge is required for headless capture. That is an I/O shim over structured
 stream-json, not Tier E scraping.
+
+### Adding a provider (issue #300)
+
+Everything Florina knows about a provider lives in **one manifest entry** in
+`src/core/application/use-cases/readiness/provider-manifests.ts`
+(`PROVIDER_MANIFESTS`): id (= adapter id), display name, `docsUrl` audit trail,
+`FLORINA_*_CMD` env override, executable name, beyond-PATH candidates,
+transport, not-found wording, credential evidence, sign-in recipe, and
+per-platform installers. From that one entry the code derives:
+
+- **attachment** — `attachLocalAgentProviders` iterates manifests, resolves the
+  executable (env override → PATH → candidate specs), and dispatches on
+  `transport.kind` to the right adapter (hooks / acp / app-server / stream-json);
+- **readiness** — `FIXES`, `INSTALLERS`, and `CREDENTIAL_EVIDENCE` are all
+  `providerTables(PROVIDER_MANIFESTS)` derivations, so sign-in recipes,
+  installers, and credential probes can never drift from the provider list.
+
+So: **to add a provider, write one manifest entry.** Only when it needs a
+transport kind that doesn't exist yet do you also add an arm to the
+attachment switch plus its adapter class. `tests/provider-manifest.test.ts`
+enforces the contract — manifest ids ≡ adapter ids, every manifest carries a
+`docsUrl`, credential probes are existence-metadata only. Two hardcoded id
+lists deliberately trip when a provider is added (`adapterIds` in
+provider-manifest.test.ts, the expected list in provider-readiness.test.ts) —
+updating them is part of the one-entry ceremony, not a second edit site.
+
+One honesty note on transports: `kind` maps 1:1 to an adapter class today —
+reusing `stream-json` for a non-agy CLI would silently spawn agy's invocation.
+A provider on a shared kind must speak that adapter's exact protocol; extend
+the variant or add a kind otherwise (see `ProviderTransport`'s doc comment).
+
+Safety rules for manifest entries: installers come only from the provider's
+**official** docs (cite `docsUrl`; `null` on unverified platforms → manual
+instructions, never a guessed command); sign-in recipes run the provider's own
+command in a _visible_ terminal; credential evidence names files / env vars /
+keyring targets for existence probes — nothing ever reads a secret value.
 
 ## Flow
 

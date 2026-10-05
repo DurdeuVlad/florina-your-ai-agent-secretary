@@ -37,6 +37,11 @@
  */
 import type { SupervisorEvent } from '../../../domain/events.js';
 import type { EventSubscriberPort } from '../../ports/outbound/event-stream.js';
+import {
+  PROVIDER_MANIFESTS,
+  perPlatform,
+  providerTables,
+} from './provider-manifests.js';
 
 /* ------------------------------------------------------------------ *
  * Types
@@ -264,54 +269,31 @@ export function missingEnvVarName(detail: string): string | undefined {
  * ------------------------------------------------------------------ */
 
 /**
- * Provider-native fix recipes. `run-command` entries are launched in a
+ * Provider-native fix recipes — derived from the provider manifests
+ * (issue #300): each manifest's `signIn` IS the recipe, so adding a
+ * provider needs no edit here. `run-command` entries are launched in a
  * visible terminal by the `florina auth <provider>` CLI verb and the
  * desktop `setup:signin:<provider>` verb; `store-key` points at the
  * secrets vault surface (issue #292) rather than inventing a new store.
  */
-const FIXES: Readonly<Record<string, ProviderFix>> = {
-  'claude-code': {
-    kind: 'run-command',
-    label: 'Sign in to Claude Code',
-    command: 'claude',
-    detail: 'opens a terminal running Claude’s own sign-in — follow the prompts there',
+// Prototype-free: `providerFixFor('toString')` must be a miss, not
+// Object.prototype. The derived fixes land in a null-prototype record.
+const FIXES: Readonly<Record<string, ProviderFix>> = Object.assign(
+  Object.create(null),
+  providerTables(PROVIDER_MANIFESTS).fixes,
+  {
+    'chat-model': {
+      kind: 'store-key',
+      label: 'Add the model API key',
+      // `keys set openai-api-key` derives OPENAI_API_KEY — the name the
+      // chat-model credential resolver actually matches (issue #294
+      // review: the earlier text stored a key nothing resolved).
+      detail:
+        'store the key in Florina’s key vault — run `florina keys set openai-api-key`, ' +
+        'or use Settings → API keys in the app',
+    } satisfies ProviderFix,
   },
-  codex: {
-    kind: 'run-command',
-    label: 'Sign in to Codex',
-    command: 'codex login',
-    detail: 'opens a terminal running `codex login` — follow the prompts there',
-  },
-  gemini: {
-    kind: 'run-command',
-    label: 'Sign in to Gemini',
-    command: 'gemini',
-    detail:
-      'opens a terminal running `gemini` — sign in there; Gemini also needs GOOGLE_CLOUD_PROJECT set for some accounts',
-  },
-  devin: {
-    kind: 'run-command',
-    label: 'Sign in to Devin',
-    command: 'devin auth login',
-    detail: 'opens a terminal running `devin auth login` — follow the prompts there',
-  },
-  antigravity: {
-    kind: 'run-command',
-    label: 'Sign in to Antigravity',
-    command: 'agy',
-    detail: 'opens a terminal running `agy` — sign in there',
-  },
-  'chat-model': {
-    kind: 'store-key',
-    label: 'Add the model API key',
-    // `keys set openai-api-key` derives OPENAI_API_KEY — the name the
-    // chat-model credential resolver actually matches (issue #294
-    // review: the earlier text stored a key nothing resolved).
-    detail:
-      'store the key in Florina’s key vault — run `florina keys set openai-api-key`, ' +
-      'or use Settings → API keys in the app',
-  },
-};
+);
 
 /* ------------------------------------------------------------------ *
  * Installer table — verified official install commands only
@@ -334,97 +316,30 @@ export interface ProviderInstaller {
   readonly detail: string;
 }
 
-const INSTALLERS: Readonly<
-  Record<string, Readonly<Partial<Record<string, ProviderInstaller | null>>>>
-> = {
-  'claude-code': {
-    win32: {
-      label: 'Install Claude Code',
-      command: 'npm i -g @anthropic-ai/claude-code',
-      detail: 'opens a terminal running the official Claude Code install (npm)',
-    },
-    darwin: {
-      label: 'Install Claude Code',
-      command: 'npm i -g @anthropic-ai/claude-code',
-      detail: 'opens a terminal running the official Claude Code install (npm)',
-    },
-    linux: {
-      label: 'Install Claude Code',
-      command: 'npm i -g @anthropic-ai/claude-code',
-      detail: 'opens a terminal running the official Claude Code install (npm)',
-    },
-  },
-  codex: {
-    win32: {
-      label: 'Install Codex',
-      command: 'npm i -g @openai/codex',
-      detail: 'opens a terminal running the official Codex install (npm)',
-    },
-    darwin: {
-      label: 'Install Codex',
-      command: 'npm i -g @openai/codex',
-      detail: 'opens a terminal running the official Codex install (npm)',
-    },
-    linux: {
-      label: 'Install Codex',
-      command: 'npm i -g @openai/codex',
-      detail: 'opens a terminal running the official Codex install (npm)',
-    },
-  },
-  gemini: {
-    win32: {
-      label: 'Install Gemini CLI',
-      command: 'npm i -g @google/gemini-cli',
-      detail: 'opens a terminal running the official Gemini CLI install (npm)',
-    },
-    darwin: {
-      label: 'Install Gemini CLI',
-      command: 'npm i -g @google/gemini-cli',
-      detail: 'opens a terminal running the official Gemini CLI install (npm)',
-    },
-    linux: {
-      label: 'Install Gemini CLI',
-      command: 'npm i -g @google/gemini-cli',
-      detail: 'opens a terminal running the official Gemini CLI install (npm)',
-    },
-  },
-  devin: {
-    // Official Windows installer (docs.devin.ai/cli — verified live):
-    // a PowerShell script that downloads the CLI AND auto-launches its
-    // login prompt at the end — install and sign-in are one journey.
-    win32: {
-      label: 'Install the Devin CLI',
-      command: 'powershell -NoProfile -Command "irm https://static.devin.ai/cli/setup.ps1 | iex"',
-      detail:
-        'opens a terminal running Devin’s official installer — it will also walk you through sign-in when it finishes',
-    },
-    // macOS/Linux: docs show a curl installer but we haven't verified
-    // the exact URL on this codebase's supported set — manual guidance.
-    darwin: null,
-    linux: null,
-  },
-  antigravity: {
-    // Official Windows installer (antigravity.google/docs/cli — verified
-    // live): registers %LOCALAPPDATA%\agy\bin on the user PATH.
-    win32: {
-      label: 'Install the Antigravity CLI',
-      command:
-        'powershell -NoProfile -Command "irm https://antigravity.google/cli/install.ps1 | iex"',
-      detail: 'opens a terminal running Antigravity’s official installer',
-    },
-    darwin: null,
-    linux: null,
-  },
-};
+/**
+ * The installer matrix — derived from the provider manifests (issue
+ * #300). Every concrete entry was verified against the provider's
+ * official install docs (the manifest's `docsUrl`) or exercised live;
+ * `null` platform cells mean "no verified command → manual
+ * instructions", never a guessed one.
+ */
+const INSTALLERS = providerTables(PROVIDER_MANIFESTS).installers;
 
 /** The verified installer for a provider on this platform, or null. */
 export function providerInstaller(providerId: string, platform: string): ProviderInstaller | null {
-  return INSTALLERS[providerId]?.[platform] ?? null;
+  return perPlatform(INSTALLERS[providerId], platform) ?? null;
 }
 
-/** Provider ids that carry a verified installer recipe (INSTALLERS key set). */
+/**
+ * Provider ids carrying at least one verified installer recipe — a
+ * manifest whose every platform cell is null (or absent) doesn't count:
+ * naming `florina install <id>` for it would promise an installer that
+ * doesn't exist.
+ */
 export function providerInstallerIds(): readonly string[] {
-  return Object.keys(INSTALLERS);
+  return PROVIDER_MANIFESTS.filter((m) =>
+    Object.values(m.installers).some((i) => i !== null && i !== undefined),
+  ).map((m) => m.id);
 }
 
 /* ------------------------------------------------------------------ *
