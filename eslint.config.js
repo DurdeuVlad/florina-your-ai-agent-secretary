@@ -46,7 +46,14 @@ export default [
     },
   },
   {
-    files: ['eslint.config.js', 'scripts/**/*.mjs', 'scripts/**/*.cjs'],
+    files: [
+      'eslint.config.js',
+      'scripts/**/*.mjs',
+      'scripts/**/*.cjs',
+      // One-off Node tooling (logo generation, captures) — Node APIs are
+      // the whole point of these scripts (#284 CI lint failure).
+      'logo-proposals/**/*.cjs',
+    ],
     languageOptions: {
       globals: {
         ...globals.node,
@@ -63,7 +70,7 @@ export default [
     },
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**'],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'release/**'],
   },
   prettier,
 ];
