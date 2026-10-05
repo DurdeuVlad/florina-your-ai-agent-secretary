@@ -37,11 +37,7 @@
  */
 import type { SupervisorEvent } from '../../../domain/events.js';
 import type { EventSubscriberPort } from '../../ports/outbound/event-stream.js';
-import {
-  PROVIDER_MANIFESTS,
-  perPlatform,
-  providerTables,
-} from './provider-manifests.js';
+import { PROVIDER_MANIFESTS, perPlatform, providerTables } from './provider-manifests.js';
 
 /* ------------------------------------------------------------------ *
  * Types
@@ -122,12 +118,17 @@ const AUTH_PATTERNS: readonly RegExp[] = [
   /(invalid|incorrect|expired|revoked)[ _-]?(or expired )?(api[ _]?key|grant|token|client|credential|oauth)|oauth.{0,30}(invalid|expired|revoked)|access_denied|unauthorized_client/i,
   /please (run|use) \/?login|please log ?in|please sign ?in|not logged in|sign in to continue/i,
   /token (has )?expired|expired (api ?key|token|credential|oauth|session)/i,
+  // litellm's auth family — aider surfaces provider rejections as
+  // `litellm.AuthenticationError`/`PermissionDeniedError` (#306).
+  /litellm\.[\w.]*(authentication|permissiondenied)[\w]*error|api_key client option must be set|not able to authenticate/i,
 ];
 
 /** Missing local configuration (distinct from a rejected credential). */
 const CONFIG_PATTERNS: readonly RegExp[] = [
   /GOOGLE_CLOUD_PROJECT|required (env|environment) variable/i,
   /no project (id )?(configured|found|set)/i,
+  // litellm's unknown-model/config family (#306).
+  /litellm\.[\w.]*notfounderror/i,
 ];
 
 /** Hard connection-failure tokens — checked before auth so a port like
@@ -152,6 +153,9 @@ const NETWORK_PATTERNS: readonly RegExp[] = [
 const QUOTA_PATTERNS: readonly RegExp[] = [
   /\b429\b|insufficient_quota/i,
   /rate.?limit|quota (is )?(exceeded|exhausted)|exceeded your (current )?quota|usage limit|billing/i,
+  // litellm quota/budget family — RateLimitError matches rate.?limit
+  // already; budget exhaustion is quota-class too (#306).
+  /litellm\.[\w.]*budgetexceeded|contextwindowexceeded/i,
 ];
 
 /** The executable itself wasn't there — install problem, not auth. */

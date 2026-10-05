@@ -1071,6 +1071,7 @@ describe('src/adapters/outbound tree', () => {
     'agents/claude-mapper.ts',
     'agents/acp-adapter.ts',
     'agents/agy-adapter.ts',
+    'agents/print-run-adapter.ts',
     'agents/stub-adapter.ts',
     'agents/index.ts',
     // Quota observation readers
@@ -1258,6 +1259,7 @@ describe('migrated outbound compatibility facades', () => {
     'src/adapters/claude-mapper.ts',
     'src/adapters/acp-adapter.ts',
     'src/adapters/agy-adapter.ts',
+    'src/adapters/print-run-adapter.ts',
     'src/adapters/stub-adapter.ts',
     'src/adapters/quota-readers.ts',
     // Preference + credential + model facades

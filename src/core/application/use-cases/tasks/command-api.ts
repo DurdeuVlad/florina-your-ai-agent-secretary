@@ -2133,7 +2133,7 @@ export class CommandApi {
       taskId: cmd.taskId,
       sessionId,
       agentId: cmd.agentId,
-      adapterFidelityTier: cmd.sessionConfig.adapterFidelityTier ?? 'B',
+      adapterFidelityTier: cmd.sessionConfig.adapterFidelityTier ?? adapterTier,
       objective: task.objective,
       workingDir: cmd.sessionConfig.workingDir,
       model: cmd.sessionConfig.model,

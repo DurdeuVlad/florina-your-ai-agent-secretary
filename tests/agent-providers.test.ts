@@ -130,6 +130,38 @@ describe('attachLocalAgentProviders', () => {
     result.dispose();
   });
 
+  it('aider resolves on PATH and registers its print-run adapter (#306)', async () => {
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv({ PATH: fakePathDir('aider') }),
+      platform: 'win32',
+      homeDir: tmp(),
+      localAppData: tmp(),
+    });
+    expect(registry.has('aider')).toBe(true);
+    expect(result.attached.find((p) => p.id === 'aider')?.command).toContain('aider');
+    result.dispose();
+  });
+
+  it('aider resolves inside a pipx venv when PATH misses it (#306)', async () => {
+    // pipx's real layout: ~/.local/pipx/venvs/<pkg>/Scripts|bin/<exe> —
+    // the scan candidate is what makes a pipx install attachable.
+    const home = tmp();
+    const venv = join(home, '.local', 'pipx', 'venvs', 'aider-chat', 'bin');
+    mkdirSync(venv, { recursive: true });
+    writeFileSync(join(venv, 'aider'), 'x');
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv(),
+      platform: 'linux',
+      homeDir: home,
+      localAppData: tmp(),
+    });
+    expect(registry.has('aider')).toBe(true);
+    expect(result.attached.find((p) => p.id === 'aider')?.command).toContain('aider');
+    result.dispose();
+  });
+
   it('spawns a codex app-server and registers codex against its endpoint', async () => {
     const dir = fakePathDir('codex');
     const registry = new AdapterRegistry();
@@ -238,6 +270,7 @@ describe('attachLocalAgentProviders', () => {
       'copilot',
       'opencode',
       'cursor',
+      'aider',
     ]) {
       expect(
         result.skipped.find((p) => p.id === id),

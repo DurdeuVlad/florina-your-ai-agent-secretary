@@ -127,7 +127,25 @@ export type ProviderTransport =
       readonly readyTimeoutMs: number;
     }
   /** Headless stream-json adapter (agy). */
-  | { readonly kind: 'stream-json' };
+  | { readonly kind: 'stream-json' }
+  /**
+   * Print-run adapter (aider) — spawn per run, objective written to a
+   * temp file substituted for `{messageFile}`, stdout lines become
+   * AgentProgress, the exit code decides Completed/Failed. `{model}`
+   * args are dropped unless the session supplies a model. The weakest
+   * transport — no structured events, a prompt the flags can't
+   * suppress stalls as silence — hence Tier E.
+   *
+   * `failurePatterns`: regex sources matched per stdout/stderr line.
+   * Providers in this class (aider) can exit 0 after a failed model
+   * call — a litellm error line on a clean exit still means
+   * `AgentFailed`, because process exit alone is not task success.
+   */
+  | {
+      readonly kind: 'print-run';
+      readonly args: readonly string[];
+      readonly failurePatterns?: readonly string[];
+    };
 
 /**
  * Local sign-in evidence — existence probes only, never a read of the
@@ -813,6 +831,141 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
             label: 'Install Cursor CLI',
             command: 'curl https://cursor.com/install -fsS | bash',
             detail: 'opens a terminal running the official Cursor CLI install script',
+          },
+        },
+      },
+      {
+        // Aider — aider.chat. No login of its own: auth IS the model
+        // provider's API key, honored from the environment. Headless
+        // means `--message-file` print mode — no ACP, no JSONL — so the
+        // new print-run transport supervises plain stdout (Tier E).
+        id: 'aider',
+        docsUrl: 'https://aider.chat/docs/scripting.html',
+        envOverride: 'FLORINA_AIDER_CMD',
+        executable: 'aider',
+        extraCandidates: {
+          // The official installer (uv tool) lands aider in
+          // ~/.local/bin; pipx installs live one level deep inside
+          // ~/.local/pipx/venvs/aider-chat/{Scripts,bin}.
+          win32: [
+            { kind: 'path', path: '{home}/.local/bin/aider.exe' },
+            {
+              kind: 'scan',
+              base: 'home',
+              dir: '.local/pipx/venvs/aider-chat',
+              file: 'aider.exe',
+            },
+          ],
+          default: [
+            { kind: 'path', path: '{home}/.local/bin/aider' },
+            {
+              kind: 'scan',
+              base: 'home',
+              dir: '.local/pipx/venvs/aider-chat',
+              file: 'aider',
+            },
+          ],
+        },
+        transport: {
+          kind: 'print-run',
+          // --yes-always + --no-stream/--no-pretty: non-interactive,
+          // greppable output. --no-auto-commits keeps aider from
+          // widening into git history — dirty worktrees stay for the
+          // human's review per the worktree contract.
+          //
+          // --no-gitignore: --yes-always would otherwise auto-answer
+          // aider's "add .aider* to .gitignore?" prompt and edit a
+          // TRACKED file on first run. --no-analytics: refuse aider's
+          // random-subset telemetry opt-in prompt rather than letting
+          // yes-always silently consent for the user (DEC-011).
+          // --no-check-update silences the version-check noise.
+          //
+          // History files ride the run's temp dir so `.aider.*` state
+          // never litters the worktree; aider's `.aider.tags.cache.*`
+          // repo-map dir has no relocation flag and remains honest,
+          // documented residue.
+          args: [
+            '--yes-always',
+            '--no-stream',
+            '--no-pretty',
+            '--no-auto-commits',
+            '--no-gitignore',
+            '--no-analytics',
+            '--no-check-update',
+            '--chat-history-file',
+            '{messageDir}/chat-history.md',
+            '--input-history-file',
+            '{messageDir}/input-history',
+            '--llm-history-file',
+            '{messageDir}/llm-history.jsonl',
+            '--message-file',
+            '{messageFile}',
+            // Single-token form so the adapter drops model wiring
+            // atomically when the session supplies none.
+            '--model={model}',
+          ],
+          // aider exits 0 even when the model call failed — verified
+          // live: a rejected OPENAI_API_KEY prints litellm's error and
+          // exits cleanly. Tail-windowed matching in the adapter: the
+          // litellm error family (AuthenticationError, RateLimitError,
+          // NotFoundError, …) in the run's LAST lines means failure;
+          // mid-run echoes or retried transients scroll out honestly.
+          failurePatterns: [
+            '^litellm\\.[\\w.]*?(?:Error|Exception|Timeout|Overloaded)\\b',
+            'API provider is not able to authenticate',
+          ],
+        },
+        notFoundDetail:
+          '`aider` not found on PATH (also checked ~/.local/bin and ' +
+          'pipx venvs). Install it, put it on PATH, or set ' +
+          'FLORINA_AIDER_CMD to its path.',
+        credentialEvidence: {
+          // Aider has no account — a model provider key in the
+          // environment is the whole credential story. (models.dev
+          // list; DEEPSEEK/OPENROUTER cover the cheap alternatives.)
+          files: [],
+          envVars: [
+            'ANTHROPIC_API_KEY',
+            'OPENAI_API_KEY',
+            'GEMINI_API_KEY',
+            'OPENROUTER_API_KEY',
+            'DEEPSEEK_API_KEY',
+          ],
+        },
+        signIn: {
+          kind: 'store-key',
+          label: 'Store a model API key for Aider',
+          detail:
+            'aider signs in with a model provider key, not its own account — run ' +
+            '`florina keys set openai-api-key` (or anthropic/gemini/openrouter/deepseek ' +
+            'equivalents), or export the provider’s env var yourself',
+        },
+        installers: {
+          // The official aider.chat install script bootstraps uv AND a
+          // Python toolchain itself — a bare interpreter is honestly
+          // not required up front (issue #306's toolchain gap case).
+          // Explicit cells: script documents win32/macos/linux only.
+          win32: {
+            label: 'Install Aider',
+            command:
+              'powershell -ExecutionPolicy ByPass -NoProfile -Command "irm https://aider.chat/install.ps1 | iex"',
+            detail:
+              'opens a terminal running the official aider installer ' +
+              '(it sets up Python itself — no interpreter needed first)',
+          },
+          darwin: {
+            label: 'Install Aider',
+            command: 'curl -fsSL https://aider.chat/install.sh | sh',
+            detail:
+              'opens a terminal running the official aider installer ' +
+              '(it sets up Python itself — no interpreter needed first)',
+          },
+          linux: {
+            label: 'Install Aider',
+            command: 'curl -fsSL https://aider.chat/install.sh | sh',
+            detail:
+              'opens a terminal running the official aider installer ' +
+              '(it sets up Python itself — no interpreter needed first)',
           },
         },
       },

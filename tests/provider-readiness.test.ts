@@ -86,6 +86,15 @@ describe('classifyFailureText (#294)', () => {
     ['authentication failed for provider', 'auth'],
     ['please sign in to continue', 'auth'],
     ['your session token expired', 'auth'],
+    // litellm's auth family — what aider's print-run AgentFailed
+    // actually carries (#306 review): must classify 'auth' so the
+    // store-key fix attaches rather than falling to 'unknown'.
+    [
+      'litellm.AuthenticationError: AuthenticationError: OpenAIException - The api_key client option must be set',
+      'auth',
+    ],
+    ['litellm.PermissionDeniedError: you do not have access', 'auth'],
+    ['The API provider is not able to authenticate you. Check your API key.', 'auth'],
   ])('auth class: %s', (text, expected) => {
     expect(classifyFailureText(text)).toBe(expected);
   });
@@ -93,6 +102,9 @@ describe('classifyFailureText (#294)', () => {
   it.each([
     ['Error: required environment variable GOOGLE_CLOUD_PROJECT is not set', 'config'],
     ['no project id configured for code assist', 'config'],
+    // litellm's unknown-model family — a model name typo is config,
+    // not auth (#306 review).
+    ['litellm.NotFoundError: model does-not-exist not found', 'config'],
   ])('config class: %s', (text, expected) => {
     expect(classifyFailureText(text)).toBe(expected);
   });
@@ -112,6 +124,10 @@ describe('classifyFailureText (#294)', () => {
     // chat-model path must not fall through to 'unknown'.
     ['You exceeded your current quota, please check your plan and billing details', 'quota'],
     ['LiteLLM error: insufficient_quota for this key', 'quota'],
+    // litellm quota/budget family from aider's print output (#306).
+    ['litellm.RateLimitError: RPM limit reached', 'quota'],
+    ['litellm.BudgetExceededError: spend cap hit', 'quota'],
+    ['litellm.ContextWindowExceededError: prompt too long', 'quota'],
   ])('quota class: %s', (text, expected) => {
     expect(classifyFailureText(text)).toBe(expected);
   });
@@ -315,6 +331,7 @@ describe('ProviderReadiness (#294)', () => {
       'copilot', // acp-adapter id
       'opencode', // acp-adapter id
       'cursor', // acp-adapter id
+      'aider', // print-run adapter id
     ];
     // Every FIXES key must be a real registered id or the synthetic
     // 'chat-model' row — no orphan recipes.
@@ -338,6 +355,7 @@ describe('ProviderReadiness (#294)', () => {
       'copilot',
       'opencode',
       'cursor',
+      'aider',
     ];
     for (const id of providerInstallerIds()) {
       expect(realIds, `installer recipe for unknown provider ${id}`).toContain(id);
@@ -408,6 +426,11 @@ describe('ProviderReadiness (#294)', () => {
         'powershell -NoProfile -Command "irm \'https://cursor.com/install?win32=true\' | iex"',
         'curl https://cursor.com/install -fsS | bash',
         'curl https://cursor.com/install -fsS | bash',
+      ],
+      aider: [
+        'powershell -ExecutionPolicy ByPass -NoProfile -Command "irm https://aider.chat/install.ps1 | iex"',
+        'curl -fsSL https://aider.chat/install.sh | sh',
+        'curl -fsSL https://aider.chat/install.sh | sh',
       ],
     });
   });
