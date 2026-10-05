@@ -3,37 +3,46 @@
  *
  * Probes the machine for installed provider CLIs and registers a factory
  * per found provider in the daemon's {@link AdapterRegistry}, so tasks can
- * route to real agents instead of only the stub:
+ * route to real agents instead of only the stub. Everything a provider
+ * needs — executable name, `FLORINA_*_CMD` override, beyond-PATH
+ * candidates, transport strategy, "not installed" wording — comes from
+ * its {@link PROVIDER_MANIFESTS} entry (issue #300): attachment is a
+ * generic loop over manifests, not per-provider handwritten blocks.
  *
- *   claude-code — `claude` on PATH → {@link ClaudeHooksAdapter} (Tier B)
- *   codex       — `codex` on PATH or `~/.codex/.sandbox-bin/codex.exe`;
- *                 a `codex app-server --listen ws://127.0.0.1:<port>`
- *                 child is spawned for the daemon's lifetime and the
- *                 {@link CodexAdapter} dials it per run (Tier A)
- *   devin       — `devin` on PATH or the Devin desktop app's bundled CLI
- *                 → {@link AcpAdapter} in `devin acp` mode (Tier C)
- *   gemini      — `gemini` on PATH → {@link AcpAdapter} `--acp` (Tier C)
- *   antigravity — `agy` on PATH → {@link AgyAdapter} headless (Tier D)
+ *   hooks       → {@link ClaudeHooksAdapter} (claude-code, Tier B)
+ *   app-server  → spawn `<exe> app-server --listen ws://127.0.0.1:<port>`
+ *                 for the daemon's lifetime; {@link CodexAdapter} dials
+ *                 it per run (codex, Tier A)
+ *   acp         → {@link AcpAdapter} with the manifest's args
+ *                 (devin `acp`, gemini `--experimental-acp`, Tier C)
+ *   stream-json → {@link AgyAdapter} headless (antigravity, Tier D)
  *
  * Per-provider command overrides: `FLORINA_CLAUDE_CMD`, `FLORINA_CODEX_CMD`,
- * `FLORINA_DEVIN_CMD`, `FLORINA_GEMINI_CMD`, `FLORINA_AGY_CMD`.
+ * `FLORINA_DEVIN_CMD`, `FLORINA_GEMINI_CMD`, `FLORINA_AGY_CMD` — each
+ * declared on its manifest's `envOverride`.
  * `FLORINA_PROVIDERS=none` disables attachment entirely;
  * `FLORINA_DISABLED_PROVIDERS=a,b` skips individual providers.
  */
 import { type ChildProcess, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, normalize } from 'node:path';
 import { connect as netConnect, createServer } from 'node:net';
 
-import type { AdapterRegistry } from '../adapters/outbound/agents/registry.js';
 import {
-  ClaudeHooksAdapter,
-  CLAUDE_HOOKS_ADAPTER_ID,
-} from '../adapters/outbound/agents/claude-hooks-adapter.js';
-import { CodexAdapter, CODEX_ADAPTER_ID } from '../adapters/outbound/agents/codex-adapter.js';
+  PROVIDER_MANIFESTS,
+  perPlatform,
+  providerTables,
+  type CredentialEvidenceSpec,
+  type ExtraCandidate,
+  type ProviderManifest,
+} from '../core/application/use-cases/readiness/provider-manifests.js';
+
+import type { AdapterRegistry } from '../adapters/outbound/agents/registry.js';
+import { ClaudeHooksAdapter } from '../adapters/outbound/agents/claude-hooks-adapter.js';
+import { CodexAdapter } from '../adapters/outbound/agents/codex-adapter.js';
 import { AcpAdapter } from '../adapters/outbound/agents/acp-adapter.js';
-import { AgyAdapter, AGY_ADAPTER_ID } from '../adapters/outbound/agents/agy-adapter.js';
+import { AgyAdapter } from '../adapters/outbound/agents/agy-adapter.js';
 import { spawnCli } from '../adapters/outbound/agents/spawn-cli.js';
 
 /** A provider whose CLI was found and registered. */
@@ -66,10 +75,16 @@ export interface AttachProvidersDeps {
   readonly homeDir?: string;
   readonly localAppData?: string;
   readonly platform?: NodeJS.Platform;
-  /** How long to wait for the codex app-server to listen (ms). */
+  /** How long to wait for an app-server child to listen (ms). */
   readonly codexReadyTimeoutMs?: number;
-  /** Injectable child-process spawner for the codex app-server (tests). */
+  /** Injectable child-process spawner for app-server children (tests). */
   readonly codexSpawner?: (command: string, args: readonly string[]) => ChildProcess;
+  /**
+   * The manifests to attach — defaults to {@link PROVIDER_MANIFESTS}.
+   * Tests inject a fake manifest to prove one entry is sufficient for
+   * attachment, readiness, and remediation (the #300 contract).
+   */
+  readonly manifests?: readonly ProviderManifest[];
 }
 
 const WIN_EXTS = ['.cmd', '.exe', '.bat', ''];
@@ -114,24 +129,48 @@ function resolveCommand(
   return null;
 }
 
-function findCodexWindowsCandidates(localAppData: string, home: string): string[] {
-  const candidates: string[] = [join(home, '.codex', '.sandbox-bin', 'codex.exe')];
-  const base = join(localAppData, 'OpenAI', 'Codex', 'bin');
-  if (existsSync(base)) {
-    const directCandidate = join(base, 'codex.exe');
-    if (existsSync(directCandidate)) {
-      candidates.push(directCandidate);
+/**
+ * Interpret a manifest's beyond-PATH candidate specs against the real
+ * filesystem — `path` specs expand `{home}`/`{localAppData}` placeholders;
+ * `scan` specs check `<base>/<dir>/<file>` then one level deep (versioned
+ * install layouts like `%LOCALAPPDATA%/OpenAI/Codex/bin/<ver>/codex.exe`).
+ */
+function expandCandidates(
+  specs: readonly ExtraCandidate[] | undefined,
+  home: string,
+  localAppData: string,
+): string[] {
+  if (specs === undefined) return [];
+  const out: string[] = [];
+  for (const spec of specs) {
+    if (spec.kind === 'path') {
+      // Manifest paths are '/'-joined literals — normalize so the
+      // resolved command carries real platform separators. Single-pass
+      // alternation: a home dir literally containing "{localAppData}"
+      // must not be substituted twice.
+      out.push(
+        normalize(
+          spec.path.replace(/\{home\}|\{localAppData\}/g, (m) =>
+            m === '{home}' ? home : localAppData,
+          ),
+        ),
+      );
+      continue;
     }
+    const base = spec.base === 'localAppData' ? join(localAppData, spec.dir) : join(home, spec.dir);
+    if (!existsSync(base)) continue;
+    const direct = join(base, spec.file);
+    if (existsSync(direct)) out.push(direct);
     try {
       for (const entry of readdirSync(base)) {
-        const candidate = join(base, entry, 'codex.exe');
-        if (existsSync(candidate)) candidates.push(candidate);
+        const candidate = join(base, entry, spec.file);
+        if (existsSync(candidate)) out.push(candidate);
       }
     } catch {
-      // ignore read errors
+      // ignore read errors — candidates are best-effort hints
     }
   }
-  return candidates;
+  return out;
 }
 
 /** A free localhost TCP port for the codex app-server. */
@@ -204,126 +243,105 @@ export async function attachLocalAgentProviders(
   const skip = (id: string, reason: string): void => {
     skipped.push({ id, reason });
   };
-  const disabledReason = (id: string): string | null =>
-    disabled.has(id) ? 'disabled via FLORINA_DISABLED_PROVIDERS' : null;
-
-  // --- claude-code — hooks adapter (Tier B) ---
-  {
-    const id = CLAUDE_HOOKS_ADAPTER_ID;
-    const d = disabledReason(id);
-    const command =
-      d === null ? resolveCommand('FLORINA_CLAUDE_CMD', 'claude', [], env, platform) : null;
-    if (d !== null) skip(id, d);
-    else if (command === null) skip(id, '`claude` CLI not found on PATH');
-    else {
-      registry.register(id, () => new ClaudeHooksAdapter(null, { command }));
-      attached.push({ id, command });
+  // One manifest drives everything: executable resolution (env override
+  // → PATH → beyond-PATH candidates), the honest not-found wording, and
+  // the transport that turns a resolved command into an adapter.
+  const seen = new Set<string>();
+  for (const manifest of deps.manifests ?? PROVIDER_MANIFESTS) {
+    const { id } = manifest;
+    // A duplicated id must not reach registry.register — it throws
+    // mid-loop, rejecting the whole attach and orphaning any app-server
+    // child already spawned. Skip honestly instead.
+    if (seen.has(id)) {
+      skip(id, 'duplicate manifest id — check PROVIDER_MANIFESTS');
+      continue;
     }
-  }
-
-  // --- codex — app-server over WebSocket (Tier A) ---
-  {
-    const id = CODEX_ADAPTER_ID;
-    const d = disabledReason(id);
-    const command =
-      d === null
-        ? resolveCommand(
-            'FLORINA_CODEX_CMD',
-            'codex',
-            platform === 'win32'
-              ? findCodexWindowsCandidates(localAppData, home)
-              : [join(home, '.codex', '.sandbox-bin', 'codex')],
-            env,
-            platform,
-          )
-        : null;
-    if (d !== null) {
-      skip(id, d);
-    } else if (command === null) {
-      skip(id, '`codex` CLI not found (PATH, ~/.codex/.sandbox-bin, or LocalAppData/OpenAI/Codex)');
-    } else {
-      try {
-        const port = await freePort();
-        const endpoint = `ws://127.0.0.1:${port}`;
-        const spawner =
-          deps.codexSpawner ?? ((cmd, args) => spawnCli(cmd, args, { stdio: 'ignore' }));
-        const child = spawner(command, ['app-server', '--listen', endpoint]);
-        children.push(child);
-        await waitForPort(port, deps.codexReadyTimeoutMs ?? 8_000);
-        registry.register(id, () => new CodexAdapter(null, { endpoint }));
-        attached.push({ id, command, detail: `app-server ${endpoint}` });
-      } catch (err) {
-        skip(id, `app-server failed to start: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    seen.add(id);
+    if (disabled.has(id)) {
+      skip(id, 'disabled via FLORINA_DISABLED_PROVIDERS');
+      continue;
     }
-  }
-
-  // --- devin — Devin CLI in ACP mode (Tier C) ---
-  {
-    const id = 'devin';
-    const d = disabledReason(id);
-    const bundled =
-      platform === 'win32'
-        ? [
-            join(
-              localAppData,
-              'Programs',
-              'Devin',
-              'resources',
-              'app',
-              'extensions',
-              'windsurf',
-              'devin',
-              'bin',
-              'devin.exe',
-            ),
-          ]
-        : platform === 'darwin'
-          ? ['/Applications/Devin.app/Contents/Resources/app/extensions/windsurf/devin/bin/devin']
-          : [];
-    const command =
-      d === null ? resolveCommand('FLORINA_DEVIN_CMD', 'devin', bundled, env, platform) : null;
-    if (d !== null) skip(id, d);
-    else if (command === null) skip(id, '`devin` CLI not found (PATH or Devin app bundle)');
-    else {
-      registry.register(id, () => new AcpAdapter(null, { id, command, args: ['acp'] }));
-      attached.push({ id, command });
-    }
-  }
-
-  // --- gemini — Gemini CLI in ACP mode (Tier C) ---
-  {
-    const id = 'gemini';
-    const d = disabledReason(id);
-    const command =
-      d === null ? resolveCommand('FLORINA_GEMINI_CMD', 'gemini', [], env, platform) : null;
-    if (d !== null) skip(id, d);
-    else if (command === null) skip(id, '`gemini` CLI not found on PATH');
-    else {
-      registry.register(
-        id,
-        () => new AcpAdapter(null, { id, command, args: ['--experimental-acp'] }),
+    let candidates: string[];
+    try {
+      candidates = expandCandidates(
+        perPlatform(manifest.extraCandidates, platform),
+        home,
+        localAppData,
       );
-      attached.push({ id, command });
-    }
-  }
-
-  // --- antigravity — `agy` headless stream-json (Tier D) ---
-  {
-    const id = AGY_ADAPTER_ID;
-    const d = disabledReason(id);
-    const command = d === null ? resolveCommand('FLORINA_AGY_CMD', 'agy', [], env, platform) : null;
-    if (d !== null) skip(id, d);
-    else if (command === null) {
+    } catch (err) {
+      // Malformed manifest data (a non-string path, a bad spec) must
+      // not crash the whole attach — this provider skips honestly so
+      // the others still register.
       skip(
         id,
-        '`agy` headless CLI not found on PATH. It is a standalone CLI install, not bundled ' +
-          'inside the Antigravity IDE app folder. Once installed, either put it on PATH or ' +
-          'set FLORINA_AGY_CMD to its path.',
+        `manifest candidates failed to resolve: ${err instanceof Error ? err.message : String(err)}`,
       );
-    } else {
-      registry.register(id, () => new AgyAdapter(null, { command }));
-      attached.push({ id, command });
+      continue;
+    }
+    const command = resolveCommand(
+      manifest.envOverride,
+      manifest.executable,
+      candidates,
+      env,
+      platform,
+    );
+    if (command === null) {
+      skip(id, manifest.notFoundDetail);
+      continue;
+    }
+    const transport = manifest.transport;
+    switch (transport.kind) {
+      case 'hooks':
+        registry.register(id, () => new ClaudeHooksAdapter(null, { command }));
+        attached.push({ id, command });
+        break;
+      case 'acp':
+        registry.register(
+          id,
+          () => new AcpAdapter(null, { id, command, args: [...transport.args] }),
+        );
+        attached.push({ id, command });
+        break;
+      case 'stream-json':
+        registry.register(id, () => new AgyAdapter(null, { command }));
+        attached.push({ id, command });
+        break;
+      case 'app-server': {
+        try {
+          const port = await freePort();
+          const endpoint = `ws://127.0.0.1:${port}`;
+          const spawner =
+            deps.codexSpawner ?? ((cmd, args) => spawnCli(cmd, args, { stdio: 'ignore' }));
+          const child = spawner(
+            command,
+            transport.args.map((a) => a.replaceAll('{endpoint}', endpoint)),
+          );
+          children.push(child);
+          // A spawn-level failure (ENOENT on a trusted bare-name
+          // override, EACCES on a non-executable candidate) arrives as
+          // 'error' — unhandled it becomes an uncaughtException that
+          // kills the daemon. Racing it into the wait turns it into an
+          // honest fast skip instead.
+          const spawnError = new Promise<never>((_, reject) => child.once('error', reject));
+          await Promise.race([
+            waitForPort(port, deps.codexReadyTimeoutMs ?? transport.readyTimeoutMs),
+            spawnError,
+          ]);
+          registry.register(id, () => new CodexAdapter(null, { endpoint }));
+          attached.push({ id, command, detail: `app-server ${endpoint}` });
+        } catch (err) {
+          skip(
+            id,
+            `app-server failed to start: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        break;
+      }
+      default:
+        // A transport kind this build doesn't know: skip honestly
+        // rather than silently registering nothing — the provider
+        // would otherwise be invisible (not attached, not skipped).
+        skip(id, `unsupported transport "${(transport as { kind: string }).kind}"`);
     }
   }
 
@@ -354,62 +372,15 @@ export async function attachLocalAgentProviders(
  * contradicts them (that's what `ProviderReadiness.recordFailure` is
  * for). Providers without a known evidence source return `'unknown'`.
  */
-const CREDENTIAL_EVIDENCE: Readonly<
-  Record<
-    string,
-    {
-      readonly files: readonly string[];
-      readonly envVars: readonly string[];
-      /**
-       * macOS Keychain service holding the credential (darwin only —
-       * Claude Code prefers the keychain over .credentials.json there
-       * and may delete the file after a successful keychain write).
-       */
-      readonly darwinKeychain?: string;
-      /**
-       * Windows Credential Manager generic target holding the
-       * credential (win32 only — verified live: agy stores its OAuth
-       * token as `gemini:antigravity`, reported by agy's own log as
-       * `authenticated via keyring`). Probed via `cmdkey /list:<target>`
-       * — existence only, the secret is never read.
-       */
-      readonly winCredTarget?: string;
-    }
-  >
-> = {
-  'claude-code': {
-    files: ['.claude/.credentials.json'],
-    envVars: ['ANTHROPIC_API_KEY'],
-    darwinKeychain: 'Claude Code-credentials',
-  },
-  codex: { files: ['.codex/auth.json'], envVars: ['OPENAI_API_KEY'] },
-  gemini: {
-    files: [
-      '.gemini/oauth_creds.json',
-      // Application Default Credentials — the gcloud auth path.
-      '.config/gcloud/application_default_credentials.json',
-    ],
-    envVars: ['GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS'],
-  },
-  devin: {
-    // `devin auth status` prints this exact path on Windows; the XDG and
-    // macOS equivalents are the conventional locations for the same CLI.
-    files: [
-      'AppData/Roaming/devin/credentials.toml',
-      '.config/devin/credentials.toml',
-      'Library/Application Support/devin/credentials.toml',
-    ],
-    envVars: ['DEVIN_API_KEY'],
-  },
-  antigravity: {
-    // agy keeps its OAuth token in the OS keyring, not a file — on
-    // Windows it's the `gemini:antigravity` generic credential.
-    files: [],
-    envVars: [],
-    winCredTarget: 'gemini:antigravity',
-    darwinKeychain: 'gemini:antigravity',
-  },
-};
+/**
+ * The evidence table — derived from the provider manifests (issue
+ * #300). Field docs live on `CredentialEvidenceSpec` in
+ * `provider-manifests.ts`; entries describe existence probes only —
+ * the probe below reads metadata (file exists? env var set? keychain/
+ * Credential Manager item present?), never a credential value.
+ */
+const CREDENTIAL_EVIDENCE: Readonly<Record<string, CredentialEvidenceSpec>> =
+  providerTables(PROVIDER_MANIFESTS).credentialEvidence;
 
 /**
  * The readiness service's `credsProbe`: reports whether any known local

@@ -107,6 +107,25 @@ describe('attachLocalAgentProviders', () => {
     result.dispose();
   });
 
+  it('a spawn-level app-server failure (ENOENT) skips honestly instead of crashing', async () => {
+    // Spawning a nonexistent binary emits 'error' on the child — without
+    // a listener that becomes an uncaughtException killing the daemon.
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv({ PATH: fakePathDir('codex') }),
+      platform: 'win32',
+      homeDir: tmp(),
+      localAppData: tmp(),
+      codexReadyTimeoutMs: 8_000,
+      codexSpawner: () => spawn('florina-definitely-nonexistent-binary', []),
+    });
+    expect(registry.has('codex')).toBe(false);
+    expect(result.skipped.find((p) => p.id === 'codex')?.reason).toContain(
+      'app-server failed to start',
+    );
+    result.dispose();
+  });
+
   it('FLORINA_PROVIDERS=none attaches nothing', async () => {
     const registry = new AdapterRegistry();
     const result = await attachLocalAgentProviders(registry, {
