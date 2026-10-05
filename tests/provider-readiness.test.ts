@@ -312,6 +312,7 @@ describe('ProviderReadiness (#294)', () => {
       AGY_ADAPTER_ID,
       'devin', // acp-adapter id
       'gemini', // acp-adapter id
+      'copilot', // acp-adapter id
     ];
     // Every FIXES key must be a real registered id or the synthetic
     // 'chat-model' row — no orphan recipes.
@@ -326,7 +327,14 @@ describe('ProviderReadiness (#294)', () => {
   });
 
   it('every INSTALLERS key is a real adapter id, and installer commands are verified-official only', () => {
-    const realIds = [CLAUDE_HOOKS_ADAPTER_ID, CODEX_ADAPTER_ID, AGY_ADAPTER_ID, 'devin', 'gemini'];
+    const realIds = [
+      CLAUDE_HOOKS_ADAPTER_ID,
+      CODEX_ADAPTER_ID,
+      AGY_ADAPTER_ID,
+      'devin',
+      'gemini',
+      'copilot',
+    ];
     for (const id of providerInstallerIds()) {
       expect(realIds, `installer recipe for unknown provider ${id}`).toContain(id);
     }
@@ -390,6 +398,7 @@ describe('ProviderReadiness (#294)', () => {
         'curl -fsSL https://antigravity.google/cli/install.sh | bash',
         'curl -fsSL https://antigravity.google/cli/install.sh | bash',
       ],
+      copilot: ['npm i -g @github/copilot', 'npm i -g @github/copilot', 'npm i -g @github/copilot'],
     });
   });
 
@@ -699,6 +708,91 @@ describe('makeCredentialProbe (#294)', () => {
       spawnFn: (() => ({ status: 1, stdout: '', stderr: 'bad parameters' })) as never,
     });
     expect(errored('antigravity')).toBe('unknown');
+  });
+
+  it('copilot: the gh-fallback credman target counts as evidence (#303)', () => {
+    // Copilot's auth order ends with `gh auth token` — a user who only
+    // ran `gh auth login` is signed in for real, so gh's Credential
+    // Manager entry (`gh:github.com:` — verified live on Windows) must
+    // count as evidence. `/list:<target>` exact-matches, so the gh key
+    // with its trailing colon is the stable probe.
+    const calls: string[][] = [];
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'win32',
+      spawnFn: ((_cmd: string, args: string[]) => {
+        calls.push(args);
+        return args[0] === '/list:gh:github.com:'
+          ? { status: 0, stdout: 'Target: gh:github.com:\n  Type: Generic\n' }
+          : { status: 0, stdout: 'Currently stored credentials:\n\n* NONE *\n' };
+      }) as never,
+    });
+    expect(probe('copilot')).toBe('present');
+    expect(calls[0]).toEqual(['/list:gh:github.com:']);
+  });
+
+  it('copilot: a per-account credman entry is found by the /list pattern scan (#303)', () => {
+    // Copilot's own store renders `https://github.com:<user>.copilot-cli`
+    // (verified live after `copilot login`) — a static exact target can
+    // never name it, so the manifest carries a `copilot-cli` pattern
+    // scanned over the full `cmdkey /list` dump.
+    const calls: string[][] = [];
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'win32',
+      spawnFn: ((_cmd: string, args: string[]) => {
+        calls.push(args);
+        if (args[0] === '/list') {
+          return {
+            status: 0,
+            stdout:
+              'Currently stored credentials:\n' +
+              '    Target: LegacyGeneric:target=gh:github.com:\n' +
+              '    Target: LegacyGeneric:target=https://github.com:DurdeuVlad.copilot-cli\n',
+          };
+        }
+        // The gh exact target misses — only the pattern can hit.
+        return { status: 0, stdout: 'Currently stored credentials:\n\n* NONE *\n' };
+      }) as never,
+    });
+    expect(probe('copilot')).toBe('present');
+    expect(calls).toContainEqual(['/list']);
+  });
+
+  it('copilot: an unknown pattern-scan verdict blocks a false absent (#303)', () => {
+    // A failed `/list` run (null status = spawn error/timeout) must
+    // degrade to 'unknown' — never decay to 'absent' and falsely offer
+    // sign-in to a user whose credentials may exist.
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'win32',
+      spawnFn: ((_cmd: string, args: string[]) =>
+        args[0] === '/list'
+          ? { status: null, stderr: 'spawn timed out' }
+          : { status: 0, stdout: '* NONE *\n' }) as never,
+    });
+    expect(probe('copilot')).toBe('unknown');
+  });
+
+  it('copilot: darwin probes every keychain item — the gh fallback item counts too (#303)', () => {
+    // First item (`copilot-cli`) misses with 44, second (`gh:github.com`)
+    // hits — presence on any consulted store is evidence.
+    const calls: string[][] = [];
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'darwin',
+      spawnFn: ((_cmd: string, args: string[]) => {
+        calls.push(args);
+        return args.includes('copilot-cli') ? { status: 44 } : { status: 0 };
+      }) as never,
+    });
+    expect(probe('copilot')).toBe('present');
+    expect(calls[0]).toEqual(['find-generic-password', '-s', 'copilot-cli']);
+    expect(calls[1]).toEqual(['find-generic-password', '-s', 'gh:github.com']);
   });
 
   it('cmdkey probe never reads a credential value — existence only', () => {

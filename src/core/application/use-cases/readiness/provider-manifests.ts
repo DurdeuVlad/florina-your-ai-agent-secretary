@@ -148,17 +148,35 @@ export interface CredentialEvidenceSpec {
   readonly xdgDataFiles?: readonly string[];
   /** Provider-blessed environment variables that carry a credential. */
   readonly envVars: readonly string[];
-  /** macOS Keychain service holding the credential (darwin only). */
-  readonly darwinKeychain?: string;
   /**
-   * macOS Keychain account within the service — probed via
-   * `security find-generic-password -s <service> -a <account>`. A
-   * service name alone over-reports (any other item under the same
-   * service counts as evidence).
+   * macOS Keychain items holding credentials (darwin only). A provider
+   * may consult several secure stores — Copilot checks its own
+   * `copilot-cli` entry and falls back to the GitHub CLI's
+   * `gh:github.com` entry, so this is a list, not a single service.
+   *
+   * `account` is probed via `security find-generic-password -s
+   * <service> -a <account>` — a service name alone over-reports (any
+   * other item under the same service counts as evidence).
    */
-  readonly darwinKeychainAccount?: string;
-  /** Windows Credential Manager generic target (win32 only). */
-  readonly winCredTarget?: string;
+  readonly darwinKeychains?: readonly {
+    readonly service: string;
+    readonly account?: string;
+  }[];
+  /**
+   * Windows Credential Manager generic targets (win32 only) — plural
+   * for the same multi-store reason as {@link darwinKeychains}.
+   * Probed by exact name via `cmdkey /list:<target>`.
+   */
+  readonly winCredTargets?: readonly string[];
+  /**
+   * Windows Credential Manager target *patterns* (win32 only) —
+   * matched against the `Target:` lines of a full `cmdkey /list`
+   * dump. Needed when the target embeds a per-account segment that
+   * exact-match can't name statically: Copilot's entries render as
+   * `https://github.com:<user>.copilot-cli` (verified live), so a
+   * `copilot-cli` substring pattern is the honest probe.
+   */
+  readonly winCredTargetPatterns?: readonly RegExp[];
   /**
    * Platforms whose primary credential store we cannot generically
    * probe (e.g. Linux Secret Service via D-Bus — there is no
@@ -211,6 +229,7 @@ const NPM = {
   claude: 'npm i -g @anthropic-ai/claude-code',
   codex: 'npm i -g @openai/codex',
   gemini: 'npm i -g @google/gemini-cli',
+  copilot: 'npm i -g @github/copilot',
 } as const;
 
 /**
@@ -243,7 +262,7 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
         credentialEvidence: {
           files: ['.claude/.credentials.json'],
           envVars: ['ANTHROPIC_API_KEY'],
-          darwinKeychain: 'Claude Code-credentials',
+          darwinKeychains: [{ service: 'Claude Code-credentials' }],
         },
         signIn: {
           kind: 'run-command',
@@ -460,9 +479,8 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
           // but both only count when settings.json opts in — presence alone
           // is not evidence, and the spec can't express compound conditions.
           envVars: [],
-          winCredTarget: 'gemini:antigravity',
-          darwinKeychain: 'gemini',
-          darwinKeychainAccount: 'antigravity',
+          winCredTargets: ['gemini:antigravity'],
+          darwinKeychains: [{ service: 'gemini', account: 'antigravity' }],
           unprobeablePlatforms: ['linux'],
         },
         signIn: {
@@ -494,6 +512,92 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
             label: 'Install the Antigravity CLI',
             command: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
             detail: 'opens a terminal running Antigravity’s official installer',
+          },
+        },
+      },
+      {
+        // GitHub Copilot CLI — docs.github.com/en/copilot. The `--acp`
+        // flag runs a real ACP server over stdio (public preview, same
+        // caveat status as gemini's flag).
+        id: 'copilot',
+        docsUrl: 'https://docs.github.com/en/copilot/how-tos/copilot-cli/install-copilot-cli',
+        envOverride: 'FLORINA_COPILOT_CMD',
+        executable: 'copilot',
+        extraCandidates: {
+          // winget portable install lands in WinGet/Links; npm global
+          // bin in %APPDATA%\npm — both invisible to a daemon whose
+          // PATH snapshot predates the install.
+          win32: [
+            { kind: 'path', path: '{localAppData}/Microsoft/WinGet/Links/copilot.exe' },
+            { kind: 'path', path: '{home}/AppData/Roaming/npm/copilot.cmd' },
+          ],
+          // Install-script PREFIX default is ~/.local (non-root) or
+          // /usr/local (root); brew cask lands in the brew prefix.
+          default: [
+            { kind: 'path', path: '{home}/.local/bin/copilot' },
+            { kind: 'path', path: '/usr/local/bin/copilot' },
+          ],
+          darwin: [
+            { kind: 'path', path: '{home}/.local/bin/copilot' },
+            { kind: 'path', path: '/usr/local/bin/copilot' },
+            { kind: 'path', path: '/opt/homebrew/bin/copilot' },
+          ],
+          linux: [
+            { kind: 'path', path: '{home}/.local/bin/copilot' },
+            { kind: 'path', path: '/usr/local/bin/copilot' },
+            { kind: 'path', path: '/home/linuxbrew/.linuxbrew/bin/copilot' },
+          ],
+        },
+        transport: { kind: 'acp', args: ['--acp'] },
+        notFoundDetail:
+          '`copilot` CLI not found on PATH (also checked ~/.local/bin, ' +
+          'Homebrew prefixes, and WinGet links). Install it, put it on ' +
+          'PATH, or set FLORINA_COPILOT_CMD to its path.',
+        credentialEvidence: {
+          // Copilot accepts five credential sources in order (docs):
+          // COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN env vars,
+          // the OS keychain under service `copilot-cli`, and finally a
+          // `gh auth token` fallback — so gh's own stores count as
+          // evidence too (`gh:github.com:` keyring target verified live
+          // on Windows; go-keyring uses the same service on macOS).
+          // Copilot's own credman target embeds the account name
+          // (`https://github.com:<user>.copilot-cli` — live-verified
+          // after `copilot login`), so it is a pattern, not an exact
+          // target. config.json is included because it is the
+          // documented plaintext token fallback when no system keychain
+          // exists — it can over-report a first-run-without-auth, which
+          // self-corrects honestly (headless dispatch fails auth → the
+          // auth-failing card routes the user back to sign-in). Linux's
+          // primary store is libsecret (D-Bus — unprobeable), so a miss
+          // there degrades to 'unknown', never a false "not signed in".
+          files: [
+            '.copilot/config.json',
+            '.config/gh/hosts.yml',
+            'AppData/Roaming/GitHub CLI/hosts.yml',
+          ],
+          envVars: ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'],
+          darwinKeychains: [{ service: 'copilot-cli' }, { service: 'gh:github.com' }],
+          winCredTargets: ['gh:github.com:'],
+          winCredTargetPatterns: [/copilot-cli/],
+          unprobeablePlatforms: ['linux'],
+        },
+        signIn: {
+          kind: 'run-command',
+          label: 'Sign in to GitHub Copilot',
+          command: 'copilot login',
+          detail:
+            'opens a terminal running `copilot login` — sign in with GitHub there ' +
+            '(a device code or browser step may follow)',
+        },
+        installers: {
+          // docs.github.com: npm is the official all-platforms
+          // installer and Florina already requires Node ≥ 22. (winget
+          // and brew are documented alternatives but pull heavier
+          // dependencies — winget auto-installs PowerShell 7.)
+          default: {
+            label: 'Install GitHub Copilot CLI',
+            command: NPM.copilot,
+            detail: 'opens a terminal running npm — the official Copilot CLI installer',
           },
         },
       },

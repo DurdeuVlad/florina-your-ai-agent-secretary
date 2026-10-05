@@ -127,6 +127,7 @@ temporary compatibility surfaces, not the public API.
 | Devin CLI         | `devin acp` (ACP/JSON-RPC stdio); `-p` print mode; hooks            | C     | none documented → reactive                                                              | `-c` / `-r` / `/fork`           |
 | Gemini CLI        | `gemini --experimental-acp` (ACP); `-p --output-format stream-json` | C / D | none → 429 detection + session-file token sums                                          | `--continue`                    |
 | Antigravity `agy` | `agy -p --output-format stream-json`                                | D     | none → reactive                                                                         | `--continue` / `--conversation` |
+| Copilot CLI       | `copilot --acp` (ACP/JSON-RPC stdio, public preview)                | C     | none documented → reactive                                                              | `--resume=<id>` / `--continue`  |
 
 Non-TTY caveat for `agy`: stdout is gated on `isatty()` (upstream bug) — a PTY
 bridge is required for headless capture. That is an I/O shim over structured

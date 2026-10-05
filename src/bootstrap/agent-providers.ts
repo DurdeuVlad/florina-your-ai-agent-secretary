@@ -14,12 +14,13 @@
  *                 for the daemon's lifetime; {@link CodexAdapter} dials
  *                 it per run (codex, Tier A)
  *   acp         → {@link AcpAdapter} with the manifest's args
- *                 (devin `acp`, gemini `--experimental-acp`, Tier C)
+ *                 (e.g. devin `acp`, gemini `--experimental-acp`,
+ *                 copilot `--acp` — Tier C)
  *   stream-json → {@link AgyAdapter} headless (antigravity, Tier D)
  *
- * Per-provider command overrides: `FLORINA_CLAUDE_CMD`, `FLORINA_CODEX_CMD`,
- * `FLORINA_DEVIN_CMD`, `FLORINA_GEMINI_CMD`, `FLORINA_AGY_CMD` — each
- * declared on its manifest's `envOverride`.
+ * Per-provider command overrides (`FLORINA_<PROVIDER>_CMD`) are
+ * declared on each manifest's `envOverride` — the manifest table is
+ * the only authoritative provider list.
  * `FLORINA_PROVIDERS=none` disables attachment entirely;
  * `FLORINA_DISABLED_PROVIDERS=a,b` skips individual providers.
  */
@@ -578,6 +579,9 @@ export function makeCredentialProbe(
   const KEYCHAIN_TTL_MS = 5000;
   const keychainCache = new Map<string, { at: number; signal: 'present' | 'absent' | 'unknown' }>();
   const winCredCache = new Map<string, { at: number; signal: 'present' | 'absent' | 'unknown' }>();
+  // Full `cmdkey /list` dump for pattern targets — cached across all
+  // providers for the TTL like the per-target verdicts.
+  let winCredListCache: { at: number; out: string | null } | undefined;
   return (providerId) => {
     const evidence = CREDENTIAL_EVIDENCE[providerId];
     if (evidence === undefined) return 'unknown';
@@ -600,16 +604,17 @@ export function makeCredentialProbe(
     // macOS Keychain is a primary credential store for some providers —
     // file absence alone must NOT claim "not signed in" there. No `-w`:
     // existence only — the password never enters daemon memory.
-    if (platform === 'darwin' && evidence.darwinKeychain !== undefined) {
-      const service = evidence.darwinKeychain;
-      const account = evidence.darwinKeychainAccount;
-      // Cache key must keep the two fields unambiguously separate —
-      // 'a b'/undefined vs 'a'/'b' would otherwise collide.
-      const cacheKey = JSON.stringify([service, account ?? null]);
-      const cached = keychainCache.get(cacheKey);
-      if (cached !== undefined && nowMs() - cached.at < KEYCHAIN_TTL_MS) {
-        if (cached.signal === 'present') return 'present';
-      } else {
+    if (platform === 'darwin') {
+      for (const item of evidence.darwinKeychains ?? []) {
+        const { service, account } = item;
+        // Cache key must keep the two fields unambiguously separate —
+        // 'a b'/undefined vs 'a'/'b' would otherwise collide.
+        const cacheKey = JSON.stringify([service, account ?? null]);
+        const cached = keychainCache.get(cacheKey);
+        if (cached !== undefined && nowMs() - cached.at < KEYCHAIN_TTL_MS) {
+          if (cached.signal === 'present') return 'present';
+          continue;
+        }
         const args = ['find-generic-password', '-s', service];
         if (account !== undefined) args.push('-a', account);
         const res = run('security', args, {
@@ -629,25 +634,32 @@ export function makeCredentialProbe(
           signal: res.status === 44 ? 'absent' : 'unknown',
         });
         if (res.status === 44) {
-          // Fall through to the absent check below — a definitive miss
-          // means file absence is still the honest verdict.
-        } else {
-          return 'unknown';
+          continue;
         }
+        return 'unknown';
       }
       // Cached non-present: honor a definitive 'absent', else 'unknown'.
-      const signal = keychainCache.get(cacheKey)?.signal;
-      if (signal === 'unknown') return 'unknown';
+      // (Any 'present' would have returned inside the loop.)
+      if (
+        (evidence.darwinKeychains ?? []).some(
+          (item) =>
+            keychainCache.get(JSON.stringify([item.service, item.account ?? null]))?.signal ===
+            'unknown',
+        )
+      ) {
+        return 'unknown';
+      }
     }
     // Windows Credential Manager — `cmdkey /list:<target>` exits 0 only
     // when the entry exists. Existence-only like the keychain probe;
     // brief cache for the same synchronous-block reason.
-    if (platform === 'win32' && evidence.winCredTarget !== undefined) {
-      const target = evidence.winCredTarget;
-      const cached = winCredCache.get(target);
-      if (cached !== undefined && nowMs() - cached.at < KEYCHAIN_TTL_MS) {
-        if (cached.signal === 'present') return 'present';
-      } else {
+    if (platform === 'win32') {
+      for (const target of evidence.winCredTargets ?? []) {
+        const cached = winCredCache.get(target);
+        if (cached !== undefined && nowMs() - cached.at < KEYCHAIN_TTL_MS) {
+          if (cached.signal === 'present') return 'present';
+          continue;
+        }
         const res = run('cmdkey', [`/list:${target}`], {
           timeout: 1500,
           encoding: 'utf8',
@@ -666,8 +678,37 @@ export function makeCredentialProbe(
         if (signal === 'present') return 'present';
         if (signal === 'unknown') return 'unknown';
       }
-      const signal = winCredCache.get(target)?.signal;
-      if (signal === 'unknown') return 'unknown';
+      // Pattern targets embed a per-account segment exact-match can't
+      // name (Copilot renders `https://github.com:<user>.copilot-cli`)
+      // — one full `/list` dump, cached like the per-target probes.
+      let listFailed = false;
+      if ((evidence.winCredTargetPatterns?.length ?? 0) > 0) {
+        let out: string | null;
+        if (winCredListCache !== undefined && nowMs() - winCredListCache.at < KEYCHAIN_TTL_MS) {
+          out = winCredListCache.out;
+        } else {
+          const res = run('cmdkey', ['/list'], {
+            timeout: 1500,
+            encoding: 'utf8',
+          });
+          out = res.status === 0 ? String(res.stdout ?? '') : null;
+          winCredListCache = { at: nowMs(), out };
+        }
+        if (out === null) {
+          listFailed = true;
+        } else if ((evidence.winCredTargetPatterns ?? []).some((p) => p.test(out))) {
+          return 'present';
+        }
+      }
+      // A cached 'unknown' must not decay to 'absent' — mirror the
+      // keychain guard: any inconclusive consultation keeps the verdict
+      // honest ('absent' requires every store to have answered).
+      if (
+        listFailed ||
+        (evidence.winCredTargets ?? []).some((t) => winCredCache.get(t)?.signal === 'unknown')
+      ) {
+        return 'unknown';
+      }
     }
     // 'absent' is only honest when every credential store the provider
     // can use on THIS platform was consulted — files/env vars always,
@@ -682,8 +723,10 @@ export function makeCredentialProbe(
       (evidence.files.length > 0 ||
         (evidence.xdgDataFiles?.length ?? 0) > 0 ||
         evidence.envVars.length > 0 ||
-        (platform === 'darwin' && evidence.darwinKeychain !== undefined) ||
-        (platform === 'win32' && evidence.winCredTarget !== undefined));
+        (platform === 'darwin' && (evidence.darwinKeychains?.length ?? 0) > 0) ||
+        (platform === 'win32' &&
+          ((evidence.winCredTargets?.length ?? 0) > 0 ||
+            (evidence.winCredTargetPatterns?.length ?? 0) > 0)));
     return consultable ? 'absent' : 'unknown';
   };
 }
