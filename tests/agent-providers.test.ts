@@ -97,6 +97,39 @@ describe('attachLocalAgentProviders', () => {
     result.dispose();
   });
 
+  it('cursor resolves `cursor-agent` on PATH and registers its ACP adapter (#305)', async () => {
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv({ PATH: fakePathDir('cursor-agent') }),
+      platform: 'win32',
+      homeDir: tmp(),
+      localAppData: tmp(),
+    });
+    expect(registry.has('cursor')).toBe(true);
+    expect(result.attached.find((p) => p.id === 'cursor')?.command).toContain('cursor-agent');
+    result.dispose();
+  });
+
+  it('cursor resolves the versions-dir payload when shims are missing (#305)', async () => {
+    // The install script's real layout: .local/bin/agent symlinks INTO
+    // versions/<ver>/cursor-agent — a broken/missing shim must still
+    // resolve the payload via the scan candidate.
+    const home = tmp();
+    const ver = join(home, '.local', 'share', 'cursor-agent', 'versions', '2026.10.01-x');
+    mkdirSync(ver, { recursive: true });
+    writeFileSync(join(ver, 'cursor-agent'), 'x');
+    const registry = new AdapterRegistry();
+    const result = await attachLocalAgentProviders(registry, {
+      env: baseEnv(),
+      platform: 'linux',
+      homeDir: home,
+      localAppData: tmp(),
+    });
+    expect(registry.has('cursor')).toBe(true);
+    expect(result.attached.find((p) => p.id === 'cursor')?.command).toContain('cursor-agent');
+    result.dispose();
+  });
+
   it('spawns a codex app-server and registers codex against its endpoint', async () => {
     const dir = fakePathDir('codex');
     const registry = new AdapterRegistry();
@@ -204,6 +237,7 @@ describe('attachLocalAgentProviders', () => {
       'antigravity',
       'copilot',
       'opencode',
+      'cursor',
     ]) {
       expect(
         result.skipped.find((p) => p.id === id),
