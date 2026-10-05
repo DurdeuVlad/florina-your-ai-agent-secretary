@@ -55,16 +55,39 @@ export interface AttachedProvider {
   readonly detail?: string;
 }
 
+/**
+ * Why a provider didn't attach. 'not-found' heals the moment the binary
+ * appears; 'error' is transient-capable (a spawn raced an in-progress
+ * install) so it retries after {@link SkippedProvider.retryAfter} cools
+ * down — bounded, so it can't spin; the rest are policy or data problems
+ * that stay skipped until the input changes.
+ */
+export type SkipKind = 'not-found' | 'disabled' | 'error' | 'unsupported-transport' | 'duplicate';
+
 /** A provider that was not attached, with the reason. */
 export interface SkippedProvider {
   readonly id: string;
   readonly reason: string;
+  readonly kind: SkipKind;
+  /**
+   * For 'error' skips: epoch ms before which a refresh must not retry —
+   * an install-window or transient spawn failure heals on a later query,
+   * but not on every query.
+   */
+  readonly retryAfter?: number;
 }
 
 /** Result of {@link attachLocalAgentProviders}. */
 export interface LocalProviderAttachment {
   readonly attached: readonly AttachedProvider[];
   readonly skipped: readonly SkippedProvider[];
+  /**
+   * Spawned helper children owned by this attachment (the codex
+   * app-server). Composed flat across refreshes so {@link dispose} is
+   * a single loop, never a wrapped-closure chain — an unbounded number
+   * of refreshes can't deepen disposal (bootstrap-internal plumbing).
+   */
+  readonly children: readonly ChildProcess[];
   /** Kill spawned helper processes (e.g. the codex app-server). */
   dispose(): void;
 }
@@ -79,6 +102,10 @@ export interface AttachProvidersDeps {
   readonly codexReadyTimeoutMs?: number;
   /** Injectable child-process spawner for app-server children (tests). */
   readonly codexSpawner?: (command: string, args: readonly string[]) => ChildProcess;
+  /** Clock for error-retry cooldown bookkeeping (tests inject a fake). */
+  readonly nowMs?: () => number;
+  /** Cooldown before an 'error' skip is retried (default 30s). */
+  readonly errorRetryCooldownMs?: number;
   /**
    * The manifests to attach — defaults to {@link PROVIDER_MANIFESTS}.
    * Tests inject a fake manifest to prove one entry is sufficient for
@@ -213,6 +240,199 @@ function waitForPort(port: number, timeoutMs: number): Promise<void> {
  * attached and what was skipped so the caller can surface it (the fleet
  * view lists registered adapter ids).
  */
+/** Shared per-manifest attach context — initial pass and refresh. */
+interface AttachCtx {
+  readonly registry: AdapterRegistry;
+  readonly env: NodeJS.ProcessEnv;
+  readonly platform: NodeJS.Platform;
+  readonly home: string;
+  readonly localAppData: string;
+  readonly children: ChildProcess[];
+  readonly deps: AttachProvidersDeps;
+}
+
+type AttachOutcome =
+  | { readonly ok: true; readonly command: string; readonly detail?: string }
+  | { readonly ok: false; readonly reason: string; readonly kind: SkipKind };
+
+/**
+ * Resolve one manifest's executable and, when found, register its
+ * transport adapter. Never throws — every failure is an honest skip
+ * reason so one bad manifest can't take down the rest.
+ */
+async function tryAttach(manifest: ProviderManifest, ctx: AttachCtx): Promise<AttachOutcome> {
+  const { registry, env, platform, home, localAppData, children, deps } = ctx;
+  const { id } = manifest;
+  let candidates: string[];
+  try {
+    candidates = expandCandidates(
+      perPlatform(manifest.extraCandidates, platform),
+      home,
+      localAppData,
+    );
+  } catch (err) {
+    // Malformed manifest data (a non-string path, a bad spec) must
+    // not crash the whole attach — this provider skips honestly so
+    // the others still register.
+    return {
+      ok: false,
+      reason: `manifest candidates failed to resolve: ${err instanceof Error ? err.message : String(err)}`,
+      kind: 'error',
+    };
+  }
+  const command = resolveCommand(
+    manifest.envOverride,
+    manifest.executable,
+    candidates,
+    env,
+    platform,
+  );
+  if (command === null) {
+    return { ok: false, reason: manifest.notFoundDetail, kind: 'not-found' };
+  }
+  const transport = manifest.transport;
+  switch (transport.kind) {
+    case 'hooks':
+      registry.register(id, () => new ClaudeHooksAdapter(null, { command }));
+      return { ok: true, command };
+    case 'acp':
+      registry.register(id, () => new AcpAdapter(null, { id, command, args: [...transport.args] }));
+      return { ok: true, command };
+    case 'stream-json':
+      registry.register(id, () => new AgyAdapter(null, { command }));
+      return { ok: true, command };
+    case 'app-server': {
+      try {
+        const port = await freePort();
+        const endpoint = `ws://127.0.0.1:${port}`;
+        const spawner =
+          deps.codexSpawner ?? ((cmd, args) => spawnCli(cmd, args, { stdio: 'ignore' }));
+        const child = spawner(
+          command,
+          transport.args.map((a) => a.replaceAll('{endpoint}', endpoint)),
+        );
+        children.push(child);
+        // A spawn-level failure (ENOENT on a trusted bare-name
+        // override, EACCES on a non-executable candidate) arrives as
+        // 'error' — unhandled it becomes an uncaughtException that
+        // kills the daemon. Racing it into the wait turns it into an
+        // honest fast skip instead.
+        const spawnError = new Promise<never>((_, reject) => child.once('error', reject));
+        await Promise.race([
+          waitForPort(port, deps.codexReadyTimeoutMs ?? transport.readyTimeoutMs),
+          spawnError,
+        ]);
+        registry.register(id, () => new CodexAdapter(null, { endpoint }));
+        return { ok: true, command, detail: `app-server ${endpoint}` };
+      } catch (err) {
+        return {
+          ok: false,
+          reason: `app-server failed to start: ${err instanceof Error ? err.message : String(err)}`,
+          kind: 'error',
+        };
+      }
+    }
+    default:
+      // A transport kind this build doesn't know: skip honestly
+      // rather than silently registering nothing — the provider
+      // would otherwise be invisible (not attached, not skipped).
+      return {
+        ok: false,
+        reason: `unsupported transport "${(transport as { kind: string }).kind}"`,
+        kind: 'unsupported-transport',
+      };
+  }
+}
+
+/**
+ * Re-resolve providers that can heal — 'not-found' skips retry every
+ * call; 'error' skips retry only once {@link SkippedProvider.retryAfter}
+ * has elapsed so a transient spawn failure (e.g. a query landing while
+ * `florina install` is mid-write) recovers without spinning per query
+ * (issue #301). The daemon's PATH is a startup snapshot, so manifest
+ * `extraCandidates` (real-fs probes) are what let a fresh install
+ * resolve before a restart.
+ *
+ * Disabled/duplicate/unsupported states never self-heal.
+ * Already-registered ids are never re-attached, so a refresh can't
+ * double-spawn an app-server child. New children compose flat into the
+ * returned attachment's `children`/`dispose` — no closure wrapping.
+ */
+export async function refreshSkippedProviders(
+  registry: AdapterRegistry,
+  current: LocalProviderAttachment,
+  deps: AttachProvidersDeps = {},
+): Promise<LocalProviderAttachment> {
+  const now = deps.nowMs ?? Date.now;
+  const cooldownMs = deps.errorRetryCooldownMs ?? 30_000;
+  const skippedById = new Map(current.skipped.map((s) => [s.id, s]));
+  const retryable = new Set(
+    current.skipped
+      .filter((s) => s.kind === 'not-found' || (s.kind === 'error' && (s.retryAfter ?? 0) <= now()))
+      .map((s) => s.id),
+  );
+  if (retryable.size === 0) return current;
+  const env = deps.env ?? process.env;
+  const platform = deps.platform ?? process.platform;
+  const home = deps.homeDir ?? homedir();
+  const localAppData = deps.localAppData ?? env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local');
+  const children: ChildProcess[] = [];
+  const ctx: AttachCtx = { registry, env, platform, home, localAppData, children, deps };
+  const recovered = new Map<string, AttachedProvider>();
+  const updatedReasons = new Map<string, SkippedProvider>();
+  for (const manifest of deps.manifests ?? PROVIDER_MANIFESTS) {
+    const { id } = manifest;
+    if (!retryable.has(id) || registry.has(id)) continue;
+    const outcome = await tryAttach(manifest, ctx);
+    if (outcome.ok) {
+      recovered.set(id, {
+        id,
+        command: outcome.command,
+        ...(outcome.detail ? { detail: outcome.detail } : {}),
+      });
+      continue;
+    }
+    const existing = skippedById.get(id);
+    if (outcome.kind === 'error') {
+      // Refresh the cooldown so consecutive errors can't spin.
+      updatedReasons.set(id, {
+        id,
+        reason: outcome.reason,
+        kind: 'error',
+        retryAfter: now() + cooldownMs,
+      });
+    } else if (existing === undefined || existing.kind !== outcome.kind) {
+      // An 'error' that now resolves nothing is honestly 'not-found'
+      // again (binary vanished mid-retry); a stale 'not-found' row
+      // reporting a real failure likewise updates. Identical
+      // not-found → not-found results aren't recorded — no state
+      // changed, and recording would defeat the no-change fast path.
+      updatedReasons.set(id, { id, reason: outcome.reason, kind: outcome.kind });
+    }
+  }
+  // Nothing healed and nothing learned — return the same object so a
+  // steady stream of status queries can't grow an attachment chain.
+  if (recovered.size === 0 && updatedReasons.size === 0) return current;
+  const skipped = current.skipped
+    .filter((s) => !recovered.has(s.id))
+    .map((s) => updatedReasons.get(s.id) ?? s);
+  const allChildren = [...current.children, ...children];
+  return {
+    attached: [...current.attached, ...recovered.values()],
+    skipped,
+    children: allChildren,
+    dispose: () => {
+      for (const child of allChildren) {
+        try {
+          child.kill();
+        } catch {
+          // best-effort — a dead child is already gone
+        }
+      }
+    },
+  };
+}
+
 export async function attachLocalAgentProviders(
   registry: AdapterRegistry,
   deps: AttachProvidersDeps = {},
@@ -221,6 +441,8 @@ export async function attachLocalAgentProviders(
   const platform = deps.platform ?? process.platform;
   const home = deps.homeDir ?? homedir();
   const localAppData = deps.localAppData ?? env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local');
+  const now = deps.nowMs ?? Date.now;
+  const cooldownMs = deps.errorRetryCooldownMs ?? 30_000;
   const attached: AttachedProvider[] = [];
   const skipped: SkippedProvider[] = [];
   const children: ChildProcess[] = [];
@@ -229,8 +451,13 @@ export async function attachLocalAgentProviders(
     return {
       attached,
       skipped: [
-        { id: 'all', reason: 'FLORINA_PROVIDERS=none — local provider attachment disabled' },
+        {
+          id: 'all',
+          reason: 'FLORINA_PROVIDERS=none — local provider attachment disabled',
+          kind: 'disabled',
+        },
       ],
+      children,
       dispose: () => {},
     };
   }
@@ -240,9 +467,7 @@ export async function attachLocalAgentProviders(
       .map((s) => s.trim())
       .filter((s) => s !== ''),
   );
-  const skip = (id: string, reason: string): void => {
-    skipped.push({ id, reason });
-  };
+  const ctx: AttachCtx = { registry, env, platform, home, localAppData, children, deps };
   // One manifest drives everything: executable resolution (env override
   // → PATH → beyond-PATH candidates), the honest not-found wording, and
   // the transport that turns a resolved command into an adapter.
@@ -253,101 +478,42 @@ export async function attachLocalAgentProviders(
     // mid-loop, rejecting the whole attach and orphaning any app-server
     // child already spawned. Skip honestly instead.
     if (seen.has(id)) {
-      skip(id, 'duplicate manifest id — check PROVIDER_MANIFESTS');
+      skipped.push({
+        id,
+        reason: 'duplicate manifest id — check PROVIDER_MANIFESTS',
+        kind: 'duplicate',
+      });
       continue;
     }
     seen.add(id);
     if (disabled.has(id)) {
-      skip(id, 'disabled via FLORINA_DISABLED_PROVIDERS');
+      skipped.push({ id, reason: 'disabled via FLORINA_DISABLED_PROVIDERS', kind: 'disabled' });
       continue;
     }
-    let candidates: string[];
-    try {
-      candidates = expandCandidates(
-        perPlatform(manifest.extraCandidates, platform),
-        home,
-        localAppData,
-      );
-    } catch (err) {
-      // Malformed manifest data (a non-string path, a bad spec) must
-      // not crash the whole attach — this provider skips honestly so
-      // the others still register.
-      skip(
+    const outcome = await tryAttach(manifest, ctx);
+    if (outcome.ok) {
+      attached.push({
         id,
-        `manifest candidates failed to resolve: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      continue;
-    }
-    const command = resolveCommand(
-      manifest.envOverride,
-      manifest.executable,
-      candidates,
-      env,
-      platform,
-    );
-    if (command === null) {
-      skip(id, manifest.notFoundDetail);
-      continue;
-    }
-    const transport = manifest.transport;
-    switch (transport.kind) {
-      case 'hooks':
-        registry.register(id, () => new ClaudeHooksAdapter(null, { command }));
-        attached.push({ id, command });
-        break;
-      case 'acp':
-        registry.register(
-          id,
-          () => new AcpAdapter(null, { id, command, args: [...transport.args] }),
-        );
-        attached.push({ id, command });
-        break;
-      case 'stream-json':
-        registry.register(id, () => new AgyAdapter(null, { command }));
-        attached.push({ id, command });
-        break;
-      case 'app-server': {
-        try {
-          const port = await freePort();
-          const endpoint = `ws://127.0.0.1:${port}`;
-          const spawner =
-            deps.codexSpawner ?? ((cmd, args) => spawnCli(cmd, args, { stdio: 'ignore' }));
-          const child = spawner(
-            command,
-            transport.args.map((a) => a.replaceAll('{endpoint}', endpoint)),
-          );
-          children.push(child);
-          // A spawn-level failure (ENOENT on a trusted bare-name
-          // override, EACCES on a non-executable candidate) arrives as
-          // 'error' — unhandled it becomes an uncaughtException that
-          // kills the daemon. Racing it into the wait turns it into an
-          // honest fast skip instead.
-          const spawnError = new Promise<never>((_, reject) => child.once('error', reject));
-          await Promise.race([
-            waitForPort(port, deps.codexReadyTimeoutMs ?? transport.readyTimeoutMs),
-            spawnError,
-          ]);
-          registry.register(id, () => new CodexAdapter(null, { endpoint }));
-          attached.push({ id, command, detail: `app-server ${endpoint}` });
-        } catch (err) {
-          skip(
-            id,
-            `app-server failed to start: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-        break;
-      }
-      default:
-        // A transport kind this build doesn't know: skip honestly
-        // rather than silently registering nothing — the provider
-        // would otherwise be invisible (not attached, not skipped).
-        skip(id, `unsupported transport "${(transport as { kind: string }).kind}"`);
+        command: outcome.command,
+        ...(outcome.detail ? { detail: outcome.detail } : {}),
+      });
+    } else {
+      skipped.push({
+        id,
+        reason: outcome.reason,
+        kind: outcome.kind,
+        // Transient-capable failures (a daemon that started while an
+        // install was mid-write) may retry — after a cooldown, so a
+        // permanently-broken install still can't spin per query.
+        ...(outcome.kind === 'error' ? { retryAfter: now() + cooldownMs } : {}),
+      });
     }
   }
 
   return {
     attached,
     skipped,
+    children,
     dispose: () => {
       for (const child of children) {
         try {

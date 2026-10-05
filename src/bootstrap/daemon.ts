@@ -49,6 +49,7 @@ import { AdapterRegistry } from '../adapters/outbound/agents/registry.js';
 import {
   attachLocalAgentProviders,
   makeCredentialProbe,
+  refreshSkippedProviders,
   type LocalProviderAttachment,
 } from './agent-providers.js';
 import { ProviderReadiness } from '../core/application/use-cases/readiness/provider-readiness.js';
@@ -270,6 +271,9 @@ export class FlorinaDaemon extends EventEmitter {
   private taskStateMachine: TaskStateMachine | null = null;
   private adapterRegistry: AdapterRegistry | null = null;
   private localProviders: LocalProviderAttachment | null = null;
+  /** In-flight re-resolution — concurrent queries share one refresh. */
+  private providerRefresh: Promise<LocalProviderAttachment | null> | null = null;
+  private acceptingProviderRefresh = true;
   private providerReadiness: ProviderReadiness | null = null;
   private sessionManager: SessionManager | null = null;
   private quotaLedger: QuotaLedger | null = null;
@@ -556,6 +560,7 @@ export class FlorinaDaemon extends EventEmitter {
       // tasks can route to them. Skipped providers are logged to the
       // journal-free stderr — daemon stdio is detached; the fleet view
       // (adapterRegistry.list()) is the user-visible surface.
+      this.acceptingProviderRefresh = true;
       this.localProviders = await attachLocalAgentProviders(this.adapterRegistry);
 
       // Provider auth readiness (issue #294): cheap local evidence —
@@ -855,9 +860,12 @@ export class FlorinaDaemon extends EventEmitter {
         delegation,
         quotaLedger: this.quotaLedger ?? undefined,
         // Onboarding/setup surface (issue #277): exposes which provider
-        // CLIs the startup probe attached vs. skipped. Live accessor so a
-        // `none`-disabled or absent attachment reports honestly empty.
-        providerAttachment: () => this.localProviders,
+        // CLIs the probe attached vs. skipped. Live accessor — each call
+        // re-resolves providers previously skipped 'not-found' so a CLI
+        // installed mid-run (e.g. `florina install`) shows up without a
+        // restart (issue #301). Deduped: concurrent queries share one
+        // refresh rather than racing a second app-server spawn.
+        providerAttachment: async () => this.refreshLocalProviders(),
         providerReadiness: this.providerReadiness ?? undefined,
         // signin-provider launches the provider's own login in a visible
         // terminal (issue #294) — the spawn stays at the composition
@@ -1214,8 +1222,23 @@ export class FlorinaDaemon extends EventEmitter {
       this.sessionManager = null;
     }
     // Kill provider helper processes (codex app-server) after sessions stop.
+    // A query can race `stop` — an in-flight refresh resolving after this
+    // point would write a fresh attachment (with its own spawned children)
+    // onto a stopped daemon and orphan them. Null the snapshot first so no
+    // new refresh can start, then drain any in-flight one and dispose its
+    // result (flat children list → one loop kills them all).
+    this.acceptingProviderRefresh = false;
+    const inFlightRefresh = this.providerRefresh;
     this.localProviders?.dispose();
     this.localProviders = null;
+    if (inFlightRefresh !== null) {
+      try {
+        (await inFlightRefresh)?.dispose();
+      } catch {
+        // refresh failed mid-shutdown — nothing new was attached
+      }
+      this.localProviders = null;
+    }
     this.providerReadiness?.stop();
     this.providerReadiness = null;
     if (this.attentionAggregator) {
@@ -1280,6 +1303,36 @@ export class FlorinaDaemon extends EventEmitter {
   private setState(state: DaemonState): void {
     this.state = state;
     this.emit('state', state);
+  }
+
+  /**
+   * The provider attachment seen by query-providers — re-resolving
+   * 'not-found' skips on every call so a CLI installed mid-run shows up
+   * without a restart (issue #301). Concurrent callers share one
+   * in-flight refresh so codex's app-server can't be spawned twice.
+   */
+  private refreshLocalProviders(): Promise<LocalProviderAttachment | null> {
+    // `acceptingProviderRefresh` closes the cleanup drain gap — after
+    // cleanup() snapshots the in-flight refresh, a late query must not
+    // start an untracked one whose spawned children would never dispose.
+    if (
+      !this.acceptingProviderRefresh ||
+      this.adapterRegistry === null ||
+      this.localProviders === null
+    ) {
+      return Promise.resolve(this.localProviders);
+    }
+    const registry = this.adapterRegistry;
+    const current = this.localProviders;
+    this.providerRefresh ??= refreshSkippedProviders(registry, current)
+      .then((next) => {
+        this.localProviders = next;
+        return next;
+      })
+      .finally(() => {
+        this.providerRefresh = null;
+      });
+    return this.providerRefresh;
   }
 }
 

@@ -374,6 +374,14 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
         // The headless binary is `agy` — the Antigravity *IDE* is a
         // different install and is NOT evidence this CLI exists.
         executable: 'agy',
+        extraCandidates: {
+          // The official Windows installer registers
+          // %LOCALAPPDATA%\agy\bin on the USER PATH — but a running
+          // daemon's env is a startup snapshot and never sees the new
+          // entry. Probe the real path directly so `florina install
+          // antigravity` resolves without a restart (issue #301).
+          win32: [{ kind: 'path', path: '{localAppData}/agy/bin/agy.exe' }],
+        },
         transport: { kind: 'stream-json' },
         notFoundDetail:
           '`agy` headless CLI not found on PATH. It is a standalone CLI install, not bundled ' +

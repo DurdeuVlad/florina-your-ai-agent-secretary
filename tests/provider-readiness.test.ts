@@ -969,9 +969,10 @@ describe('CommandApi readiness surfaces (#294)', () => {
     expect(res.launched).toBe(true);
     expect(launches).toEqual(['npm i -g @openai/codex']);
     expect(res.detail).toContain('official');
-    // Provider attachment is a startup snapshot — the detail must say a
-    // restart is needed before the new binary is visible, or the user
-    // re-checks and thinks the install failed.
+    // The next query-providers re-resolves live (#301), so status picks
+    // the install up — but a PATH entry the daemon's stale env can't see
+    // still needs the documented restart fallback.
+    expect(res.detail).toContain('florina status');
     expect(res.detail).toContain('restart florina');
     expect(res.detail).toContain('florina auth codex');
 
