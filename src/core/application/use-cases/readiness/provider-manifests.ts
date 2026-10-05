@@ -717,6 +717,105 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
           },
         },
       },
+      {
+        // Cursor CLI — cursor.com/docs/cli. The binary ships as BOTH
+        // `agent` and `cursor-agent` (same executable, co-located in
+        // every install — live-verified); `cursor-agent` is the
+        // distinctive name, so it anchors PATH probing and the sign-in
+        // recipe — `agent` alone is a generic name that could belong
+        // to any CLI. `agent acp` is a real ACP server over stdio
+        // (cursor.com/docs/cli/reference/parameters + live-verified
+        // initialize handshake), so the generic AcpAdapter carries it.
+        id: 'cursor',
+        docsUrl: 'https://cursor.com/docs/cli/overview',
+        envOverride: 'FLORINA_CURSOR_CMD',
+        executable: 'cursor-agent',
+        extraCandidates: {
+          // win32: the install script lands .cmd shims directly in
+          // %LOCALAPPDATA%\cursor-agent plus a versions/<ver>/
+          // payload dir holding cursor-agent.cmd (all live-verified
+          // on this machine).
+          win32: [
+            { kind: 'path', path: '{localAppData}/cursor-agent/agent.cmd' },
+            { kind: 'path', path: '{localAppData}/cursor-agent/cursor-agent.cmd' },
+            {
+              kind: 'scan',
+              base: 'localAppData',
+              dir: 'cursor-agent/versions',
+              file: 'cursor-agent.cmd',
+            },
+          ],
+          // unix: ~/.local/bin shims plus the versions/<ver>/cursor-agent
+          // payload — the payload file is named `cursor-agent` (the
+          // .local/bin/agent symlink points INTO it), never `agent`.
+          default: [
+            { kind: 'path', path: '{home}/.local/bin/agent' },
+            { kind: 'path', path: '{home}/.local/bin/cursor-agent' },
+            {
+              kind: 'scan',
+              base: 'home',
+              dir: '.local/share/cursor-agent/versions',
+              file: 'cursor-agent',
+            },
+          ],
+        },
+        transport: { kind: 'acp', args: ['acp'] },
+        notFoundDetail:
+          '`cursor-agent`/`agent` (Cursor CLI) not found on PATH (also ' +
+          'checked the cursor-agent install dirs). Install it, put it ' +
+          'on PATH, or set FLORINA_CURSOR_CMD to its path.',
+        credentialEvidence: {
+          // Credential layout verified against the bundled CLI code:
+          // the DEFAULT store is the macOS Keychain on darwin
+          // (service cursor-access-token / -refresh-token / -api-key,
+          // account cursor-user) and a file elsewhere — win32
+          // %APPDATA%\Cursor\auth.json, linux $XDG_CONFIG_HOME/cursor/
+          // auth.json (default ~/.config); AGENT_CLI_CREDENTIAL_STORE=
+          // file forces the file store everywhere (~/.cursor/auth.json
+          // on darwin). A custom XDG_CONFIG_HOME is not resolvable —
+          // documented limitation.
+          files: [
+            '.cursor/auth.json',
+            '.config/cursor/auth.json',
+            'AppData/Roaming/Cursor/auth.json',
+          ],
+          envVars: ['CURSOR_API_KEY', 'CURSOR_AUTH_TOKEN'],
+          darwinKeychains: [
+            { service: 'cursor-access-token', account: 'cursor-user' },
+            { service: 'cursor-refresh-token', account: 'cursor-user' },
+            { service: 'cursor-api-key', account: 'cursor-user' },
+          ],
+        },
+        signIn: {
+          kind: 'run-command',
+          label: 'Sign in to Cursor',
+          command: 'cursor-agent login',
+          detail:
+            'opens a terminal running `cursor-agent login` (same binary as `agent`) ' +
+            '— complete the browser sign-in there',
+        },
+        installers: {
+          // Official install script (cursor.com/docs/cli/overview):
+          // curl for macOS/Linux, PowerShell irm|iex for Windows. No
+          // `default` — the script only documents those three OSes.
+          win32: {
+            label: 'Install Cursor CLI',
+            command:
+              'powershell -NoProfile -Command "irm \'https://cursor.com/install?win32=true\' | iex"',
+            detail: 'opens a terminal running the official Cursor CLI install script',
+          },
+          darwin: {
+            label: 'Install Cursor CLI',
+            command: 'curl https://cursor.com/install -fsS | bash',
+            detail: 'opens a terminal running the official Cursor CLI install script',
+          },
+          linux: {
+            label: 'Install Cursor CLI',
+            command: 'curl https://cursor.com/install -fsS | bash',
+            detail: 'opens a terminal running the official Cursor CLI install script',
+          },
+        },
+      },
     ] as ProviderManifest[]
   ).map((m) => deepFreeze(m)),
 );

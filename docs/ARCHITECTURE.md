@@ -129,6 +129,7 @@ temporary compatibility surfaces, not the public API.
 | Antigravity `agy` | `agy -p --output-format stream-json`                                | D     | none → reactive                                                                         | `--continue` / `--conversation` |
 | Copilot CLI       | `copilot --acp` (ACP/JSON-RPC stdio, public preview)                | C     | none documented → reactive                                                              | `--resume=<id>` / `--continue`  |
 | OpenCode          | `opencode acp` (ACP/JSON-RPC stdio)                                 | C     | none documented → reactive                                                              | `opencode run --session <id>`   |
+| Cursor CLI        | `agent acp` (ACP/JSON-RPC stdio)                                    | C     | none documented → reactive                                                              | `agent resume`                  |
 
 OpenCode credential caveat: v2 stores `auth login` tokens inside
 `opencode.db`, which exists from first launch whether or not it holds a

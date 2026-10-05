@@ -314,6 +314,7 @@ describe('ProviderReadiness (#294)', () => {
       'gemini', // acp-adapter id
       'copilot', // acp-adapter id
       'opencode', // acp-adapter id
+      'cursor', // acp-adapter id
     ];
     // Every FIXES key must be a real registered id or the synthetic
     // 'chat-model' row — no orphan recipes.
@@ -336,6 +337,7 @@ describe('ProviderReadiness (#294)', () => {
       'gemini',
       'copilot',
       'opencode',
+      'cursor',
     ];
     for (const id of providerInstallerIds()) {
       expect(realIds, `installer recipe for unknown provider ${id}`).toContain(id);
@@ -402,6 +404,11 @@ describe('ProviderReadiness (#294)', () => {
       ],
       copilot: ['npm i -g @github/copilot', 'npm i -g @github/copilot', 'npm i -g @github/copilot'],
       opencode: ['npm i -g opencode-ai', 'npm i -g opencode-ai', 'npm i -g opencode-ai'],
+      cursor: [
+        'powershell -NoProfile -Command "irm \'https://cursor.com/install?win32=true\' | iex"',
+        'curl https://cursor.com/install -fsS | bash',
+        'curl https://cursor.com/install -fsS | bash',
+      ],
     });
   });
 
@@ -904,6 +911,53 @@ describe('makeCredentialProbe (#294)', () => {
     expect(makeCredentialProbe({ env: { OPENAI_API_KEY: 'x' }, homeDir: home })('opencode')).toBe(
       'present',
     );
+  });
+
+  it('cursor: all three platform auth.json layouts and both env vars count (#305)', () => {
+    // Binary-verified store paths: darwin ~/.cursor, win32 %APPDATA%
+    // \Cursor, linux ~/.config/cursor — a miss on any one layout must
+    // not hide a sign-in that landed on another.
+    for (const rel of [
+      path.join('.cursor', 'auth.json'),
+      path.join('.config', 'cursor', 'auth.json'),
+      path.join('AppData', 'Roaming', 'Cursor', 'auth.json'),
+    ]) {
+      const dir = path.join(home, path.dirname(rel));
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(home, rel), '{}');
+      expect(makeCredentialProbe({ env: {}, homeDir: home })('cursor')).toBe('present');
+      fs.rmSync(path.join(home, rel));
+    }
+    expect(makeCredentialProbe({ env: {}, homeDir: home })('cursor')).toBe('absent');
+    for (const env of [{ CURSOR_API_KEY: 'x' }, { CURSOR_AUTH_TOKEN: 'x' }]) {
+      expect(makeCredentialProbe({ env, homeDir: home })('cursor')).toBe('present');
+    }
+  });
+
+  it('cursor on darwin probes the real keychain items — service + account (#305)', () => {
+    // Binary-verified names: services cursor-access-token /
+    // cursor-refresh-token / cursor-api-key, account cursor-user.
+    const calls: string[][] = [];
+    const probe = makeCredentialProbe({
+      env: {},
+      homeDir: home,
+      platform: 'darwin',
+      spawnFn: ((_cmd: string, args: string[]) => {
+        calls.push(args);
+        return { status: 44 };
+      }) as never,
+    });
+    expect(probe('cursor')).toBe('absent');
+    expect(calls).toContainEqual([
+      'find-generic-password',
+      '-s',
+      'cursor-access-token',
+      '-a',
+      'cursor-user',
+    ]);
+    // Every probed item must carry the account filter — a bare
+    // service match would over-report unrelated cursor entries.
+    for (const args of calls) expect(args).toContain('-a');
   });
 });
 

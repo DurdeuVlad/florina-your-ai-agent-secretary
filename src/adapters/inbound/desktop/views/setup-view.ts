@@ -102,6 +102,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   antigravity: 'Antigravity',
   copilot: 'GitHub Copilot',
   opencode: 'OpenCode',
+  cursor: 'Cursor CLI',
   all: 'Provider detection',
 };
 
@@ -114,6 +115,7 @@ const PROVIDER_ORDER = [
   'antigravity',
   'copilot',
   'opencode',
+  'cursor',
 ];
 
 /** Plain display name for a provider id — shared with the chat context line. */

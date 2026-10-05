@@ -71,6 +71,7 @@ describe('provider manifest — id integrity', () => {
       AGY_ADAPTER_ID,
       'copilot',
       'opencode',
+      'cursor',
     ].sort();
     expect([...providerManifestIds()].sort()).toEqual(adapterIds);
   });
@@ -454,6 +455,10 @@ describe('provider manifest — the real registry is load-bearing', () => {
 
   it('opencode declares `opencode acp` — its documented ACP subcommand (#304)', () => {
     expect(providerManifest('opencode')?.transport).toEqual({ kind: 'acp', args: ['acp'] });
+  });
+
+  it('cursor declares `agent acp` — its documented ACP subcommand (#305)', () => {
+    expect(providerManifest('cursor')?.transport).toEqual({ kind: 'acp', args: ['acp'] });
   });
 
   it("executables are unique, and a run-command recipe never leads with ANOTHER provider's exe", () => {
