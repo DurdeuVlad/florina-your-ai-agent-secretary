@@ -223,15 +223,17 @@ export class AttentionAggregator {
    * `retryable` distinguishes transient failures (busy/IO) from
    * permanent ones (constraint violations a retry can never satisfy).
    *
-   * The 30s dedup window collapses a burst (e.g. repeated SQLITE_BUSY)
-   * into one card rather than a storm — but collapsing must not lose
-   * writes: each additional failed row folds into the open card's
-   * `writes` list so Retry can still land every retained row.
+   * Collapsing must not lose writes: each additional failed row folds
+   * into the open card's `writes` list so Retry can still land every
+   * retained row.
    *
-   * Known limit (issue #272): the inbox is in-memory — a daemon restart
-   * loses the card and its retained rows. Persistence is a separate
-   * follow-up; until then "retained for retry" means retained *while
-   * the daemon runs*.
+   * The fold is gated on an *unresolved* card standing for the task —
+   * not on the dedup window: the window lives in RAM and is lost on
+   * restart (issue #272), but the persisted card and its retained
+   * `writes[]` survive. A restored card must keep absorbing new
+   * failures or the retained rows split across duplicate cards. The
+   * escape is status: resolving the card lets the next failure open a
+   * fresh one.
    */
   reportJournalFailure(failure: {
     readonly source: string;
@@ -242,7 +244,6 @@ export class AttentionAggregator {
     const taskId = failure.write?.taskId ?? '';
     const key = dedupKey(taskId, 'JournalFailure');
     const nowMs = this.now();
-    const last = this.lastCreated.get(key);
     // Any unresolved card for the same task absorbs the burst — not just
     // Pending ones: an acknowledged/escalated card must still collect
     // every failed row, or those rows vanish silently while the card
@@ -251,7 +252,7 @@ export class AttentionAggregator {
       .list({ kind: 'JournalFailure', taskId })
       .filter((i) => i.status !== 'Resolved')
       .at(-1);
-    if (open !== undefined && last !== undefined && nowMs - last < this.dedupWindowMs) {
+    if (open !== undefined) {
       const prev = Array.isArray(open.payload['writes']) ? (open.payload['writes'] as Event[]) : [];
       const dropped =
         typeof open.payload['droppedCount'] === 'number'
@@ -280,9 +281,9 @@ export class AttentionAggregator {
       this.lastCreated.set(key, nowMs); // sliding window for a continuous storm
       return;
     }
-    // No open card to fold into (first failure, card resolved, or the
-    // window expired) — a fresh card must always be creatable here, so
-    // the stale window timestamp from a previous card cannot suppress it.
+    // No open card to fold into (first failure or the card was
+    // resolved) — a fresh card must always be creatable here, so the
+    // stale window timestamp from a previous card cannot suppress it.
     this.lastCreated.delete(key);
     this.maybeAddItem({
       taskId,

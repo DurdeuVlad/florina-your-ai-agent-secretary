@@ -11,6 +11,7 @@ export { SessionRepository } from './session.js';
 export { DeliverableRepository } from './deliverable.js';
 export { EventRepository } from './event.js';
 export { AttentionItemRepository } from './attention-item.js';
+export { AttentionInboxSnapshotRepository } from './attention-inbox-snapshot.js';
 export { DecisionRepository } from './decision.js';
 export { ApprovalRepository } from './approval.js';
 export { CapabilityGrantRepository } from './capability-grant.js';

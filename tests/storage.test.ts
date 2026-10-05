@@ -14,10 +14,14 @@ import {
   DeliverableRepository,
   EventRepository,
   AttentionItemRepository,
+  AttentionInboxSnapshotRepository,
   DecisionRepository,
   ApprovalRepository,
   ContextCapsuleRepository,
 } from '../src/storage/index.js';
+import { AttentionInbox } from '../src/attention/attention-inbox.js';
+import { createAttentionItem } from '../src/attention/attention-item.js';
+import { reconcileJournalFailureItems } from '../src/attention/journal-failure-reconcile.js';
 import {
   AdapterFidelityTier,
   ApprovalAuthorityLevel,
@@ -82,7 +86,7 @@ describe('storage: database initialization & migrations', () => {
   it('initializes an in-memory database and runs migrations', () => {
     const db = new StorageDatabase({ path: ':memory:' });
     const result = db.open();
-    expect(result.appliedVersion).toBe(4);
+    expect(result.appliedVersion).toBe(5);
     expect(db.isOpen).toBe(true);
     db.close();
     expect(db.isOpen).toBe(false);
@@ -93,7 +97,7 @@ describe('storage: database initialization & migrations', () => {
     db.open();
     // Running runMigrations again on the same connection should be a no-op.
     const version = runMigrations(db.connection);
-    expect(version).toBe(4);
+    expect(version).toBe(5);
     db.close();
   });
 
@@ -885,7 +889,7 @@ describe('storage: migration framework is forward-only', () => {
       version: number;
       description: string;
     }[];
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(5);
     expect(rows[0].version).toBe(1);
     expect(rows[0].description).toContain('Create all tables');
     expect(rows[1].version).toBe(2);
@@ -894,6 +898,8 @@ describe('storage: migration framework is forward-only', () => {
     expect(rows[2].description).toContain('briefs');
     expect(rows[3].version).toBe(4);
     expect(rows[3].description).toContain('chat_messages');
+    expect(rows[4].version).toBe(5);
+    expect(rows[4].description).toContain('attention_inbox_snapshot');
     db.close();
   });
 
@@ -902,16 +908,150 @@ describe('storage: migration framework is forward-only', () => {
     const tmp = path.join(os.tmpdir(), `flor-test-${Date.now()}.db`);
     const db1 = new StorageDatabase({ path: tmp });
     const r1 = db1.open();
-    expect(r1.appliedVersion).toBe(4);
+    expect(r1.appliedVersion).toBe(5);
     db1.close();
 
     const db2 = new StorageDatabase({ path: tmp });
     const r2 = db2.open();
-    // Migrations should not be re-applied; version stays at 4.
-    expect(r2.appliedVersion).toBe(4);
+    // Migrations should not be re-applied; version stays at 5.
+    expect(r2.appliedVersion).toBe(5);
     db2.close();
 
     // Clean up.
     fs.unlinkSync(tmp);
+  });
+});
+
+describe('storage: attention inbox snapshot (issue #272)', () => {
+  let ctx: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => {
+    ctx = createTestDb();
+  });
+
+  afterEach(() => {
+    ctx.db.close();
+  });
+
+  it('returns null when no snapshot has been saved', () => {
+    const repo = new AttentionInboxSnapshotRepository(ctx.raw);
+    expect(repo.load()).toBeNull();
+  });
+
+  it('round-trips a snapshot through save → load', () => {
+    const repo = new AttentionInboxSnapshotRepository(ctx.raw);
+    const inbox = new AttentionInbox();
+    inbox.add(
+      createAttentionItem({
+        id: 'jf-1',
+        taskId: 'task-1',
+        kind: 'JournalFailure',
+        priority: 'Critical',
+        payload: { writes: [{ id: 'ev-1' }], source: 'event-journal' },
+      }),
+    );
+    repo.save(inbox.snapshot());
+
+    const loaded = repo.load();
+    expect(loaded).not.toBeNull();
+    const restored = AttentionInbox.restore(loaded!);
+    expect(restored.size).toBe(1);
+    expect(restored.list()[0]!.payload['writes']).toEqual([{ id: 'ev-1' }]);
+  });
+
+  it('overwrites the single row on subsequent saves', () => {
+    const repo = new AttentionInboxSnapshotRepository(ctx.raw);
+    const inbox = new AttentionInbox();
+    inbox.add(
+      createAttentionItem({
+        id: 'a',
+        taskId: 'task-1',
+        kind: 'FailedRun',
+        priority: 'High',
+      }),
+    );
+    repo.save(inbox.snapshot());
+    inbox.resolve('a');
+    repo.save(inbox.snapshot());
+
+    const rowCount = ctx.raw
+      .prepare('SELECT COUNT(*) AS n FROM attention_inbox_snapshot')
+      .get() as { n: number };
+    expect(rowCount.n).toBe(1);
+    const loaded = repo.load();
+    expect(loaded!.items[0]!.status).toBe('Resolved');
+  });
+
+  it('survives an observer-driven mutation → restart cycle end-to-end', () => {
+    // The daemon wiring in miniature: the observer persists on every
+    // mutation; a new process would load + restore the last snapshot.
+    const repo = new AttentionInboxSnapshotRepository(ctx.raw);
+    const inbox = new AttentionInbox();
+    inbox.setMutationObserver((i) => repo.save(i.snapshot()));
+    inbox.add(
+      createAttentionItem({
+        id: 'jf-1',
+        taskId: 'task-1',
+        kind: 'JournalFailure',
+        priority: 'Critical',
+        payload: { writes: [{ id: 'ev-9' }, { id: 'ev-10' }] },
+      }),
+    );
+    inbox.mergePayload('jf-1', { writes: [{ id: 'ev-9' }, { id: 'ev-10' }, { id: 'ev-11' }] });
+
+    // "Restart": a fresh inbox restored from the durable snapshot.
+    const restored = AttentionInbox.restore(repo.load()!);
+    const card = restored.list({ kind: 'JournalFailure' })[0]!;
+    expect(card.status).toBe('Pending');
+    expect(card.payload['writes']).toEqual([{ id: 'ev-9' }, { id: 'ev-10' }, { id: 'ev-11' }]);
+  });
+
+  it('reconciles restored JournalFailure writes against the real journal', () => {
+    // Seed FK parents + one "landed" event row.
+    const project = buildProject({ name: 'p', repo: { path: '/r' } });
+    ctx.projects.insert(project);
+    const task = buildTask({ projectId: project.id, objective: 'o' });
+    ctx.tasks.insert(task);
+    const agent = buildAgent({
+      name: 'Codex',
+      provider: 'codex',
+      fidelityTier: AdapterFidelityTier.A,
+      runtime: { kind: 'app-server' },
+    });
+    ctx.agents.insert(agent);
+    const session = buildSession({ taskId: task.id, agentId: agent.id });
+    ctx.sessions.insert(session);
+    const landed = buildEvent({ sessionId: session.id, taskId: task.id, kind: 'FileChanged' });
+    ctx.events.insert(landed);
+
+    // Restore an inbox whose JournalFailure card retains the landed row
+    // plus one that never reached the journal.
+    const inbox = new AttentionInbox();
+    inbox.add(
+      createAttentionItem({
+        id: 'jf-1',
+        taskId: task.id,
+        kind: 'JournalFailure',
+        priority: 'Critical',
+        payload: {
+          writes: [
+            { id: landed.id, kind: 'FileChanged' },
+            { id: 'ev-missing', kind: 'ToolStarted' },
+          ],
+        },
+      }),
+    );
+    const result = reconcileJournalFailureItems(inbox, ctx.events);
+    expect(result).toEqual({ landed: 1, resolved: 0, surviving: 1 });
+    const card = inbox.list()[0]!;
+    expect(card.payload['writes']).toEqual([{ id: 'ev-missing', kind: 'ToolStarted' }]);
+
+    // Land the survivor too — a second reconcile resolves the card.
+    ctx.events.insert(
+      buildEvent({ id: 'ev-missing', sessionId: session.id, taskId: task.id, kind: 'ToolStarted' }),
+    );
+    const result2 = reconcileJournalFailureItems(inbox, ctx.events);
+    expect(result2).toEqual({ landed: 1, resolved: 1, surviving: 0 });
+    expect(inbox.list()[0]!.status).toBe('Resolved');
   });
 });

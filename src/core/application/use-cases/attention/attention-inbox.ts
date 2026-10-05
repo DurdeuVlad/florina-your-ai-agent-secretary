@@ -68,12 +68,35 @@ export class AttentionInbox {
   private readonly items = new Map<string, AttentionItem>();
 
   /**
+   * Observer invoked synchronously after every successful mutation.
+   *
+   * The daemon uses this to persist a durable snapshot on change
+   * (issue #272): journal-failure cards retain the only copy of writes
+   * that never landed, so an in-memory-only inbox silently loses them on
+   * restart. The observer must not throw into the inbox — a persistence
+   * sink swallows and reports its own errors.
+   */
+  private mutationObserver: ((inbox: AttentionInbox) => void) | undefined;
+
+  /**
+   * Register (or clear, with `undefined`) the post-mutation observer.
+   *
+   * Only mutations that actually change the inbox notify the observer —
+   * an acknowledge of a missing item or a `take` on an empty inbox does
+   * not fire.
+   */
+  setMutationObserver(observer: ((inbox: AttentionInbox) => void) | undefined): void {
+    this.mutationObserver = observer;
+  }
+
+  /**
    * Insert an item into the inbox in priority order.
    *
    * If an item with the same id already exists it is replaced.
    */
   add(item: AttentionItem): void {
     this.items.set(item.id, { ...item });
+    this.notifyMutation();
   }
 
   /**
@@ -98,6 +121,7 @@ export class AttentionInbox {
     const top = active[0];
     if (top !== undefined) {
       this.items.delete(top.id);
+      this.notifyMutation();
     }
     return top;
   }
@@ -113,7 +137,10 @@ export class AttentionInbox {
   acknowledge(id: string): boolean {
     const item = this.items.get(id);
     if (item === undefined) return false;
-    item.status = 'Acknowledged';
+    if (item.status !== 'Acknowledged') {
+      item.status = 'Acknowledged';
+      this.notifyMutation();
+    }
     return true;
   }
 
@@ -129,7 +156,10 @@ export class AttentionInbox {
   resolve(id: string): boolean {
     const item = this.items.get(id);
     if (item === undefined) return false;
-    item.status = 'Resolved';
+    if (item.status !== 'Resolved') {
+      item.status = 'Resolved';
+      this.notifyMutation();
+    }
     return true;
   }
 
@@ -143,8 +173,11 @@ export class AttentionInbox {
   escalate(id: string): boolean {
     const item = this.items.get(id);
     if (item === undefined) return false;
-    item.priority = 'Critical';
-    item.status = 'Escalated';
+    if (item.status !== 'Escalated' || item.priority !== 'Critical') {
+      item.priority = 'Critical';
+      item.status = 'Escalated';
+      this.notifyMutation();
+    }
     return true;
   }
 
@@ -160,7 +193,9 @@ export class AttentionInbox {
   mergePayload(id: string, patch: Record<string, unknown>): boolean {
     const item = this.items.get(id);
     if (item === undefined) return false;
+    if (Object.keys(patch).length === 0) return true;
     Object.assign(item.payload as Record<string, unknown>, patch);
+    this.notifyMutation();
     return true;
   }
 
@@ -173,7 +208,11 @@ export class AttentionInbox {
    * @returns `true` if the item was found and removed.
    */
   remove(id: string): boolean {
-    return this.items.delete(id);
+    const removed = this.items.delete(id);
+    if (removed) {
+      this.notifyMutation();
+    }
+    return removed;
   }
 
   /**
@@ -195,11 +234,23 @@ export class AttentionInbox {
    * The snapshot is a deep copy of the current items; mutating the inbox
    * after taking a snapshot does not affect it. Restore with
    * {@link AttentionInbox.restore}.
+   *
+   * `options.maxResolved` bounds the persisted `Resolved` tail: resolved
+   * items are kept for history/audit, but a durable snapshot rewritten on
+   * every mutation cannot grow without bound (issue #272). When given,
+   * only the newest `maxResolved` resolved items (by `createdAt`) are
+   * included — active items are never pruned.
    */
-  snapshot(): AttentionInboxSnapshot {
-    return {
-      items: [...this.items.values()].map(cloneAttentionItem),
-    };
+  snapshot(options?: { readonly maxResolved?: number }): AttentionInboxSnapshot {
+    let items = [...this.items.values()];
+    if (options?.maxResolved !== undefined) {
+      const resolved = items
+        .filter((i) => i.status === 'Resolved')
+        .sort(compareAttentionItems)
+        .slice(-options.maxResolved);
+      items = items.filter((i) => i.status !== 'Resolved').concat(resolved);
+    }
+    return { items: items.map(cloneAttentionItem) };
   }
 
   /**
@@ -236,6 +287,11 @@ export class AttentionInbox {
   /* ---------------------------------------------------------------- *
    * Internal
    * ---------------------------------------------------------------- */
+
+  /** Notify the registered mutation observer (issue #272). */
+  private notifyMutation(): void {
+    this.mutationObserver?.(this);
+  }
 
   /** All active (Pending or Escalated) items, ordered by priority then createdAt (FIFO). */
   private activeSorted(): AttentionItem[] {

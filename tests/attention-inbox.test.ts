@@ -458,6 +458,72 @@ describe('AttentionInbox', () => {
       expect(snap2.items.sort(compareAttentionItems).map((i) => i.id)).toEqual(['1', '2']);
     });
   });
+
+  describe('mutation observer (issue #272)', () => {
+    it('fires on every successful mutation', () => {
+      const fired: string[] = [];
+      inbox.setMutationObserver(() => fired.push('fired'));
+      inbox.add(item('1', 'High', '2026-01-01T00:00:00.000Z'));
+      inbox.add(item('2', 'Low', '2026-01-01T00:00:00.000Z'));
+      inbox.acknowledge('1');
+      inbox.escalate('2');
+      inbox.mergePayload('1', { extra: true });
+      inbox.resolve('1');
+      inbox.remove('2');
+      expect(fired.length).toBe(7);
+    });
+
+    it('fires on take only when an item was removed', () => {
+      const fired: string[] = [];
+      inbox.add(item('1', 'High', '2026-01-01T00:00:00.000Z'));
+      inbox.setMutationObserver(() => fired.push('fired'));
+      expect(inbox.take()?.id).toBe('1');
+      expect(inbox.take()).toBeUndefined();
+      expect(fired.length).toBe(1);
+    });
+
+    it('does not fire on no-op mutations', () => {
+      const fired: string[] = [];
+      inbox.setMutationObserver(() => fired.push('fired'));
+      expect(inbox.acknowledge('missing')).toBe(false);
+      expect(inbox.resolve('missing')).toBe(false);
+      expect(inbox.escalate('missing')).toBe(false);
+      expect(inbox.mergePayload('missing', {})).toBe(false);
+      expect(inbox.remove('missing')).toBe(false);
+      expect(fired.length).toBe(0);
+    });
+
+    it('does not fire when the item is already in the target state', () => {
+      const fired: string[] = [];
+      inbox.add(
+        item('1', 'High', '2026-01-01T00:00:00.000Z', { status: 'Acknowledged' }),
+      );
+      inbox.add(item('2', 'Critical', '2026-01-01T00:00:00.000Z', { status: 'Resolved' }));
+      inbox.setMutationObserver(() => fired.push('fired'));
+      expect(inbox.acknowledge('1')).toBe(true); // found, but no state change
+      expect(inbox.resolve('2')).toBe(true);
+      expect(inbox.mergePayload('1', {})).toBe(true); // empty patch
+      expect(fired.length).toBe(0);
+    });
+
+    it('passes the inbox so the observer can snapshot current state', () => {
+      const snapshots: AttentionInboxSnapshot[] = [];
+      inbox.setMutationObserver((i) => snapshots.push(i.snapshot()));
+      inbox.add(item('1', 'High', '2026-01-01T00:00:00.000Z'));
+      inbox.add(item('2', 'Low', '2026-01-01T00:00:00.000Z'));
+      expect(snapshots.length).toBe(2);
+      expect(snapshots[1]!.items.length).toBe(2);
+    });
+
+    it('can be cleared with undefined', () => {
+      const fired: string[] = [];
+      inbox.setMutationObserver(() => fired.push('fired'));
+      inbox.add(item('1', 'High', '2026-01-01T00:00:00.000Z'));
+      inbox.setMutationObserver(undefined);
+      inbox.add(item('2', 'Low', '2026-01-01T00:00:00.000Z'));
+      expect(fired.length).toBe(1);
+    });
+  });
 });
 
 /* ------------------------------------------------------------------ *

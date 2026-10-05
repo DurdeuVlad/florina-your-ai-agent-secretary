@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { WebSocket } from 'ws';
+import { DaemonClient } from '../src/cli/client.js';
 
 import {
   FlorinaDaemon,
@@ -12,8 +13,16 @@ import {
   type ApiResponse,
   type EventStreamMessage,
 } from '../src/daemon/index.js';
-import { buildProject } from '../src/domain/index.js';
+import {
+  buildAgent,
+  buildEvent,
+  buildProject,
+  buildSession,
+  buildTask,
+  AdapterFidelityTier,
+} from '../src/domain/index.js';
 import type { SupervisorEvent } from '../src/domain/index.js';
+import { AttentionInboxSnapshotRepository, runMigrations } from '../src/storage/index.js';
 
 /**
  * Helper: create a unique lockfile path per test so single-instance checks
@@ -710,5 +719,145 @@ describe('daemon: integration (start, API, events, stop)', () => {
     client.close();
     await daemon.stop();
     expect(daemon.isRunning).toBe(false);
+  });
+});
+
+describe('daemon: attention inbox persistence (issue #272)', () => {
+  let lockfile: string;
+  let dbPath: string;
+
+  beforeEach(() => {
+    lockfile = uniqueLockfile();
+    dbPath = path.join(
+      os.tmpdir(),
+      `florina-persist-${process.pid}-${Math.random().toString(36).slice(2)}.db`,
+    );
+  });
+
+  afterEach(() => {
+    for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, lockfile]) {
+      try {
+        fs.unlinkSync(f);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  function makeDaemon(): FlorinaDaemon {
+    return new FlorinaDaemon({
+      port: 0,
+      mcpPort: 0,
+      lockfile,
+      dbPath,
+      installSignalHandlers: false,
+    });
+  }
+
+  it('restores an attention card across a restart on a persistent db', async () => {
+    // Boot 1: an AgentFailed event surfaces a FailedRun card through the
+    // real aggregator pipeline; the mutation observer persists it.
+    const first = makeDaemon();
+    await first.start();
+    first.publishEvent({
+      type: 'AgentFailed',
+      timestamp: new Date().toISOString(),
+      taskId: 'task-persist',
+      sessionId: 'sess-p',
+      agentId: 'codex',
+      adapterFidelityTier: 'A',
+      task: 'Persist me',
+      error: 'boom',
+      recoverable: true,
+    } as SupervisorEvent);
+    await new Promise((r) => setTimeout(r, 50));
+    await first.stop();
+
+    // Boot 2 on the same db: the card survived.
+    const second = makeDaemon();
+    await second.start();
+    const client = new DaemonClient({ port: second.port, timeoutMs: 5000 });
+    const res = await client.send({ kind: 'query-inbox' });
+    await second.stop();
+
+    expect(res.ok).toBe(true);
+    expect('items' in res).toBe(true);
+    if ('items' in res) {
+      expect(res.items.some((i) => i.kind === 'FailedRun' && i.taskId === 'task-persist')).toBe(
+        true,
+      );
+    }
+  });
+
+  it('reconciles a restored JournalFailure card against the real journal', async () => {
+    // Seed a persistent db: FK parents + one landed event + an inbox
+    // snapshot whose card retains the landed row and one missing row.
+    const Database = (await import('better-sqlite3')).default;
+    const raw = new Database(dbPath);
+    runMigrations(raw);
+    const { ProjectRepository, TaskRepository, AgentRepository, SessionRepository } =
+      await import('../src/storage/index.js');
+    const { EventRepository } = await import('../src/storage/index.js');
+    const project = buildProject({ name: 'p', repo: { path: '/r' } });
+    new ProjectRepository(raw).insert(project);
+    const task = buildTask({ projectId: project.id, objective: 'o' });
+    new TaskRepository(raw).insert(task);
+    const agent = buildAgent({
+      name: 'Codex',
+      provider: 'codex',
+      fidelityTier: AdapterFidelityTier.A,
+      runtime: { kind: 'app-server' },
+    });
+    new AgentRepository(raw).insert(agent);
+    const session = buildSession({ taskId: task.id, agentId: agent.id });
+    new SessionRepository(raw).insert(session);
+    const events = new EventRepository(raw);
+    const landed = buildEvent({ sessionId: session.id, taskId: task.id, kind: 'FileChanged' });
+    events.insert(landed);
+    new AttentionInboxSnapshotRepository(raw).save({
+      items: [
+        {
+          id: 'jf-seeded',
+          taskId: task.id,
+          kind: 'JournalFailure',
+          priority: 'Critical',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          status: 'Pending',
+          payload: {
+            writes: [{ id: landed.id, kind: 'FileChanged' }, { id: 'ev-missing' }],
+            source: 'event-journal',
+            retryable: true,
+          },
+        },
+      ],
+    });
+    raw.close();
+
+    const daemon = makeDaemon();
+    await daemon.start();
+
+    // The boot reconcile ran: the snapshot row was rewritten with only
+    // the still-missing write retained.
+    const after = new Database(dbPath, { readonly: true });
+    const row = after
+      .prepare('SELECT payload FROM attention_inbox_snapshot WHERE id = 1')
+      .get() as { payload: string };
+    after.close();
+    const card = (JSON.parse(row.payload).items as { payload: { writes: { id: string }[] } }[])[0]!;
+    expect(card.payload.writes).toEqual([{ id: 'ev-missing' }]);
+
+    // And the live inbox reflects the same trimmed card.
+    const client = new DaemonClient({ port: daemon.port, timeoutMs: 5000 });
+    const res = await client.send({ kind: 'query-inbox' });
+    await daemon.stop();
+    expect(res.ok).toBe(true);
+    expect('items' in res).toBe(true);
+    if ('items' in res) {
+      const card = res.items.find((i) => i.id === 'jf-seeded');
+      expect(card).toBeDefined();
+      expect((card!.payload['writes'] as { id: string }[]).map((w) => w.id)).toEqual([
+        'ev-missing',
+      ]);
+    }
   });
 });

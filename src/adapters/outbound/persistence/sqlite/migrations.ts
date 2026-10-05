@@ -136,6 +136,26 @@ export const MIGRATION_004_CHAT: Migration = {
 };
 
 /**
+ * Migration 5 (issue #272): the `attention_inbox_snapshot` table — a
+ * single-row blob holding the serialized attention inbox so approvals,
+ * escalations, and `JournalFailure` retained writes survive daemon
+ * restarts.
+ */
+export const MIGRATION_005_ATTENTION_INBOX_SNAPSHOT: Migration = {
+  version: 5,
+  description: 'Create the attention_inbox_snapshot table',
+  run: (db: Database.Database) => {
+    db.exec(/* sql */ `
+      CREATE TABLE IF NOT EXISTS attention_inbox_snapshot (
+        id       INTEGER PRIMARY KEY CHECK (id = 1),
+        payload  TEXT NOT NULL,
+        saved_at TEXT NOT NULL
+      );
+    `);
+  },
+};
+
+/**
  * The ordered list of all known migrations. New migrations are appended here
  * with an incrementing version number; the framework applies only those not
  * yet recorded in the `_migrations` table.
@@ -145,6 +165,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_002_CAPABILITY_GRANTS,
   MIGRATION_003_BRIEFS,
   MIGRATION_004_CHAT,
+  MIGRATION_005_ATTENTION_INBOX_SNAPSHOT,
 ];
 
 /**

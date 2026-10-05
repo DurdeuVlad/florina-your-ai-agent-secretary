@@ -144,6 +144,22 @@ export interface BriefRepositoryPort {
 }
 
 /**
+ * Attention-inbox snapshot store (issue #272). The inbox's whole
+ * serialized state is persisted as one opaque blob — generic over the
+ * snapshot shape so the port stays decoupled from the inbox's
+ * serialization (same rationale as {@link CompletionDigestRepositoryPort}).
+ * Persisting the snapshot preserves the retained writes inside
+ * `JournalFailure` cards — the only copy of journal rows that never
+ * landed.
+ */
+export interface AttentionInboxStorePort<TSnapshot> {
+  /** The last saved snapshot, or `null` when none has been persisted. */
+  load(): TSnapshot | null;
+  /** Replace the persisted snapshot atomically. */
+  save(snapshot: TSnapshot): void;
+}
+
+/**
  * Completion digest store (issue #16/#37). Generic over the digest type so
  * the port stays decoupled from any one digest representation.
  */
