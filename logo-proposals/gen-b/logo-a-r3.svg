@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Florina — Confluence r3 (brand navy + app amber)</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#122A4C"/>
+      <stop offset="1" stop-color="#0D2040"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#tile)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M244 108 V334"/>
+    <path d="M152 132 V176 L244 262"/>
+    <path d="M360 214 H308 L244 262"/>
+    <path d="M208 400 H316"/>
+  </g>
+  <rect x="218" y="334" width="52" height="52" rx="8" fill="#E3A94A"/>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Florina mark — Leafed F (r3, brand navy + app amber)</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#122A4C"/>
+      <stop offset="1" stop-color="#0D2040"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="104" fill="url(#tile)"/>
+  <g fill="#FFFFFF">
+    <rect x="142" y="146" width="44" height="232"/>
+    <rect x="142" y="146" width="172" height="44"/>
+    <rect x="142" y="246" width="104" height="44"/>
+    <circle cx="164" cy="356" r="22"/>
+    <circle cx="246" cy="268" r="22"/>
+  </g>
+  <path d="M310 180 Q356 146 368 90 Q335 121 318 162 Z" fill="#a98af0"/>
+</svg>

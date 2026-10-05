@@ -58,7 +58,7 @@ export class ElectronWindowBackend implements WindowBackend {
       alwaysOnTop: options.alwaysOnTop ?? false,
       skipTaskbar: options.skipTaskbar ?? false,
       show: false,
-      backgroundColor: '#0d1117',
+      backgroundColor: '#0e0a16',
       webPreferences: {
         // Renderer gets DOM + the whitelisted contextBridge API only. No
         // Node integration; the CJS preload exposes florina.on/command.

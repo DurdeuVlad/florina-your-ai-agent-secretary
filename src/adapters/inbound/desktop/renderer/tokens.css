@@ -2,27 +2,28 @@
  * Production renderer stylesheet; docs/mockups/mockup.css is its twin —
  * change a token in one, mirror it in the other. */
 :root {
-  --bg: #0b0b0c;
-  --surface: #131315;
-  --panel: #1c1c1f;
-  --panel-raised: #232327;
-  --border: #2d2d31;
-  --text: #ececf1;
-  --muted: #93939d;
-  --accent: #4f8dff;
-  --accent-contrast: #071022;
+  --bg: #0e0a16;
+  --surface: #151022;
+  --panel: #1d1730;
+  --panel-raised: #261e3f;
+  --border: #342b4e;
+  --text: #eeecf5;
+  --muted: #9b93b3;
+  --accent: #a98af0;
+  --accent-contrast: #1a1028;
   --green: #3fb984;
   --amber: #e3a94a;
   --red: #ef5959;
   --orange: #e2814f;
   --purple: #a98af0;
-  --slate: #7d7d87;
-  /* views emit color: 'blue' (issue #265) — alias to the accent blue;
-   * yellow/gray alias the nearest tokens (dormant approval/PTT paths) */
-  --blue: var(--accent);
+  --slate: #847d99;
+  /* views emit color: 'blue' (issue #265) — kept as a literal supporting
+   * hue for the Medium/info rung of the severity ladder; yellow/gray
+   * alias the nearest tokens (dormant approval/PTT paths) */
+  --blue: #4f8dff;
   --yellow: var(--amber);
   --gray: var(--slate);
-  --border-hover: #3a3a40;
+  --border-hover: #4a3d6e;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -62,6 +63,20 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+}
+/* ambient brand presence: one faint violet wash bleeding down from the
+ * top — flat, fixed, never animated */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto;
+  height: 480px;
+  pointer-events: none;
+  background: radial-gradient(
+    900px 320px at 30% 0%,
+    rgba(169, 138, 240, 0.07),
+    transparent 70%
+  );
 }
 .shell {
   display: flex;
@@ -548,7 +563,7 @@ button.danger:hover {
 }
 @keyframes pulse {
   50% {
-    box-shadow: 0 0 0 6px rgba(79, 141, 255, 0.16);
+    box-shadow: 0 0 0 6px rgba(169, 138, 240, 0.16);
   }
 }
 .hud .hudtext {
@@ -623,7 +638,7 @@ button.danger:hover {
 }
 @keyframes pulse-orb {
   50% {
-    box-shadow: 0 0 0 14px rgba(79, 141, 255, 0.16);
+    box-shadow: 0 0 0 14px rgba(169, 138, 240, 0.16);
   }
 }
 @media (prefers-reduced-motion: reduce) {
