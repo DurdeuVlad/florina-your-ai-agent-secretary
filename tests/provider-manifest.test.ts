@@ -19,6 +19,7 @@ import {
   type ProviderManifest,
 } from '../src/core/application/use-cases/readiness/provider-manifests.js';
 import {
+  providerFixFor,
   providerFixIds,
   providerInstallerIds,
   type ProviderInstaller,
@@ -72,6 +73,7 @@ describe('provider manifest — id integrity', () => {
       'copilot',
       'opencode',
       'cursor',
+      'aider',
     ].sort();
     expect([...providerManifestIds()].sort()).toEqual(adapterIds);
   });
@@ -255,7 +257,7 @@ describe('provider manifest — safety invariants', () => {
   });
 
   it('transport kinds in use are exactly the set the attachment switch handles', () => {
-    const KNOWN_KINDS = new Set(['hooks', 'acp', 'app-server', 'stream-json']);
+    const KNOWN_KINDS = new Set(['hooks', 'acp', 'app-server', 'stream-json', 'print-run']);
     for (const m of PROVIDER_MANIFESTS) {
       expect(KNOWN_KINDS.has(m.transport.kind)).toBe(true);
     }
@@ -459,6 +461,49 @@ describe('provider manifest — the real registry is load-bearing', () => {
 
   it('cursor declares `agent acp` — its documented ACP subcommand (#305)', () => {
     expect(providerManifest('cursor')?.transport).toEqual({ kind: 'acp', args: ['acp'] });
+  });
+
+  it('aider declares the print-run transport with its verified non-interactive flags (#306)', () => {
+    // Docs-verified flags (aider.chat/docs/scripting.html): message
+    // file + always-yes + plain output; --no-auto-commits keeps aider
+    // from widening into git history. '{model}' as a single-token
+    // arg drops atomically when no model is pinned.
+    expect(providerManifest('aider')?.transport).toEqual({
+      kind: 'print-run',
+      args: [
+        '--yes-always',
+        '--no-stream',
+        '--no-pretty',
+        '--no-auto-commits',
+        '--no-gitignore',
+        '--no-analytics',
+        '--no-check-update',
+        '--chat-history-file',
+        '{messageDir}/chat-history.md',
+        '--input-history-file',
+        '{messageDir}/input-history',
+        '--llm-history-file',
+        '{messageDir}/llm-history.jsonl',
+        '--message-file',
+        '{messageFile}',
+        '--model={model}',
+      ],
+      // aider exits 0 on failed model calls (verified live) — the
+      // litellm error family in the tail means AgentFailed; a loose
+      // `litellm.\w+` would false-positive on mid-run echoes/retries.
+      failurePatterns: [
+        '^litellm\\.[\\w.]*?(?:Error|Exception|Timeout|Overloaded)\\b',
+        'API provider is not able to authenticate',
+      ],
+    });
+  });
+
+  it('aider has no provider-native login — its signIn is a model-key recipe (#306)', () => {
+    const fix = providerFixFor('aider');
+    // A run-command here would fabricate `aider login`; aider's auth
+    // IS a model provider key, so the recipe must steer to the vault.
+    expect(fix?.kind).toBe('store-key');
+    expect(fix?.detail).toContain('florina keys set');
   });
 
   it("executables are unique, and a run-command recipe never leads with ANOTHER provider's exe", () => {

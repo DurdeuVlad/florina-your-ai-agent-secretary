@@ -128,3 +128,11 @@ export type {
 /* Antigravity agy headless adapter (Tier D, issue #62) */
 export { AgyAdapter, AGY_ADAPTER_ID, nodeAgySpawner } from './agy-adapter.js';
 export type { AgyAdapterOptions, AgyProcess, AgySpawner } from './agy-adapter.js';
+
+/* Print-run adapter — plain-stdout providers like aider (Tier E, issue #306) */
+export { PrintRunAdapter, nodePrintRunSpawner } from './print-run-adapter.js';
+export type {
+  PrintRunAdapterOptions,
+  PrintRunProcess,
+  PrintRunSpawner,
+} from './print-run-adapter.js';

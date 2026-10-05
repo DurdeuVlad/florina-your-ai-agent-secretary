@@ -44,6 +44,7 @@ import { ClaudeHooksAdapter } from '../adapters/outbound/agents/claude-hooks-ada
 import { CodexAdapter } from '../adapters/outbound/agents/codex-adapter.js';
 import { AcpAdapter } from '../adapters/outbound/agents/acp-adapter.js';
 import { AgyAdapter } from '../adapters/outbound/agents/agy-adapter.js';
+import { PrintRunAdapter } from '../adapters/outbound/agents/print-run-adapter.js';
 import { spawnCli } from '../adapters/outbound/agents/spawn-cli.js';
 
 /** A provider whose CLI was found and registered. */
@@ -301,6 +302,18 @@ async function tryAttach(manifest: ProviderManifest, ctx: AttachCtx): Promise<At
       return { ok: true, command };
     case 'stream-json':
       registry.register(id, () => new AgyAdapter(null, { command }));
+      return { ok: true, command };
+    case 'print-run':
+      registry.register(
+        id,
+        () =>
+          new PrintRunAdapter(null, {
+            id,
+            command,
+            args: transport.args,
+            failurePatterns: transport.failurePatterns?.map((p) => new RegExp(p)),
+          }),
+      );
       return { ok: true, command };
     case 'app-server': {
       try {

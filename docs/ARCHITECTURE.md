@@ -120,16 +120,41 @@ temporary compatibility surfaces, not the public API.
 
 ## Provider Surfaces
 
-| Provider          | Adapter surface                                                     | Tier  | Quota signal                                                                            | Session resume                  |
-| ----------------- | ------------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------- | ------------------------------- |
-| Codex             | `codex app-server` JSON-RPC                                         | A     | `account/rateLimits/read` → `usedPercent`, `resetsAt` (5h + weekly)                     | thread resume                   |
-| Claude Code       | CLI + lifecycle hooks / Agent SDK                                   | B     | statusline `rate_limits` (5h + 7d `resets_at`); `anthropic-ratelimit-unified-*` headers | `--resume`                      |
-| Devin CLI         | `devin acp` (ACP/JSON-RPC stdio); `-p` print mode; hooks            | C     | none documented → reactive                                                              | `-c` / `-r` / `/fork`           |
-| Gemini CLI        | `gemini --experimental-acp` (ACP); `-p --output-format stream-json` | C / D | none → 429 detection + session-file token sums                                          | `--continue`                    |
-| Antigravity `agy` | `agy -p --output-format stream-json`                                | D     | none → reactive                                                                         | `--continue` / `--conversation` |
-| Copilot CLI       | `copilot --acp` (ACP/JSON-RPC stdio, public preview)                | C     | none documented → reactive                                                              | `--resume=<id>` / `--continue`  |
-| OpenCode          | `opencode acp` (ACP/JSON-RPC stdio)                                 | C     | none documented → reactive                                                              | `opencode run --session <id>`   |
-| Cursor CLI        | `agent acp` (ACP/JSON-RPC stdio)                                    | C     | none documented → reactive                                                              | `agent resume`                  |
+| Provider          | Adapter surface                                                     | Tier  | Quota signal                                                                            | Session resume                      |
+| ----------------- | ------------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------- | ----------------------------------- |
+| Codex             | `codex app-server` JSON-RPC                                         | A     | `account/rateLimits/read` → `usedPercent`, `resetsAt` (5h + weekly)                     | thread resume                       |
+| Claude Code       | CLI + lifecycle hooks / Agent SDK                                   | B     | statusline `rate_limits` (5h + 7d `resets_at`); `anthropic-ratelimit-unified-*` headers | `--resume`                          |
+| Devin CLI         | `devin acp` (ACP/JSON-RPC stdio); `-p` print mode; hooks            | C     | none documented → reactive                                                              | `-c` / `-r` / `/fork`               |
+| Gemini CLI        | `gemini --experimental-acp` (ACP); `-p --output-format stream-json` | C / D | none → 429 detection + session-file token sums                                          | `--continue`                        |
+| Antigravity `agy` | `agy -p --output-format stream-json`                                | D     | none → reactive                                                                         | `--continue` / `--conversation`     |
+| Copilot CLI       | `copilot --acp` (ACP/JSON-RPC stdio, public preview)                | C     | none documented → reactive                                                              | `--resume=<id>` / `--continue`      |
+| OpenCode          | `opencode acp` (ACP/JSON-RPC stdio)                                 | C     | none documented → reactive                                                              | `opencode run --session <id>`       |
+| Cursor CLI        | `agent acp` (ACP/JSON-RPC stdio)                                    | C     | none documented → reactive                                                              | `agent resume`                      |
+| Aider             | `aider --message-file --yes-always` print mode (plain stdout)       | E     | none documented → reactive                                                              | `--restore-chat-history` (chat log) |
+
+Aider auth caveat: aider has no account of its own — its credential IS a
+model provider key in the environment (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
+`DEEPSEEK_API_KEY`), so its sign-in recipe is a `store-key` pointer to the
+vault, never a fabricated `aider login`. Known limitation: keys stored in
+the vault are injected at dispatch time — the env-var credential probe
+can't see them, so `florina status` can read "not signed in" for aider
+even after `keys set` (runs still work; the vault-injection path is the
+real auth). Unifying vault evidence into the probe is a follow-up.
+
+Its print-run transport (`kind: 'print-run'`) is the weakest supervision
+surface: stdout lines become `AgentProgress` (capped, with an honest
+omitted-count marker) and the terminal event is decided by `'close'`
+plus tail-windowed `failurePatterns` — aider exits 0 after printing
+litellm errors, so the last lines carry the truth. `--yes-always` is
+paired with `--no-gitignore` (aider would otherwise edit the tracked
+`.gitignore` on first run), `--no-analytics` (never silently opt the user
+into telemetry), `--no-auto-commits`, and history files relocated into
+the run's temp dir. Residual: `.aider.tags.cache.*` under the repo root
+has no relocation flag — visible aider residue, safe to gitignore.
+`--message-file` content is message text only (aider's `commands.run`
+never parses it), so `/`-leading lines are safe. A prompt aider can't
+suppress stalls as silence, not a lie.
 
 OpenCode credential caveat: v2 stores `auth login` tokens inside
 `opencode.db`, which exists from first launch whether or not it holds a
@@ -152,7 +177,8 @@ per-platform installers. From that one entry the code derives:
 
 - **attachment** — `attachLocalAgentProviders` iterates manifests, resolves the
   executable (env override → PATH → candidate specs), and dispatches on
-  `transport.kind` to the right adapter (hooks / acp / app-server / stream-json);
+  `transport.kind` to the right adapter (hooks / acp / app-server / stream-json /
+  print-run);
 - **readiness** — `FIXES`, `INSTALLERS`, and `CREDENTIAL_EVIDENCE` are all
   `providerTables(PROVIDER_MANIFESTS)` derivations, so sign-in recipes,
   installers, and credential probes can never drift from the provider list.
