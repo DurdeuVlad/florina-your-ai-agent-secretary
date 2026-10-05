@@ -31,7 +31,11 @@ export interface DevinProjectScannerOptions {
 export function decodeWorkspaceUri(uri: string): string {
   if (uri.startsWith('file://')) {
     try {
-      return fileURLToPath(uri).replace(/\\/g, '/');
+      // A `file:///x:/` URI encodes a Windows drive path on every
+      // platform — on POSIX, fileURLToPath leaves it as `/x:/...`,
+      // which is a meaningless path. Strip the leading slash the same
+      // way the URL-parse fallback below does (#284).
+      return fileURLToPath(uri).replace(/\\/g, '/').replace(/^\/([a-zA-Z]:)/, '$1');
     } catch {
       try {
         const parsed = new URL(uri);

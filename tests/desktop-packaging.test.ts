@@ -58,7 +58,9 @@ describe('resolveRendererAsset — dev mode', () => {
 });
 
 describe('resolveRendererAsset — packaged mode', () => {
-  const resourcesPath = path.join('C:', 'Program Files', 'Florina', 'resources');
+  // Genuinely absolute on every platform — `path.join('C:', …)` is
+  // not absolute on POSIX, which broke the Linux CI run (#284).
+  const resourcesPath = path.resolve('Program Files', 'Florina', 'resources');
   const resolve = makeResolver(true, resourcesPath, '');
 
   it('resolves index.html under process.resourcesPath/renderer', () => {
@@ -88,7 +90,7 @@ describe('resolveRendererAsset — packaged mode', () => {
 });
 
 describe('resolveRendererAsset — path safety', () => {
-  const resourcesPath = path.join('C:', 'resources');
+  const resourcesPath = path.resolve('resources');
   const resolve = makeResolver(true, resourcesPath, '');
 
   it('produces a path under resourcesPath for any valid filename', () => {
