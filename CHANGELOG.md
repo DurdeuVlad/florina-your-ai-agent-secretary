@@ -5,6 +5,47 @@ All notable changes to Florina are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-05
+
+### Provider onboarding (milestone 13)
+
+- **`florina install <provider>`** — when a provider CLI isn't installed,
+  Florina offers its verified-official installer (npm for Claude Code, Codex,
+  Gemini; the providers' own installers for Devin and Antigravity on Windows)
+  and runs it in a visible terminal only after the explicit command. Platforms
+  without a verified installer get manual instructions — never a guessed
+  command. (#307)
+- **Provider manifests** — one declarative spec per provider now drives
+  executable detection, transport, credential evidence, sign-in recipes, and
+  installers. Adding a provider is a single manifest entry. (#300)
+- **Honest readiness for every provider** — `florina status` reports real
+  auth states (`signed in` / `not signed in` / `auth failing` / `unknown`),
+  classified failures, and a one-command fix per provider. Credential probes
+  are existence-only and never read secrets. Devin's `credentials.toml` and
+  Antigravity's OS-keyring entry are now detected on Windows. (#294, #298)
+- Sign-in flows open the correct commands (`devin auth login`, not
+  `devin login`) and preflight the binary before spawning a terminal.
+
+### Secrets
+
+- **Encrypted credential vault wired end-to-end** — `florina keys` /
+  `secrets-*` commands store secrets encrypted at rest; stored values are
+  injected into agent process environments at dispatch, and a saved chat
+  model key is used as a fallback when no env var is set. (#292, #293)
+
+### The Florina Method
+
+- Every agent dispatch now binds to the Florina Method contract asset, and
+  the Secretary composes it into its prompt — a shared, inspectable
+  definition of how Florina brokers attention. (#286–#288)
+
+### Design & packaging
+
+- Violet theme palette across renderer tokens and mockups, regenerated app
+  icon (source SVG finalists kept in `logo-proposals/`), and an
+  electron-builder `extraMetadata` fix so packaged builds boot the desktop
+  composition root. (#309)
+
 ## [0.1.0] - 2026-10-01
 
 First public release.
