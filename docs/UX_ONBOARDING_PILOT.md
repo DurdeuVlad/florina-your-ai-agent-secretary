@@ -109,8 +109,11 @@ before the pilot counts as resolved.
 
 ## 7. Status
 
-**Blocked — needs human participants.** Session infrastructure is ready:
-this brief plus `docs/pilot/session-materials.md` (disposable sandbox
-spec, per-participant evidence sheet, session checklist). Open decisions
-from the issue: recruitment owner, consent record keeping, and sample
-count confirmation.
+**Deferred — revisit after release.** Product-owner decision: recruitment
+is postponed; the pilot will run when new users are reachable post-release.
+Sample is now "as many as recruitment yields" rather than a fixed five;
+the default consent approach is the verbal script in §3 (no recording
+unless the participant opts in). Infrastructure is ready: this brief plus
+`docs/pilot/session-materials.md` (disposable sandbox spec,
+per-participant evidence sheet, session checklist). No participant
+sessions have run, so no human-validation claims exist.
