@@ -1445,6 +1445,7 @@ describe('florina auth CLI (#294)', () => {
       } as unknown as CliDependencies['client'],
       runner: {
         start: () => Promise.resolve(1),
+        startDetached: () => Promise.resolve({ pid: 1, logFile: '/tmp/daemon.log' }),
         stop: () => Promise.resolve(true),
         status: () => Promise.resolve({ running: true, port: 17419 }),
       },

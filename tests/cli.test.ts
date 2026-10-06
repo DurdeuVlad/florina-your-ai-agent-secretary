@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -506,6 +507,276 @@ describe('DaemonRunner', () => {
     expect(runner.readPid()).toBe(process.pid);
     await runner.stop();
   });
+
+  /** Claim a free port, then release it for the child fixture to bind. */
+  async function freePort(): Promise<number> {
+    const probe = net.createServer();
+    const port = await new Promise<number>((resolve) => {
+      probe.listen(0, '127.0.0.1', () => resolve((probe.address() as net.AddressInfo).port));
+    });
+    await new Promise((resolve) => probe.close(resolve));
+    return port;
+  }
+
+  const DETACH_FIXTURE = path.join(__dirname, 'fixtures', 'detach-fake-daemon.cjs');
+
+  /** Set the fixture env vars and return a restore function. */
+  function fixtureEnv(port: number, pidFile: string): () => void {
+    const saved: Record<string, string | undefined> = {};
+    for (const [key, value] of [
+      ['FLORINA_TEST_PORT', String(port)],
+      ['FLORINA_TEST_PIDFILE', pidFile],
+      ['FLORINA_TEST_FAIL', undefined],
+    ] as const) {
+      saved[key] = process.env[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    return () => {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    };
+  }
+
+  it('startDetached spawns a real child; status/stop manage it end-to-end', async () => {
+    const pidFile = uniquePidFile();
+    const { dbPath } = isolatedDbPath();
+    const port = await freePort();
+    const runner = new DaemonRunner({
+      pidFile,
+      lockfile: uniqueLockfile(),
+      dbPath,
+      port,
+      mcpPort: null,
+    });
+    const restore = fixtureEnv(port, pidFile);
+    try {
+      const { pid, logFile } = await runner.startDetached(DETACH_FIXTURE);
+      expect(pid).toBeGreaterThan(0);
+      expect(pid).not.toBe(process.pid);
+      expect(logFile).toContain('daemon.log');
+      expect(fs.existsSync(logFile)).toBe(true);
+      // status() sees the detached daemon: live pid + bound port.
+      const status = await runner.status();
+      expect(status.running).toBe(true);
+      expect(status.pid).toBe(pid);
+      // stop() signals it through the pidfile — full detached lifecycle.
+      expect(await runner.stop()).toBe(true);
+      // The child's port release isn't instant on SIGTERM — poll briefly.
+      let running = true;
+      for (let i = 0; i < 25 && running; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        running = (await runner.status()).running;
+      }
+      expect(running).toBe(false);
+    } finally {
+      restore();
+      const orphan = runner.readPid();
+      if (orphan !== undefined) {
+        try {
+          process.kill(orphan, 'SIGTERM');
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  });
+
+  it('startDetached surfaces an early child exit instead of fake success', async () => {
+    const pidFile = uniquePidFile();
+    const { dbPath } = isolatedDbPath();
+    const port = await freePort();
+    const runner = new DaemonRunner({
+      pidFile,
+      lockfile: uniqueLockfile(),
+      dbPath,
+      port,
+      mcpPort: null,
+    });
+    const restore = fixtureEnv(port, pidFile);
+    process.env['FLORINA_TEST_FAIL'] = '1';
+    try {
+      await expect(runner.startDetached(DETACH_FIXTURE)).rejects.toThrow(
+        /exited during startup|PID file/,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it('startDetached times out when the child never writes a pid file — no fake success', async () => {
+    const pidFile = uniquePidFile();
+    const { dbPath } = isolatedDbPath();
+    const port = await freePort();
+    const runner = new DaemonRunner({
+      pidFile,
+      lockfile: uniqueLockfile(),
+      dbPath,
+      port,
+      mcpPort: null,
+    });
+    const restore = fixtureEnv(port, pidFile);
+    // Point the fixture's pidfile elsewhere — the runner's file stays empty.
+    process.env['FLORINA_TEST_PIDFILE'] = uniquePidFile();
+    try {
+      await expect(runner.startDetached(DETACH_FIXTURE, { timeoutMs: 2500 })).rejects.toThrow(
+        /PID file/,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it('a stale pid file naming a live but unbound pid is not a running daemon', async () => {
+    const pidFile = uniquePidFile();
+    const { dbPath } = isolatedDbPath();
+    const port = await freePort();
+    fs.writeFileSync(pidFile, String(process.pid), 'utf8'); // alive, but port free
+    const runner = new DaemonRunner({
+      pidFile,
+      lockfile: uniqueLockfile(),
+      dbPath,
+      port,
+      mcpPort: null,
+    });
+    expect((await runner.status()).running).toBe(false);
+    // stop() must refuse rather than SIGTERM a recycled pid.
+    expect(await runner.stop()).toBe(false);
+    expect(fs.existsSync(pidFile)).toBe(false); // stale file cleaned
+  });
+});
+
+/* ================================================================== *
+ * start --detach (issue #323 — agent-drivable daemon lifecycle)
+ * ================================================================== */
+
+describe('start --detach', () => {
+  async function runStart(
+    argv: readonly string[],
+    runner: CliDependencies['runner'],
+  ): Promise<{ code: number; stdout: string; stderr: string }> {
+    let stdout = '';
+    let stderr = '';
+    const outSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stdout += c.toString();
+        return true;
+      });
+    const errSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stderr += c.toString();
+        return true;
+      });
+    try {
+      const code = await runCli([...argv], {
+        client: new DaemonClient({ port: 1 }),
+        runner,
+        createVoiceSession: async () => {
+          throw new Error('voice not used in these tests');
+        },
+      } satisfies CliDependencies);
+      return { code, stdout, stderr };
+    } finally {
+      outSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  }
+
+  function detachRunner(over: Partial<CliDependencies['runner']> = {}) {
+    return {
+      status: async () => ({ running: false, port: 17419 }),
+      start: async () => 1111,
+      startDetached: async () => ({ pid: 4242, logFile: '/x/daemon.log' }),
+      stop: async () => false,
+      ...over,
+    };
+  }
+
+  it('start --detach reports the spawned pid and log path', async () => {
+    const { code, stdout } = await runStart(['start', '--detach'], detachRunner());
+    expect(code).toBe(0);
+    expect(stdout).toContain('4242');
+    expect(stdout).toContain('daemon.log');
+  });
+
+  it('start --detach --json emits a machine-readable success doc', async () => {
+    const { code, stdout } = await runStart(['start', '--detach', '--json'], detachRunner());
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.started).toBe(true);
+    expect(doc.pid).toBe(4242);
+    expect(doc.logFile).toContain('daemon.log');
+  });
+
+  it('start --detach propagates a startup failure as exit 1', async () => {
+    const { code, stderr } = await runStart(
+      ['start', '--detach'],
+      detachRunner({
+        startDetached: async () => {
+          throw new Error('Daemon exited during startup (code 2) — see /x/daemon.log');
+        },
+      }),
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain('exited during startup');
+  });
+
+  it('start --detach --json emits a JSON error on startup failure', async () => {
+    const { code, stderr } = await runStart(
+      ['start', '--detach', '--json'],
+      detachRunner({
+        startDetached: async () => {
+          throw new Error('did not bind port 17419');
+        },
+      }),
+    );
+    expect(code).toBe(1);
+    expect(JSON.parse(stderr).error).toContain('did not bind');
+  });
+
+  it('start --json without --detach is a usage error', async () => {
+    const { code, stderr } = await runStart(['start', '--json'], detachRunner());
+    expect(code).toBe(1);
+    expect(stderr).toContain('Usage: florina start');
+  });
+
+  it('start --detach=<value> is a usage error', async () => {
+    const { code, stderr } = await runStart(['start', '--detach=yes'], detachRunner());
+    expect(code).toBe(1);
+    expect(stderr).toContain('Usage: florina start');
+  });
+
+  it('plain start still starts in the foreground', async () => {
+    let foregroundCalled = false;
+    let detachedCalled = false;
+    const { code, stdout } = await runStart(
+      ['start'],
+      detachRunner({
+        start: async () => {
+          foregroundCalled = true;
+          return 1111;
+        },
+        startDetached: async () => {
+          detachedCalled = true;
+          return { pid: 0, logFile: '' };
+        },
+      }),
+    );
+    expect(code).toBe(0);
+    expect(stdout).toContain('1111');
+    expect(foregroundCalled).toBe(true);
+    expect(detachedCalled).toBe(false);
+  });
 });
 
 /* ================================================================== *
@@ -948,6 +1219,7 @@ describe('status --json', () => {
     return {
       status: async () => ({ running, port: 17419, pid: running ? 4321 : undefined }),
       start: async () => 0,
+      startDetached: async () => ({ pid: 4321, logFile: '/tmp/daemon.log' }),
       stop: async () => false,
     };
   }
@@ -1215,6 +1487,7 @@ describe('repos', () => {
         runner: {
           status: async () => ({ running: true, port: 1 }),
           start: async () => 0,
+          startDetached: async () => ({ pid: 4242, logFile: '/tmp/daemon.log' }),
           stop: async () => false,
         },
         createVoiceSession: async () => {

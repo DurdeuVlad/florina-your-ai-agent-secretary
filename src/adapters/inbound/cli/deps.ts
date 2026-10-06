@@ -30,6 +30,12 @@ export interface DaemonProcessStatus {
 export interface DaemonProcessManager {
   /** Start the daemon; resolves with its PID. */
   start(): Promise<number>;
+  /**
+   * Start the daemon as a detached child; resolves with the spawned pid
+   * and the log file once the daemon port is bound. Throws on failure —
+   * never reports success for a daemon that didn't come up.
+   */
+  startDetached(): Promise<{ pid: number; logFile: string }>;
   /** Stop the daemon; resolves whether a daemon was stopped. */
   stop(): Promise<boolean>;
   /** Probe the daemon process status. */

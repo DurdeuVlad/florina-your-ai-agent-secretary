@@ -188,7 +188,8 @@ Usage: florina <command> [options] [args]
        flor      <command> [options] [args]
 
 Commands:
-  start                       Start the daemon (in-process for MVP)
+  start [--detach] [--json]   Start the daemon (foreground by default;
+                              --detach runs it in the background)
   stop                        Stop the running daemon
   status [--json]             Show daemon status (JSON: providers, chat model, repos)
   inbox [--filter <p>]        List attention inbox items
@@ -326,13 +327,57 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
 
 /* --- start --- */
 async function cmdStart(ctx: CommandContext): Promise<CommandResult> {
+  // Unknown flags on this verb are usage errors, not silent ignores —
+  // `--deatch` (typo) must never silently become a blocking foreground
+  // daemon an agent can't leave.
+  for (const flag of Object.keys(ctx.args.flags)) {
+    if (!START_FLAGS.has(flag)) {
+      return { exitCode: 1, message: `Unknown flag: --${flag}\n` };
+    }
+  }
+  if (ctx.args.positionals.length > 0) {
+    return { exitCode: 1, message: 'Usage: florina start [--detach] [--json]\n' };
+  }
+  // --json only makes sense for the detached path: a foreground start
+  // hands stdout to the long-running daemon, so a JSON promise would be
+  // a lie. --detach=<value> is likewise a usage error.
+  const detachFlag = ctx.args.flags['detach'];
+  if (detachFlag !== undefined && detachFlag !== true) {
+    return { exitCode: 1, message: 'Usage: florina start [--detach] [--json]\n' };
+  }
+  const jsonFlag = ctx.args.flags['json'];
+  if (jsonFlag !== undefined && (jsonFlag !== true || detachFlag !== true)) {
+    return { exitCode: 1, message: 'Usage: florina start [--detach] [--json]\n' };
+  }
+  const detach = detachFlag === true;
+  const json = jsonFlag === true;
+  const error = (message: string): CommandResult => ({
+    exitCode: 1,
+    message: json ? `${JSON.stringify({ error: message })}\n` : `${message}\n`,
+  });
   try {
+    if (detach) {
+      const { pid, logFile } = await ctx.deps.runner.startDetached();
+      if (json) {
+        return {
+          exitCode: 0,
+          message: `${JSON.stringify({ started: true, detached: true, pid, logFile })}\n`,
+        };
+      }
+      return {
+        exitCode: 0,
+        message: `Daemon started in the background (pid ${pid}). Log: ${logFile}\n`,
+      };
+    }
     const pid = await ctx.deps.runner.start();
     return { exitCode: 0, message: `Daemon started (pid ${pid}).\n` };
   } catch (e) {
-    return { exitCode: 1, message: `Failed to start daemon: ${messageOf(e)}\n` };
+    return error(`Failed to start daemon: ${messageOf(e)}`);
   }
 }
+
+/** The only flags `florina start` understands. */
+const START_FLAGS: ReadonlySet<string> = new Set(['detach', 'json', 'no-color', 'help', 'h']);
 
 /* --- stop --- */
 async function cmdStop(ctx: CommandContext): Promise<CommandResult> {
