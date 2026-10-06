@@ -54,9 +54,11 @@ import type {
   SecretsListResponse,
   SecretsDeleteResponse,
   ProvidersResponse,
+  ReposResponse,
   SigninProviderResponse,
   InstallProviderResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
+import type { DaemonProcessStatus } from './deps.js';
 import type { TaskState } from '../../../core/domain/enums.js';
 import type {
   AttentionItemKind,
@@ -159,7 +161,7 @@ Usage: florina <command> [options] [args]
 Commands:
   start                       Start the daemon (in-process for MVP)
   stop                        Stop the running daemon
-  status                      Show daemon status
+  status [--json]             Show daemon status (JSON: providers, chat model, repos)
   inbox [--filter <p>]        List attention inbox items
     --priority <Critical|High|Medium|Low>
     --status <Pending|Acknowledged|Resolved|Escalated>
@@ -308,6 +310,15 @@ async function cmdStop(ctx: CommandContext): Promise<CommandResult> {
 
 /* --- status --- */
 async function cmdStatus(ctx: CommandContext): Promise<CommandResult> {
+  // `--json` takes no value and `status` takes no positionals — a stray
+  // token must not silently fall back to human output for an agent caller.
+  const jsonFlag = ctx.args.flags['json'];
+  if (jsonFlag !== undefined || ctx.args.positionals.length > 0) {
+    if (jsonFlag !== true || ctx.args.positionals.length > 0) {
+      return { exitCode: 1, message: 'Usage: florina status [--json]\n' };
+    }
+    return statusAsJson(ctx, await ctx.deps.runner.status());
+  }
   const status = await ctx.deps.runner.status();
   let message = formatStatus(status.running, status.port, status.pid);
   // Surface per-agent context health when the daemon is reachable
@@ -331,6 +342,79 @@ async function cmdStatus(ctx: CommandContext): Promise<CommandResult> {
     }
   }
   return { exitCode: 0, message };
+}
+
+/**
+ * `status --json` (issue #321): the same readiness facts the desktop
+ * setup card renders — provider attach/auth state, chat-model readiness,
+ * repo roots + discovered repos — as one JSON document, so an external
+ * agent can parse truth instead of scraping prose. `null` marks "couldn't
+ * check" / "not reported" — never fabricated emptiness.
+ *
+ * Exit contract: 0 = the daemon answered (facts delivered, whatever they
+ * say); non-zero = the answer could not be obtained (daemon down or
+ * protocol-dead), with `error` carrying a machine-readable reason.
+ */
+async function statusAsJson(
+  ctx: CommandContext,
+  status: DaemonProcessStatus,
+): Promise<CommandResult> {
+  const daemon = { running: status.running, port: status.port, pid: status.pid ?? null };
+  if (!status.running) {
+    return {
+      exitCode: 1,
+      message: `${JSON.stringify({ cliVersion: VERSION, daemon, error: 'daemon-not-running' })}\n`,
+    };
+  }
+  const [provRes, reposRes] = await Promise.all([
+    sendCommand(ctx.deps.client, { kind: 'query-providers' }),
+    sendCommand(ctx.deps.client, { kind: 'query-repos' }),
+  ]);
+  // Shape guards mirror the desktop card's checks: an `ok` reply missing
+  // the expected payload keys is "couldn't check", not truth.
+  const p =
+    provRes.ok && 'providers' in provRes && Array.isArray(provRes.providers)
+      ? (provRes as ProvidersResponse)
+      : null;
+  const r =
+    reposRes.ok &&
+    'roots' in reposRes &&
+    'repos' in reposRes &&
+    reposRes.roots !== undefined &&
+    reposRes.repos !== undefined
+      ? (reposRes as ReposResponse)
+      : null;
+  if (p === null && r === null) {
+    // Process alive but nothing answered — protocol dead, wrong build, or
+    // unwired features. The underlying errors go in `detail` so an agent
+    // can tell "start the daemon" from "upgrade the daemon".
+    return {
+      exitCode: 1,
+      message: `${JSON.stringify({
+        cliVersion: VERSION,
+        daemon,
+        error: 'daemon-unreachable',
+        detail: [
+          'error' in provRes ? provRes.error : undefined,
+          'error' in reposRes ? reposRes.error : undefined,
+        ].filter((e): e is string => e !== undefined),
+      })}\n`,
+    };
+  }
+  return {
+    exitCode: 0,
+    message: `${JSON.stringify({
+      cliVersion: VERSION,
+      daemon,
+      providersChecked: p !== null,
+      providersProbed: p === null ? null : p.probed === undefined ? null : p.probed === true,
+      providers: p === null ? null : p.providers,
+      chatModel: p === null ? null : (p.chatModel ?? null),
+      reposChecked: r !== null,
+      roots: r === null ? null : (r.roots?.roots ?? null),
+      repos: r === null ? null : (r.repos ?? null),
+    })}\n`,
+  };
 }
 
 /* --- inbox --- */
