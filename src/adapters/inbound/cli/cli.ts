@@ -10,6 +10,9 @@
  * Works in headless CI/SSH environments (no TUI/desktop dependency, DEC-008).
  * Color output is auto-disabled when stdout is not a TTY.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as readline from 'node:readline';
 import { DaemonClient, DaemonConnectionError } from './client.js';
 import {
   formatInbox,
@@ -55,6 +58,10 @@ import type {
   SecretsDeleteResponse,
   ProvidersResponse,
   ReposResponse,
+  QueryReposCommand,
+  AddRepoRootCommand,
+  RemoveRepoRootCommand,
+  MoveRepoRootCommand,
   SigninProviderResponse,
   InstallProviderResponse,
 } from '../../../core/application/use-cases/tasks/command-api.js';
@@ -81,16 +88,38 @@ interface ParsedArgs {
 }
 
 /**
+ * Flags that are always boolean — they never swallow the next token as a
+ * value. A string value is only reachable via `--flag=value`, and every
+ * consumer reads these with `=== true`, so `--yes=false` still refuses.
+ */
+const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+  'yes',
+  'json',
+  'grant',
+  'deny',
+  'no-color',
+  'detach',
+  'help',
+  'h',
+]);
+
+/**
  * Parse a raw argv array into a {@link ParsedArgs} object.
  *
  * - The first non-flag token is the subcommand.
  * - Subsequent non-flag tokens are positionals.
  * - `--flag value` and `--flag=value` set string flags.
  * - `--flag` (no value) sets a boolean `true`.
+ * - Flags named in `booleanFlags` never consume the next token, so
+ *   `--yes <path>` keeps `<path>` as a positional. Only the `--flag=value`
+ *   form can give them a string (which consent checks treat as false).
  * - `-f` short flags are treated like long flags.
  * - A negative number (e.g. `-1`) is treated as a value, not a flag.
  */
-export function parseArgs(argv: readonly string[]): ParsedArgs {
+export function parseArgs(
+  argv: readonly string[],
+  booleanFlags: ReadonlySet<string> = new Set(),
+): ParsedArgs {
   const positionals: string[] = [];
   const flags: Record<string, string | boolean> = {};
   let command = '';
@@ -107,7 +136,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       } else {
         const key = tok.slice(2);
         const next = argv[i + 1];
-        if (next !== undefined && isValueToken(next)) {
+        if (next !== undefined && isValueToken(next) && !booleanFlags.has(key)) {
           flags[key] = next;
           i += 2;
         } else {
@@ -118,7 +147,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     } else if (tok.startsWith('-') && tok.length > 1 && !isNegativeNumber(tok)) {
       const key = tok.slice(1);
       const next = argv[i + 1];
-      if (next !== undefined && isValueToken(next)) {
+      if (next !== undefined && isValueToken(next) && !booleanFlags.has(key)) {
         flags[key] = next;
         i += 2;
       } else {
@@ -179,6 +208,10 @@ Commands:
   catchup                     Show what happened since you were last active
   metrics [--since <ms>]      Show metrics snapshot
   preferences [--project <id>]  Show routing preference rules + deny list
+  repos [list] [--json]       Show watched folders and discovered projects
+  repos add <path>            Watch a folder for projects
+  repos remove <path> [--yes] Stop watching a folder (asks first)
+  repos move <path> up|down   Reorder a watched folder's priority
   keys set <name> [--provider <id>] [--project <id>] [--env-var <NAME>]
                               Store an API key or secret (prompts, no echo)
       [--description <text>] [--expires <ISO>]
@@ -273,6 +306,8 @@ async function runSubcommand(ctx: CommandContext): Promise<CommandResult> {
       return cmdAuth(ctx);
     case 'install':
       return cmdInstall(ctx);
+    case 'repos':
+      return cmdRepos(ctx);
     case 'prune':
       return cmdPrune(ctx);
     case 'voice':
@@ -889,6 +924,290 @@ async function cmdInstall(ctx: CommandContext): Promise<CommandResult> {
   return { exitCode: 0, message: `${r.detail ?? 'Done.'}\n` };
 }
 
+/* --- repos (issue #322) ---
+ *
+ * CLI surface for repo-root management. All four verbs map 1:1 onto the
+ * existing daemon commands (issue #253) — no new daemon behavior. `add`
+ * never guesses a scope: the caller names the literal folder. `remove`
+ * keeps a consent moment: a TTY gets a y/N prompt, a non-TTY caller (an
+ * agent) must pass --yes — the typed verb stays the consent.
+ */
+async function cmdRepos(ctx: CommandContext): Promise<CommandResult> {
+  const [sub, ...rest] = ctx.args.positionals;
+  // `--json=<anything>` is a usage error, same as `status --json=x` —
+  // an agent that asked for JSON must never get prose at exit 0.
+  const jsonFlag = ctx.args.flags['json'];
+  if (jsonFlag !== undefined && jsonFlag !== true) return reposUsage();
+  const json = jsonFlag === true;
+  switch (sub) {
+    case undefined:
+    case 'list':
+      if (rest.length > 0) return reposUsage();
+      return reposList(ctx, json);
+    case 'add':
+      if (rest.length !== 1) return reposUsage();
+      return reposAdd(ctx, rest[0], json);
+    case 'remove':
+    case 'rm':
+    case 'delete':
+      if (rest.length !== 1) return reposUsage();
+      return reposRemove(ctx, rest[0], json, ctx.args.flags['yes'] === true);
+    case 'move':
+      if (rest.length !== 2) return reposUsage();
+      return reposMove(ctx, rest[0], rest[1], json);
+    default:
+      return reposUsage();
+  }
+}
+
+function reposUsage(): CommandResult {
+  return {
+    exitCode: 1,
+    message:
+      'Usage: florina repos [list|add <path>|remove <path>|move <path> up|down] [--json] [--yes]\n',
+  };
+}
+
+/** Error output honors --json: agents get a parseable reason, not prose. */
+function reposError(message: string, json: boolean): CommandResult {
+  if (json) {
+    return { exitCode: 1, message: `${JSON.stringify({ error: message })}\n` };
+  }
+  return { exitCode: 1, message: `${message}\n` };
+}
+
+/**
+ * Match a typed path against configured roots. The daemon compares
+ * verbatim strings, so we look up the stored spelling and send THAT —
+ * a case/spelling variant the user typed still removes the right root,
+ * and we never claim success on a path the daemon doesn't watch.
+ */
+async function findStoredRoot(
+  ctx: CommandContext,
+  target: string,
+): Promise<{ ok: true; stored?: string } | { ok: false }> {
+  const query = await sendCommand(ctx.deps.client, { kind: 'query-repos' });
+  if (!query.ok || !('roots' in query)) return { ok: false };
+  const roots = (query as ReposResponse).roots?.roots;
+  if (!Array.isArray(roots)) return { ok: false };
+  // Stored roots are verbatim strings; on Windows the filesystem ignores
+  // case and treats / and \ alike, so normalize both — and always send the
+  // STORED spelling so the daemon's verbatim compare removes the right root.
+  const norm = (p: string) =>
+    process.platform === 'win32' ? p.toLowerCase().replace(/\//g, '\\') : p;
+  return {
+    ok: true,
+    stored: roots.find((r) => typeof r.path === 'string' && norm(r.path) === norm(target))?.path,
+  };
+}
+
+/** Format the roots + discovered repos either as JSON or human text. */
+function reposMessage(r: ReposResponse, json: boolean): string {
+  if (json) {
+    const roots = Array.isArray(r.roots?.roots) ? r.roots.roots : null;
+    const repos = Array.isArray(r.repos) ? r.repos : null;
+    return `${JSON.stringify({ roots, repos })}\n`;
+  }
+  const roots = Array.isArray(r.roots?.roots) ? r.roots.roots : [];
+  const repos = Array.isArray(r.repos) ? r.repos : [];
+  const lines: string[] = [];
+  if (roots.length === 0) {
+    lines.push('No watched folders — add one with `florina repos add <path>`.');
+  } else {
+    lines.push('Watched folders:');
+    for (const [i, root] of roots.entries()) {
+      lines.push(`  ${i + 1}. ${root.path}`);
+    }
+  }
+  if (roots.length > 0) {
+    if (repos.length === 0) {
+      lines.push('No projects found inside the watched folders.');
+    } else {
+      lines.push('Projects:');
+      for (const repo of repos) {
+        lines.push(`  ${repo.name} — ${repo.path}`);
+      }
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+async function reposList(ctx: CommandContext, json: boolean): Promise<CommandResult> {
+  const command: QueryReposCommand = { kind: 'query-repos' };
+  const response = await sendCommand(ctx.deps.client, command);
+  if (!response.ok) {
+    return reposError(`Failed to query watched folders: ${errorOf(response)}`, json);
+  }
+  return { exitCode: 0, message: reposMessage(response as ReposResponse, json) };
+}
+
+async function reposAdd(
+  ctx: CommandContext,
+  rawPath: string | undefined,
+  json: boolean,
+): Promise<CommandResult> {
+  if (rawPath === undefined || rawPath.trim() === '') {
+    return reposError('Usage: florina repos add <path>', json);
+  }
+  const target = path.resolve(rawPath);
+  try {
+    if (!fs.statSync(target).isDirectory()) {
+      return reposError(`Not a directory: ${target}`, json);
+    }
+  } catch {
+    return reposError(`Not a directory: ${target}`, json);
+  }
+  const command: AddRepoRootCommand = { kind: 'add-repo-root', path: target };
+  const response = await sendCommand(ctx.deps.client, command);
+  if (!response.ok) {
+    return reposError(`Failed to add folder: ${errorOf(response)}`, json);
+  }
+  // Re-query so the caller sees the discovery result of the add — the
+  // command response carries roots only. If it fails, the add still
+  // landed — report that, never a fabricated discovery list.
+  const query = await sendCommand(ctx.deps.client, { kind: 'query-repos' });
+  const r = query.ok ? (query as ReposResponse) : null;
+  const knownRoots = r && Array.isArray(r.roots?.roots) ? r.roots.roots : null;
+  const knownRepos = r && Array.isArray(r.repos) ? r.repos : null;
+  const discovered =
+    knownRepos === null ? null : knownRepos.filter((repo) => repo.rootPath === target).length;
+  if (json) {
+    return {
+      exitCode: 0,
+      message: `${JSON.stringify({
+        added: target,
+        roots: knownRoots,
+        repos: knownRepos,
+        discovered,
+        ...(r === null ? { warning: "added, but couldn't list discovered projects" } : {}),
+      })}\n`,
+    };
+  }
+  if (r === null) {
+    return {
+      exitCode: 0,
+      message: `Now watching ${target} (couldn't list discovered projects just now).\n`,
+    };
+  }
+  const found = (knownRepos ?? []).filter((repo) => repo.rootPath === target);
+  const discovery =
+    found.length === 0
+      ? 'no projects found inside it — Florina watches it anyway.'
+      : `found ${found.length} project${found.length === 1 ? '' : 's'} inside.`;
+  return { exitCode: 0, message: `Now watching ${target} — ${discovery}\n` };
+}
+
+/** Ask before narrowing scope — only interactive terminals get a prompt. */
+async function confirmRemoval(target: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    return false;
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(`Stop watching ${target}? [y/N] `, resolve);
+      // EOF (Ctrl+D) closes without answering — treat as no.
+      rl.on('close', () => resolve(''));
+    });
+    return /^\s*y(es)?\s*$/i.test(answer);
+  } finally {
+    rl.close();
+  }
+}
+
+async function reposRemove(
+  ctx: CommandContext,
+  rawPath: string | undefined,
+  json: boolean,
+  yes: boolean,
+): Promise<CommandResult> {
+  if (rawPath === undefined || rawPath.trim() === '') {
+    return reposError('Usage: florina repos remove <path> [--yes]', json);
+  }
+  // Confirm the target is actually watched before any consent prompt —
+  // the daemon no-ops on unknown paths, which would make "stopped
+  // watching" a lie. Send the stored spelling so the match is verbatim.
+  const stored = await findStoredRoot(ctx, path.resolve(rawPath));
+  if (!stored.ok) {
+    return reposError('Could not check watched folders — daemon did not answer.', json);
+  }
+  if (stored.stored === undefined) {
+    return reposError(`Not a watched folder: ${path.resolve(rawPath)}`, json);
+  }
+  const target = stored.stored;
+  // Preflight: don't spend a consent moment on a dead daemon.
+  if (!yes && (await ctx.deps.runner.status()).running !== true) {
+    return reposError('Daemon is not running — nothing to remove it from right now.', json);
+  }
+  if (!yes && !(await confirmRemoval(target))) {
+    return reposError(
+      'Not confirmed — pass --yes to remove non-interactively (nothing changed).',
+      json,
+    );
+  }
+  const command: RemoveRepoRootCommand = { kind: 'remove-repo-root', path: target };
+  const response = await sendCommand(ctx.deps.client, command);
+  if (!response.ok) {
+    return reposError(`Failed to remove folder: ${errorOf(response)}`, json);
+  }
+  const r = response as ReposResponse;
+  const roots = Array.isArray(r.roots?.roots) ? r.roots.roots : null;
+  if (json) {
+    return {
+      exitCode: 0,
+      message: `${JSON.stringify({ roots, removed: target })}\n`,
+    };
+  }
+  const remaining = roots?.length ?? 0;
+  return {
+    exitCode: 0,
+    message: `Stopped watching ${target} — ${remaining} folder${remaining === 1 ? '' : 's'} still watched.\n`,
+  };
+}
+
+async function reposMove(
+  ctx: CommandContext,
+  rawPath: string | undefined,
+  direction: string | undefined,
+  json: boolean,
+): Promise<CommandResult> {
+  if (
+    rawPath === undefined ||
+    rawPath.trim() === '' ||
+    (direction !== 'up' && direction !== 'down')
+  ) {
+    return reposError('Usage: florina repos move <path> up|down', json);
+  }
+  // move-repo-root no-ops on unknown paths — verify membership first so a
+  // typo isn't reported as a successful reorder.
+  const stored = await findStoredRoot(ctx, path.resolve(rawPath));
+  if (!stored.ok) {
+    return reposError('Could not check watched folders — daemon did not answer.', json);
+  }
+  if (stored.stored === undefined) {
+    return reposError(`Not a watched folder: ${path.resolve(rawPath)}`, json);
+  }
+  const command: MoveRepoRootCommand = {
+    kind: 'move-repo-root',
+    path: stored.stored,
+    direction,
+  };
+  const response = await sendCommand(ctx.deps.client, command);
+  if (!response.ok) {
+    return reposError(`Failed to reorder folder: ${errorOf(response)}`, json);
+  }
+  const r = response as ReposResponse;
+  const roots = Array.isArray(r.roots?.roots) ? r.roots.roots : null;
+  if (json) {
+    return {
+      exitCode: 0,
+      message: `${JSON.stringify({ roots })}\n`,
+    };
+  }
+  const order = (roots ?? []).map((root) => `  ${root.path}`).join('\n');
+  return { exitCode: 0, message: `Watch order now:\n${order}\n` };
+}
+
 /* --- prune --- */
 async function cmdPrune(ctx: CommandContext): Promise<CommandResult> {
   const [taskId] = ctx.args.positionals;
@@ -1115,7 +1434,7 @@ export async function runCli(argv: readonly string[], deps: CliDependencies): Pr
     return 0;
   }
 
-  const args = parseArgs(argv);
+  const args = parseArgs(argv, BOOLEAN_FLAGS);
   if (args.flags['no-color'] === true) {
     setColorEnabled(false);
   }
