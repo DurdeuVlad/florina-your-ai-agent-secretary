@@ -1768,3 +1768,79 @@ describe('constants', () => {
     expect(DEFAULT_PID_FILE).toContain('florina');
   });
 });
+
+/* ================================================================== *
+ * Agent-recipe verb pin (issue #324)
+ *
+ * docs/AGENT_SETUP.md names a fixed set of verbs an external agent runs.
+ * If a verb is renamed or dropped, the recipe rots silently — so every
+ * verb it documents must dispatch to a real command, not the
+ * "Unknown command" default. Each call runs against a down-daemon fake;
+ * dispatch is proven by the absence of "Unknown command", whatever the
+ * verb's own failure is.
+ * ================================================================== */
+
+describe('agent setup recipe verbs (docs/AGENT_SETUP.md pin)', () => {
+  const RECIPE_INVOCATIONS: readonly (readonly string[])[] = [
+    ['version'],
+    ['start', '--json'], // usage error (json needs --detach) — still dispatches
+    ['stop'],
+    ['status', '--json'],
+    ['install', 'cursor'],
+    ['auth', 'cursor'],
+    ['auth', 'chat'],
+    ['keys', 'set', 'openai-api-key'],
+    ['repos'],
+    ['repos', 'add', ''],
+    ['repos', 'remove', '', '--yes'],
+  ];
+
+  async function runAgainstDownDaemon(
+    argv: readonly string[],
+  ): Promise<{ code: number; stdout: string; stderr: string }> {
+    let stdout = '';
+    let stderr = '';
+    const outSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stdout += c.toString();
+        return true;
+      });
+    const errSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stderr += c.toString();
+        return true;
+      });
+    const original = DaemonClient.prototype.sendRaw;
+    DaemonClient.prototype.sendRaw = function () {
+      return Promise.reject(new DaemonConnectionError('down'));
+    };
+    try {
+      const code = await runCli([...argv], {
+        client: new DaemonClient({ port: 1 }),
+        runner: {
+          status: async () => ({ running: false, port: 1 }),
+          start: async () => 1,
+          startDetached: async () => ({ pid: 1, logFile: '/tmp/daemon.log' }),
+          stop: async () => false,
+        },
+        createVoiceSession: async () => {
+          throw new Error('voice not used in these tests');
+        },
+      } satisfies CliDependencies);
+      return { code, stdout, stderr };
+    } finally {
+      DaemonClient.prototype.sendRaw = original;
+      outSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  }
+
+  for (const argv of RECIPE_INVOCATIONS) {
+    it(`\`florina ${argv.join(' ')}\` dispatches to a real verb`, async () => {
+      const { stdout, stderr } = await runAgainstDownDaemon(argv);
+      expect(stdout + stderr).not.toContain('Unknown command');
+    });
+  }
+});
