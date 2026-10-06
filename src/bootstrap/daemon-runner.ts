@@ -20,6 +20,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
 
 import { FlorinaDaemon, isPortInUse, DEFAULT_DAEMON_PORT, DEFAULT_MCP_PORT } from './daemon.js';
 import { ensureLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
@@ -31,6 +32,13 @@ export const DEFAULT_PID_FILE = path.join(os.tmpdir(), 'florina.pid');
 
 /** Default SQLite database path. */
 export const DEFAULT_DB_PATH = path.join(os.homedir(), '.florina', 'florina.db');
+
+/** How long `startDetached` waits for the child's port to bind. */
+const DETACHED_START_TIMEOUT_MS = 15_000;
+/** Readiness poll interval for `startDetached`. */
+const DETACHED_POLL_MS = 200;
+/** How long `stop` waits for the signaled process to actually exit. */
+const STOP_DEATH_WAIT_MS = 5_000;
 
 /** Options for constructing a {@link DaemonRunner}. */
 export interface DaemonRunnerOptions {
@@ -111,10 +119,17 @@ export class DaemonRunner {
    * @returns the PID of the running daemon.
    */
   async start(): Promise<number> {
-    // If a daemon is already running (by PID file or port), refuse.
+    // If a daemon is already running, refuse. A live pid only counts when
+    // the port is bound too — otherwise it's a recycled pid on a stale
+    // file, which we clean up and proceed past.
     const existing = this.readPid();
     if (existing !== undefined && isPidAlive(existing)) {
-      throw new Error(`Daemon is already running (pid ${existing})`);
+      // Port 0 is OS-assigned and unprobeable — the live pid is the only
+      // evidence; a nonzero port must be bound to count as running.
+      if (this.port === 0 || (await isPortInUse(this.port))) {
+        throw new Error(`Daemon is already running (pid ${existing})`);
+      }
+      this.removePidFile();
     }
     if (await isPortInUse(this.port)) {
       throw new Error(`Port ${this.port} is already in use — is the daemon already running?`);
@@ -168,6 +183,143 @@ export class DaemonRunner {
   }
 
   /**
+   * Start the daemon as a detached child process and return once its
+   * port is bound (issue #323). Used by `florina start --detach` so an
+   * external agent or script can bring Florina up without keeping a
+   * foreground process alive.
+   *
+   * The child re-invokes this CLI (`start`, foreground) so the whole
+   * startup path is identical to an interactive start — it writes the
+   * PID file with its own pid and installs signal handlers, so `stop`
+   * and `status` work unchanged.
+   *
+   * Startup output is appended to `<dbDir>/daemon.log`; early child
+   * exits and readiness timeouts surface as thrown errors naming the
+   * log, never as silent success.
+   *
+   * Limitation: the child re-invokes this CLI with no argument plumbing,
+   * so it always composes the *default* runner options. Callers using a
+   * non-default port/dbPath/pidFile must pass an entrypoint that reads
+   * those values itself (tests do via env vars).
+   *
+   * @param entrypoint script the child runs (defaults to this CLI's own
+   *   argv[1]); tests pass a fixture path.
+   * @returns the spawned pid and the log file startup output lands in.
+   */
+  async startDetached(
+    entrypoint?: string,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<{ pid: number; logFile: string }> {
+    if (await this.daemonAlreadyRunning()) {
+      throw new Error('Daemon is already running — see `florina status`.');
+    }
+
+    const script = entrypoint ?? process.argv[1];
+    if (script === undefined) {
+      throw new Error('Cannot locate the CLI entrypoint to spawn a detached daemon.');
+    }
+    const logDir = path.dirname(this.dbPath);
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'daemon.log');
+    // A stale pidfile must never satisfy readiness: record its mtime so
+    // the loop below only accepts a file written after this spawn. (A
+    // stale file can coincidentally name the new child's pid when the OS
+    // recycles pids.)
+    let stalePidfileMtime: number | undefined;
+    try {
+      stalePidfileMtime = fs.statSync(this.pidFile).mtimeMs;
+    } catch {
+      /* no existing pidfile */
+    }
+    const out = fs.openSync(logFile, 'a');
+    const child = spawn(process.execPath, [script, 'start'], {
+      detached: true,
+      stdio: ['ignore', out, out],
+      windowsHide: true,
+      env: process.env,
+    });
+    fs.closeSync(out);
+    child.unref();
+    // Attach 'error' before checking pid — an async spawn failure emits
+    // it later and an unhandled 'error' would crash this process.
+    let spawnError: Error | undefined;
+    child.on('error', (e) => {
+      spawnError = e;
+    });
+    if (child.pid === undefined) {
+      throw new Error(`Failed to spawn the daemon process — see ${logFile}`);
+    }
+
+    // Readiness = the pid file naming THIS child's pid. The child writes
+    // it only after its daemon binds the port, so a foreign process or a
+    // racing sibling can't satisfy it — and a stale file never carries
+    // this pid. Death is re-checked at the moment of success because a
+    // signal-killed child keeps exitCode null.
+    const dead = () =>
+      child.exitCode !== null || child.signalCode !== null || spawnError !== undefined;
+    const timeoutMs = opts.timeoutMs ?? DETACHED_START_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (dead()) {
+        throw new Error(
+          spawnError !== undefined
+            ? `Daemon spawn failed: ${spawnError.message}`
+            : `Daemon exited during startup ` +
+                `(code ${child.exitCode ?? `signal ${child.signalCode}`}) — see ${logFile}`,
+        );
+      }
+      // The pidfile must name this child AND be a fresh write — a stale
+      // file recycled onto this pid has the old mtime.
+      if (this.readPid() === child.pid && !dead()) {
+        const stale = stalePidfileMtime;
+        let fresh = stale === undefined;
+        if (!fresh) {
+          try {
+            fresh = fs.statSync(this.pidFile).mtimeMs > (stale as number);
+          } catch {
+            fresh = false;
+          }
+        }
+        if (fresh) {
+          return { pid: child.pid, logFile };
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, DETACHED_POLL_MS));
+    }
+    // Don't orphan a wedged or merely-slow child — kill it so the caller
+    // isn't left with an invisible half-started daemon.
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      /* already gone */
+    }
+    throw new Error(
+      `Daemon did not write its PID file within ${(timeoutMs / 1000).toFixed(1)}s ` +
+        `(a slow daemon may still finish starting — check \`florina status\`) — see ${logFile}`,
+    );
+  }
+
+  /**
+   * Whether a daemon is running per the pid file, disambiguating a
+   * recycled pid by requiring the port to be bound too. A live pid with
+   * a free port is a stale file, not a running daemon.
+   */
+  private async daemonAlreadyRunning(): Promise<boolean> {
+    const existing = this.readPid();
+    if (existing !== undefined && isPidAlive(existing)) {
+      // Port 0 is unprobeable — a live pidfile pid is the only evidence.
+      if (this.port === 0 || (await isPortInUse(this.port))) {
+        return true;
+      }
+      // Pid alive but port free: a recycled pid on a stale file, not a
+      // daemon. Leave the file — the daemon's own start() removes stale
+      // pid files before writing its own.
+      return false;
+    }
+    return this.port !== 0 && (await isPortInUse(this.port));
+  }
+
+  /**
    * Stop the daemon. If an in-process daemon is running, stop it directly.
    * Otherwise, read the PID file and signal that process.
    */
@@ -187,30 +339,63 @@ export class DaemonRunner {
       this.removePidFile();
       return false;
     }
+    // Only signal the pid when the port is bound too — a live pid on a
+    // stale file is likely a recycled pid owned by an unrelated process,
+    // and we must never SIGTERM a stranger. Port 0 means OS-assigned:
+    // unprobeable, so the pid is the only evidence available.
+    if (this.port !== 0 && !(await isPortInUse(this.port))) {
+      this.removePidFile();
+      return false;
+    }
     try {
       process.kill(pid, 'SIGTERM');
     } catch {
       return false;
     }
-    this.removePidFile();
+    // Wait for actual death before unlinking — if the daemon's graceful
+    // shutdown lingers, the file stays so a later `stop` can retry.
+    const deadline = Date.now() + STOP_DEATH_WAIT_MS;
+    while (Date.now() < deadline && isPidAlive(pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!isPidAlive(pid)) {
+      this.removePidFile();
+    }
     return true;
   }
 
   /**
-   * Check whether the daemon is running. Looks at the PID file and verifies
-   * the process is alive, then confirms the port is bound.
+   * Check whether the daemon is running. A live pidfile pid only counts
+   * when the port is bound too — a live-but-unbound pid is a recycled
+   * pid on a stale file, not this daemon.
    */
   async status(): Promise<DaemonStatus> {
     const pid = this.readPid();
+    if (this.port === 0) {
+      // OS-assigned port is unprobeable — the pidfile is the only
+      // evidence, and a recycled pid can't be cross-checked away.
+      if (pid !== undefined && isPidAlive(pid)) {
+        return { running: true, pid, port: this.port };
+      }
+      if (pid !== undefined) {
+        this.removePidFile();
+      }
+      return { running: false, port: this.port };
+    }
+    const portBound = await isPortInUse(this.port);
     if (pid !== undefined && isPidAlive(pid)) {
-      return { running: true, pid, port: this.port };
+      if (portBound) {
+        return { running: true, pid, port: this.port };
+      }
+      // Stale file naming a live but unrelated pid — drop it.
+      this.removePidFile();
+      return { running: false, port: this.port };
     }
     // Stale PID file — clean it up.
     if (pid !== undefined) {
       this.removePidFile();
     }
-    // Fall back to a port probe in case the PID file is missing.
-    const portBound = await isPortInUse(this.port);
+    // Fall back to the port probe in case the PID file is missing.
     return { running: portBound, port: this.port };
   }
 

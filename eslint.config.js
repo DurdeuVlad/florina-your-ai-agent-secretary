@@ -53,6 +53,9 @@ export default [
       // One-off Node tooling (logo generation, captures) — Node APIs are
       // the whole point of these scripts (#284 CI lint failure).
       'logo-proposals/**/*.cjs',
+      // Spawnable fixture daemons — plain CommonJS children for
+      // process-lifecycle tests (#323).
+      'tests/fixtures/**/*.cjs',
     ],
     languageOptions: {
       globals: {
