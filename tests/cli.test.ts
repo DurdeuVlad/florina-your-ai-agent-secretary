@@ -3,7 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { parseArgs, main, VERSION } from '../src/cli/index.js';
+import { parseArgs, main, runCli, VERSION } from '../src/cli/index.js';
+import type { CliDependencies } from '../src/adapters/inbound/cli/deps.js';
 import {
   formatInbox,
   formatTask,
@@ -935,6 +936,245 @@ describe('subcommand dispatch (mocked transport)', () => {
       kind: 'query-inbox',
       filter: { priority: 'Critical' },
     });
+  });
+});
+
+/* ================================================================== *
+ * status --json (issue #321 — machine-readable readiness)
+ * ================================================================== */
+
+describe('status --json', () => {
+  function jsonRunner(running: boolean) {
+    return {
+      status: async () => ({ running, port: 17419, pid: running ? 4321 : undefined }),
+      start: async () => 0,
+      stop: async () => false,
+    };
+  }
+
+  async function runStatusJson(
+    argv: readonly string[],
+    runner: ReturnType<typeof jsonRunner>,
+    transport?: WebSocketTransport,
+  ): Promise<{ code: number; stdout: string; stderr: string }> {
+    let stdout = '';
+    let stderr = '';
+    const outSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stdout += c.toString();
+        return true;
+      });
+    const errSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stderr += c.toString();
+        return true;
+      });
+    const original = DaemonClient.prototype.sendRaw;
+    if (transport !== undefined) {
+      DaemonClient.prototype.sendRaw = function (command: unknown) {
+        return transport(command as never, 10_000);
+      };
+    }
+    try {
+      const code = await runCli([...argv], {
+        client: new DaemonClient({ port: 1 }),
+        runner,
+        createVoiceSession: async () => {
+          throw new Error('voice not used in these tests');
+        },
+      } satisfies CliDependencies);
+      return { code, stdout, stderr };
+    } finally {
+      DaemonClient.prototype.sendRaw = original;
+      outSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  }
+
+  it('daemon not running → exit 1 with a machine-readable reason', async () => {
+    const { code, stderr } = await runStatusJson(['status', '--json'], jsonRunner(false));
+    expect(code).toBe(1);
+    const doc = JSON.parse(stderr);
+    expect(doc.daemon.running).toBe(false);
+    expect(doc.error).toBe('daemon-not-running');
+  });
+
+  it('daemon alive → JSON carries the same facts the setup card renders', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-providers') {
+        return {
+          ok: true,
+          probed: true,
+          providers: [
+            {
+              id: 'claude-code',
+              found: true,
+              auth: 'signed-in',
+              installable: false,
+            },
+            {
+              id: 'cursor',
+              found: false,
+              detail: 'not installed',
+              installable: true,
+            },
+          ],
+          chatModel: { configured: true, keySource: 'env', state: 'ok' },
+        };
+      }
+      if (kind === 'query-repos') {
+        return {
+          ok: true,
+          roots: { roots: [{ path: '/home/u/code' }] },
+          repos: [{ name: 'florina', path: '/home/u/code/florina', rootPath: '/home/u/code' }],
+        };
+      }
+      return { ok: false, error: `unexpected ${kind}` };
+    }) as unknown as WebSocketTransport;
+
+    const { code, stdout } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+
+    // Same-source pin: the serialized fields are exactly what
+    // SetupViewInput's providers/chatModel/roots/repos consume.
+    expect(doc.providersChecked).toBe(true);
+    expect(doc.providersProbed).toBe(true);
+    expect(doc.providers[0]).toMatchObject({ id: 'claude-code', found: true, auth: 'signed-in' });
+    expect(doc.providers[1]).toMatchObject({ id: 'cursor', found: false, installable: true });
+    expect(doc.chatModel).toMatchObject({ configured: true, keySource: 'env', state: 'ok' });
+    expect(doc.reposChecked).toBe(true);
+    expect(doc.roots).toEqual([{ path: '/home/u/code' }]);
+    expect(doc.repos).toEqual([
+      { name: 'florina', path: '/home/u/code/florina', rootPath: '/home/u/code' },
+    ]);
+  });
+
+  it('probed:false serializes as couldn\'t-check, never as "none found"', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-providers') {
+        return { ok: true, probed: false, providers: [] };
+      }
+      return { ok: true, roots: { roots: [] }, repos: [] };
+    }) as unknown as WebSocketTransport;
+
+    const { code, stdout } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.providersChecked).toBe(true);
+    expect(doc.providersProbed).toBe(false);
+    expect(doc.chatModel).toBeNull();
+  });
+
+  it('daemon alive but protocol dead → exit 1 daemon-unreachable', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => {
+      throw new DaemonConnectionError('refused');
+    }) as unknown as WebSocketTransport;
+    const { code, stderr } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    expect(code).toBe(1);
+    expect(JSON.parse(stderr).error).toBe('daemon-unreachable');
+  });
+
+  it('providers query fails while repos answers → checked flags stay honest', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-repos') {
+        return { ok: true, roots: { roots: [] }, repos: [] };
+      }
+      return { ok: false, error: 'no probe' };
+    }) as unknown as WebSocketTransport;
+
+    const { code, stdout } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.providersChecked).toBe(false);
+    expect(doc.providersProbed).toBeNull();
+    // Unchecked side emits null — never a fabricated "none found" list.
+    expect(doc.providers).toBeNull();
+    expect(doc.chatModel).toBeNull();
+    expect(doc.reposChecked).toBe(true);
+  });
+
+  it('repos query fails while providers answers → roots/repos emit null', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-providers') {
+        return { ok: true, probed: true, providers: [] };
+      }
+      return { ok: false, error: 'repo roots are not wired into this daemon' };
+    }) as unknown as WebSocketTransport;
+
+    const { code, stdout } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.reposChecked).toBe(false);
+    expect(doc.roots).toBeNull();
+    expect(doc.repos).toBeNull();
+    expect(doc.providersChecked).toBe(true);
+  });
+
+  it('absent probed field (older daemon) → providersProbed:null, not false', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-providers') {
+        return { ok: true, providers: [{ id: 'codex', found: true }] };
+      }
+      return { ok: true, roots: { roots: [] }, repos: [] };
+    }) as unknown as WebSocketTransport;
+
+    const { stdout } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    const doc = JSON.parse(stdout);
+    expect(doc.providersChecked).toBe(true);
+    expect(doc.providersProbed).toBeNull();
+  });
+
+  it('daemon answering ok:false to both queries → exit 1 with error detail', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      return { ok: false, error: `Unknown command kind: ${kind}` };
+    }) as unknown as WebSocketTransport;
+
+    const { code, stderr } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    expect(code).toBe(1);
+    const doc = JSON.parse(stderr);
+    expect(doc.error).toBe('daemon-unreachable');
+    expect(doc.detail).toContain('Unknown command kind: query-providers');
+    expect(doc.detail).toContain('Unknown command kind: query-repos');
+  });
+
+  it('malformed ok response (missing providers key) → providersChecked:false', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-providers') {
+        return { ok: true };
+      }
+      return { ok: true, roots: { roots: [] }, repos: [] };
+    }) as unknown as WebSocketTransport;
+
+    const { code, stdout } = await runStatusJson(['status', '--json'], jsonRunner(true), transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.providersChecked).toBe(false);
+    expect(doc.providers).toBeNull();
+  });
+
+  it('--json with a stray value is rejected, not silently human-formatted', async () => {
+    const { code, stderr } = await runStatusJson(
+      ['status', '--json', 'extra-arg'],
+      jsonRunner(false),
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain('Usage: florina status [--json]');
+  });
+
+  it('status with a stray positional is rejected', async () => {
+    const { code, stderr } = await runStatusJson(['status', 'foo', '--json'], jsonRunner(false));
+    expect(code).toBe(1);
+    expect(stderr).toContain('Usage: florina status [--json]');
   });
 });
 
