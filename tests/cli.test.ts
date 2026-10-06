@@ -1179,6 +1179,313 @@ describe('status --json', () => {
 });
 
 /* ================================================================== *
+ * repos verbs (issue #322 — agent-drivable folder scope)
+ * ================================================================== */
+
+describe('repos', () => {
+  async function runRepos(
+    argv: readonly string[],
+    transport?: WebSocketTransport,
+  ): Promise<{ code: number; stdout: string; stderr: string; calls: unknown[] }> {
+    let stdout = '';
+    let stderr = '';
+    const calls: unknown[] = [];
+    const outSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stdout += c.toString();
+        return true;
+      });
+    const errSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        stderr += c.toString();
+        return true;
+      });
+    const original = DaemonClient.prototype.sendRaw;
+    if (transport !== undefined) {
+      DaemonClient.prototype.sendRaw = function (command: unknown) {
+        calls.push(command);
+        return transport(command as never, 10_000);
+      };
+    }
+    try {
+      const code = await runCli([...argv], {
+        client: new DaemonClient({ port: 1 }),
+        runner: {
+          status: async () => ({ running: true, port: 1 }),
+          start: async () => 0,
+          stop: async () => false,
+        },
+        createVoiceSession: async () => {
+          throw new Error('voice not used in these tests');
+        },
+      } satisfies CliDependencies);
+      return { code, stdout, stderr, calls };
+    } finally {
+      DaemonClient.prototype.sendRaw = original;
+      outSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  }
+
+  it('repos lists watched folders and discovered projects', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+      roots: { roots: [{ path: '/home/u/code' }] },
+      repos: [{ name: 'florina', path: '/home/u/code/florina', rootPath: '/home/u/code' }],
+    })) as unknown as WebSocketTransport;
+    const { code, stdout, calls } = await runRepos(['repos'], transport);
+    expect(code).toBe(0);
+    expect(calls).toEqual([{ kind: 'query-repos' }]);
+    expect(stdout).toContain('/home/u/code');
+    expect(stdout).toContain('florina');
+  });
+
+  it('repos list --json emits the same roots+repos facts', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+      roots: { roots: [{ path: '/r' }] },
+      repos: [{ name: 'x', path: '/r/x', rootPath: '/r' }],
+    })) as unknown as WebSocketTransport;
+    const { code, stdout } = await runRepos(['repos', 'list', '--json'], transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.roots).toEqual([{ path: '/r' }]);
+    expect(doc.repos).toEqual([{ name: 'x', path: '/r/x', rootPath: '/r' }]);
+  });
+
+  it('repos add resolves the path, sends add-repo-root, then re-queries discovery', async () => {
+    const dir = os.tmpdir();
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-repos') {
+        return {
+          ok: true,
+          roots: { roots: [{ path: dir }] },
+          repos: [{ name: 'p', path: `${dir}/p`, rootPath: dir }],
+        };
+      }
+      return { ok: true, roots: { roots: [{ path: dir }] } };
+    }) as unknown as WebSocketTransport;
+    const { code, stdout, calls } = await runRepos(['repos', 'add', dir], transport);
+    expect(code).toBe(0);
+    expect(calls[0]).toEqual({ kind: 'add-repo-root', path: path.resolve(dir) });
+    expect(calls[1]).toEqual({ kind: 'query-repos' });
+    expect(stdout).toContain('1 project');
+  });
+
+  it('repos add a nonexistent path fails without touching the daemon', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
+    const { code, stderr, calls } = await runRepos(
+      ['repos', 'add', path.join(os.tmpdir(), 'definitely-not-here-zz')],
+      transport,
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain('Not a directory');
+    expect(calls).toEqual([]);
+  });
+
+  it('repos remove without --yes on a non-TTY refuses before mutating', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-repos') {
+        return { ok: true, roots: { roots: [{ path: path.resolve('/some/dir') }] }, repos: [] };
+      }
+      return { ok: true };
+    }) as unknown as WebSocketTransport;
+    const { code, stderr, calls } = await runRepos(['repos', 'remove', '/some/dir'], transport);
+    expect(code).toBe(1);
+    expect(stderr).toContain('--yes');
+    // The membership pre-query ran; no remove command was sent.
+    expect(calls).toEqual([{ kind: 'query-repos' }]);
+  });
+
+  it('repos remove --yes sends remove-repo-root and reports what remains', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-repos') {
+        return { ok: true, roots: { roots: [{ path: path.resolve('/gone') }] }, repos: [] };
+      }
+      return { ok: true, roots: { roots: [{ path: '/kept' }] } };
+    }) as unknown as WebSocketTransport;
+    const { code, stdout, calls } = await runRepos(
+      ['repos', 'remove', '/gone', '--yes'],
+      transport,
+    );
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      { kind: 'query-repos' },
+      { kind: 'remove-repo-root', path: path.resolve('/gone') },
+    ]);
+    expect(stdout).toContain('1 folder');
+  });
+
+  it('repos remove a path that is not watched exits 1 — no fake success', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+      roots: { roots: [{ path: '/other' }] },
+      repos: [],
+    })) as unknown as WebSocketTransport;
+    const { code, stderr, calls } = await runRepos(
+      ['repos', 'remove', '/gone', '--yes'],
+      transport,
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain('Not a watched folder');
+    expect(calls).toEqual([{ kind: 'query-repos' }]);
+  });
+
+  it('repos accepts flags before positionals (--yes <path>)', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-repos') {
+        return { ok: true, roots: { roots: [{ path: path.resolve('/gone') }] }, repos: [] };
+      }
+      return { ok: true, roots: { roots: [] } };
+    }) as unknown as WebSocketTransport;
+    const { code, calls } = await runRepos(['repos', 'remove', '--yes', '/gone'], transport);
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      { kind: 'query-repos' },
+      { kind: 'remove-repo-root', path: path.resolve('/gone') },
+    ]);
+  });
+
+  it('repos remove --yes=false is refused, not treated as consent', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+      roots: { roots: [{ path: path.resolve('/gone') }] },
+      repos: [],
+    })) as unknown as WebSocketTransport;
+    const { code, calls } = await runRepos(['repos', 'remove', '/gone', '--yes=false'], transport);
+    expect(code).toBe(1);
+    expect(calls).toEqual([{ kind: 'query-repos' }]);
+  });
+
+  it('repos move sends move-repo-root with the stored spelling', async () => {
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-repos') {
+        return {
+          ok: true,
+          roots: { roots: [{ path: '/a' }, { path: path.resolve('/b') }] },
+          repos: [],
+        };
+      }
+      return { ok: true, roots: { roots: [{ path: '/a' }, { path: path.resolve('/b') }] } };
+    }) as unknown as WebSocketTransport;
+    const { code, calls } = await runRepos(['repos', 'move', '/b', 'up'], transport);
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      { kind: 'query-repos' },
+      { kind: 'move-repo-root', path: path.resolve('/b'), direction: 'up' },
+    ]);
+  });
+
+  it('repos move a path that is not watched exits 1 — no fake reorder', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+      roots: { roots: [{ path: '/a' }] },
+      repos: [],
+    })) as unknown as WebSocketTransport;
+    const { code, calls } = await runRepos(['repos', 'move', '/b', 'up'], transport);
+    expect(code).toBe(1);
+    expect(calls).toEqual([{ kind: 'query-repos' }]);
+  });
+
+  it('repos move with a bad direction is a usage error, no command sent', async () => {
+    const { code, calls } = await runRepos(['repos', 'move', '/b', 'sideways']);
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it('repos add with an empty path is a usage error — never resolves cwd', async () => {
+    const { code, calls } = await runRepos(['repos', 'add', '']);
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it('repos add --json with failed discovery re-query emits JSON + warning', async () => {
+    const dir = os.tmpdir();
+    const transport: WebSocketTransport = vi.fn(async (command: unknown) => {
+      const kind = (command as { kind: string }).kind;
+      if (kind === 'query-repos') {
+        return { ok: false, error: 'repo scanner is not wired' };
+      }
+      return { ok: true, roots: { roots: [{ path: dir }] } };
+    }) as unknown as WebSocketTransport;
+    const { code, stdout } = await runRepos(['repos', 'add', dir, '--json'], transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.added).toBe(path.resolve(dir));
+    expect(doc.discovered).toBeNull();
+    expect(doc.warning).toContain("couldn't list");
+  });
+
+  it('repos errors emit JSON when --json is set', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: false,
+      error: 'repo roots are not wired into this daemon',
+    })) as unknown as WebSocketTransport;
+    const { code, stderr } = await runRepos(['repos', '--json'], transport);
+    expect(code).toBe(1);
+    expect(JSON.parse(stderr).error).toContain('not wired');
+  });
+
+  it('repos list with a stray positional is a usage error', async () => {
+    const { code } = await runRepos(['repos', 'list', 'extra']);
+    expect(code).toBe(1);
+  });
+
+  it('repos --json=<string> is a usage error, never prose at exit 0', async () => {
+    const { code, stdout, calls } = await runRepos(['repos', 'list', '--json=true']);
+    expect(code).toBe(1);
+    expect(stdout).not.toContain('Watched folders');
+    expect(calls).toEqual([]);
+  });
+
+  it('repos remove/move with an empty path are usage errors', async () => {
+    for (const argv of [
+      ['repos', 'remove', '', '--yes'],
+      ['repos', 'move', '', 'up'],
+    ]) {
+      const { code, calls } = await runRepos(argv);
+      expect(code).toBe(1);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('repos list --json emits nulls, not empty arrays, on missing fields', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: true,
+    })) as unknown as WebSocketTransport;
+    const { code, stdout } = await runRepos(['repos', 'list', '--json'], transport);
+    expect(code).toBe(0);
+    const doc = JSON.parse(stdout);
+    expect(doc.roots).toBeNull();
+    expect(doc.repos).toBeNull();
+  });
+
+  it('repos unknown subcommand is a usage error', async () => {
+    const { code } = await runRepos(['repos', 'frobnicate']);
+    expect(code).toBe(1);
+  });
+
+  it('daemon error responses exit 1 with the error message', async () => {
+    const transport: WebSocketTransport = vi.fn(async () => ({
+      ok: false,
+      error: 'repo roots are not wired into this daemon',
+    })) as unknown as WebSocketTransport;
+    const { code, stderr } = await runRepos(['repos'], transport);
+    expect(code).toBe(1);
+    expect(stderr).toContain('not wired');
+  });
+});
+
+/* ================================================================== *
  * Constants
  * ================================================================== */
 
