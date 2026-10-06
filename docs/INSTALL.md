@@ -53,6 +53,11 @@ There are two ways to run Florina. Pick the row that matches you:
 
 ### Path B — run from source
 
+> **Delegating setup to a coding agent?** Point it at
+> [`AGENT_SETUP.md`](AGENT_SETUP.md) — a step-for-step recipe with exact
+> commands, exit codes, and the moments it must hand back to you. This page
+> is the human version of the same journey.
+
 ```bash
 npm install
 npm run build

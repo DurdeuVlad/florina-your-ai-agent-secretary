@@ -2,6 +2,11 @@
 
 Guidance for coding agents (and humans) working in this repository.
 
+> **Installing Florina on a machine?** This file documents repo conventions
+> for contributors. The machine-setup recipe — exact commands, exit codes,
+> and hand-off steps an external agent executes to install and verify
+> Florina — lives in [`docs/AGENT_SETUP.md`](docs/AGENT_SETUP.md).
+
 ## Project
 
 **Florina** — an open-source attention broker for coding agents. See

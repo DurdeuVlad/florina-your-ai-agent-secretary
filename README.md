@@ -37,7 +37,9 @@ tasks, deliverables, decisions, and attention requests.
 > **Just want to use Florina?** Download the packaged desktop app instead —
 > [`docs/INSTALL.md`](docs/INSTALL.md) has the Windows/Linux installers and a
 > plain-language walkthrough that assumes no prior knowledge. The steps below
-> are for running Florina from source.
+> are for running Florina from source. **Delegating setup to a coding agent?**
+> [`docs/AGENT_SETUP.md`](docs/AGENT_SETUP.md) is the verbatim recipe it should
+> follow.
 
 ### Prerequisites
 
