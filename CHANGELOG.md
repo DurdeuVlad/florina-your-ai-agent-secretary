@@ -5,6 +5,56 @@ All notable changes to Florina are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-06
+
+### Agent-operable setup (milestone 14)
+
+- **`florina status --json`** — one machine-readable document carrying the
+  same readiness facts the desktop setup card renders: daemon state,
+  per-provider install/auth state, chat-model status, watched roots and
+  discovered repos. Exit 0 means the daemon answered; non-zero carries a
+  machine-readable `error` (`daemon-not-running`, `daemon-unreachable`)
+  on stderr. `null` marks "couldn't check" — never a fabricated empty list.
+  (#321)
+- **`florina repos`** — `list`, `add <path>`, `remove <path> [--yes]`, and
+  `move <path> up|down` over the daemon's existing root commands, all with
+  `--json`. Removal keeps an explicit consent moment (`--yes` required
+  non-interactively), unknown paths fail honestly instead of no-op
+  "success", and `add` never guesses a scope — the caller names the folder.
+  (#322)
+- **`florina start --detach`** — starts the daemon in a detached background
+  process (output to `~/.florina/daemon.log`) and returns only once the
+  child itself is bound and ready. Early exit, spawn failure, and timeout
+  all surface as nonzero exits; `--json` reports `{started, detached, pid,
+logFile}`. Unknown flags and stray arguments are usage errors, so a typo
+  can never wedge an agent in a blocking foreground daemon. (#323)
+- **`docs/AGENT_SETUP.md`** — the verbatim recipe an external coding agent
+  (Claude Code, Codex, Cursor, …) follows to install, configure, and verify
+  Florina: exact commands, exit-code contracts, designed human hand-offs
+  for sign-ins/secrets/folder choice, and a final verification that quotes
+  `status --json` facts rather than claiming success. A pin test asserts
+  every recipe verb stays in the CLI dispatch table. (#320, #324)
+
+### Providers
+
+- **Four new providers** — GitHub Copilot, OpenCode, Cursor (`cursor-agent`
+  via ACP), and Aider (print-run transport with model-key auth) join the
+  manifest table; detection, credential evidence, sign-in recipes, and
+  installers all come from the single declarative manifest. (#303–#306)
+- **macOS/Linux parity** — verified installers and credential probes now
+  cover all three platforms, including a beyond-PATH sign-in fix for
+  OpenCode. (#302, #304)
+- Skipped providers are re-probed on every status query, so a CLI installed
+  mid-session is seen without a daemon restart. (#301)
+
+### Fixes
+
+- The attention inbox now persists across daemon restarts. (#272)
+- `florina version` reports the package version — the CLI's `VERSION`
+  constant had drifted to `0.0.1` and is now pinned to `package.json` by a
+  test so it cannot drift again.
+- Linux CI: platform-correct path handling. (#284)
+
 ## [0.2.0] - 2026-10-05
 
 ### Provider onboarding (milestone 13)

@@ -1767,6 +1767,13 @@ describe('constants', () => {
     expect(DEFAULT_PID_FILE).toContain(os.tmpdir());
     expect(DEFAULT_PID_FILE).toContain('florina');
   });
+
+  it('VERSION mirrors package.json — `florina version` must never lie', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    expect(VERSION).toBe(pkg.version);
+  });
 });
 
 /* ================================================================== *

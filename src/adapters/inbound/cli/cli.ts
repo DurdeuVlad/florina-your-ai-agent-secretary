@@ -73,8 +73,8 @@ import type {
   AttentionItemStatus,
 } from '../../../core/application/use-cases/attention/attention-item.js';
 
-/** CLI version (mirrors package.json version). */
-export const VERSION = '0.0.1';
+/** CLI version (mirrors package.json version — pinned by cli.test.ts). */
+export const VERSION = '0.3.0';
 
 /* ================================================================== *
  * Argument parsing (minimal, no external deps)
