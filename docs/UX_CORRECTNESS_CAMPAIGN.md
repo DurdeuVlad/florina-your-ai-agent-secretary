@@ -1,8 +1,8 @@
 # UX Correctness Campaign
 
-**Status:** in flight — milestone **UX Correctness Pass** and issues
-created on `DurdeuVlad/florina-your-ai-agent-secretary`; #331 (PR #335),
-#332 (PR #336), #333 (PR #337) merged; #334 in progress.
+**Status:** done — milestone **UX Correctness Pass** on
+`DurdeuVlad/florina-your-ai-agent-secretary`; all four issues merged:
+#331 (PR #335), #332 (PR #336), #333 (PR #337), #334 (PR #338).
 
 **Source:** live findings from the 2026-10-07 evidence run catalogued in
 [`UX_ISSUE_CATALOGUE.md`](UX_ISSUE_CATALOGUE.md) (v0.3.0, real daemon,
