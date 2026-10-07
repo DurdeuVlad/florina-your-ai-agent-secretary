@@ -56,6 +56,15 @@ loadEnvFile();
 const DAEMON_URL = process.env['FLORINA_DAEMON_URL'] ?? 'ws://127.0.0.1:17419';
 
 /**
+ * Where `desktop-settings.json` lives (issue #334). Unset → `~/.florina`;
+ * `FLORINA_DESKTOP_SETTINGS_DIR` points it elsewhere — the visual-qa
+ * harness uses a throwaway dir so a first-run profile can render without
+ * touching the real settings file. Daemon state (auth token, journal)
+ * still resolves under the real profile — this scopes ONLY this file.
+ */
+const DESKTOP_SETTINGS_DIR = process.env['FLORINA_DESKTOP_SETTINGS_DIR'];
+
+/**
  * Resolve a renderer asset path for both development and packaged modes
  * (issue #171, DEC-028).
  *
@@ -101,7 +110,7 @@ function runCli(action: 'start' | 'stop'): void {
  */
 async function quitApp(): Promise<void> {
   await desktopAppRef?.stop();
-  if (readDesktopSettings().stopDaemonOnQuit) runCli('stop');
+  if (readDesktopSettings(DESKTOP_SETTINGS_DIR).stopDaemonOnQuit) runCli('stop');
   app.quit();
 }
 
@@ -130,7 +139,7 @@ async function main(): Promise<void> {
   let dictation: DictationService | undefined;
   let whisper: TranscriptionPort | undefined;
   const whisperModel = process.env['FLORINA_WHISPER_MODEL'];
-  const settings = readDesktopSettings();
+  const settings = readDesktopSettings(DESKTOP_SETTINGS_DIR);
   if (openaiKey !== undefined || whisperModel !== undefined) {
     const { RealtimeBridge, defaultSocketFactory } =
       await import('../adapters/outbound/voice/realtime-bridge.js');
@@ -324,8 +333,8 @@ async function main(): Promise<void> {
     // Desktop settings persistence for the prefs screen's "Desktop &
     // voice" card (issue #163) — the renderer sends `deskset:` patches.
     desktopSettings: {
-      read: () => readDesktopSettings(),
-      write: (s) => writeDesktopSettings(s),
+      read: () => readDesktopSettings(DESKTOP_SETTINGS_DIR),
+      write: (s) => writeDesktopSettings(s, DESKTOP_SETTINGS_DIR),
     },
     // Settings > Repos "+ Add folder"/"Use default folder" (issue #253).
     folderPicker: new ElectronFolderPicker(),

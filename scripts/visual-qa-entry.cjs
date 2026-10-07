@@ -14,6 +14,7 @@
  */
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -118,7 +119,27 @@ async function checkNoHOverflow(win, label) {
   }
 }
 
+/** Throwaway dir for the first-run fixture — removed in the outer finally. */
+let fixtureDir = null;
+
 async function shotApp() {
+  /* First-run setup fixture (issue #334): the setup card only renders
+   * when onboardingState is 'open' — never true on a configured machine.
+   * Pointing FLORINA_DESKTOP_SETTINGS_DIR at a temp dir gives the app a
+   * profile with no desktop-settings.json → the card renders. The daemon
+   * connection (incl. ~/.florina/auth-token) is untouched — only this
+   * file is scoped. */
+  fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'florina-qa-setup-'));
+  process.env.FLORINA_DESKTOP_SETTINGS_DIR = fixtureDir;
+  console.log(`[visual-qa] first-run fixture → ${fixtureDir} (real ~/.florina untouched)`);
+  // Pre-run snapshot of the real file — the hermeticity check at the end
+  // compares against this, so it must be taken before ANY app write could
+  // land (setup:done/deskset fire later this run).
+  const realSettingsFile = path.join(os.homedir(), '.florina', 'desktop-settings.json');
+  const realSettingsSnapshot = fs.existsSync(realSettingsFile)
+    ? fs.readFileSync(realSettingsFile)
+    : null;
+
   // Booting the real bootstrap starts DesktopApp, tray, HUD, hotkeys —
   // exactly what a user sees. It connects to the running daemon (or
   // auto-starts one, #132) and renders real state.
@@ -142,6 +163,43 @@ async function shotApp() {
   win.show();
   win.focus();
   await sleep(APP_SETTLE_MS);
+
+  /* First-run setup captures (issue #334): the welcome card is mounted at
+   * the top of the launch view by replaySetup once the fixture profile
+   * reports onboardingState 'open'. Capture welcome, step to 'apps' via
+   * the real verb, capture that, then setup:done collapses the panel so
+   * the app-* baselines below stay panel-free. */
+  const welcomeVisible = await win.webContents.executeJavaScript(
+    `document.getElementById('setupPanel')?.textContent.length > 0`,
+  );
+  if (!welcomeVisible) {
+    console.log('[visual-qa] WARN: setup panel did not render on a fresh profile');
+    process.exitCode = 1;
+  } else {
+    await captureWindow(win, path.join(SHOTS, 'app-setup-welcome.png'));
+    console.log('[visual-qa] captured setup welcome step');
+    await checkNoHOverflow(win, 'setup-welcome');
+    await win.webContents.executeJavaScript(`window.florina.command('setup:next')`);
+    // The apps step waits on live daemon facts — poll the panel text.
+    let appsStep = false;
+    for (let i = 0; i < 20; i++) {
+      appsStep = await win.webContents.executeJavaScript(
+        `document.getElementById('setupPanel')?.textContent.includes('coding apps') ?? false`,
+      );
+      if (appsStep) break;
+      await sleep(300);
+    }
+    if (appsStep) {
+      await captureWindow(win, path.join(SHOTS, 'app-setup-apps.png'));
+      console.log('[visual-qa] captured setup apps step');
+      await checkNoHOverflow(win, 'setup-apps');
+    } else {
+      console.log('[visual-qa] WARN: setup next step never rendered — apps shot skipped');
+      process.exitCode = 1;
+    }
+    await win.webContents.executeJavaScript(`window.florina.command('setup:done')`);
+    await sleep(SETTLE_MS);
+  }
 
   for (const [view, key] of Object.entries(APP_VIEWS)) {
     if (key !== null) {
@@ -244,7 +302,6 @@ async function shotApp() {
   // Two extra Custom items at Medium/Low prove the per-priority icon
   // and chip-color gap fix (issue #265) in the same capture.
   const WebSocket = require('ws');
-  const os = require('node:os');
   const daemonUrl = process.env.FLORINA_DAEMON_URL ?? 'ws://127.0.0.1:17419';
   const ws = new WebSocket(daemonUrl);
   const RAISES = [
@@ -456,10 +513,8 @@ async function shotApp() {
   // conflict → Settings-rebind → working-shortcut story live. A
   // synthesized keypress can't reach the OS global-shortcut layer, so
   // dispatch→pttToggle stays covered by tests/ptt-hotkey.test.ts.
-  // The settings file is snapshotted and restored so the probe leaves no
-  // persisted override behind (#334 will isolate the whole run).
-  const settingsFile = path.join(os.homedir(), '.florina', 'desktop-settings.json');
-  const settingsSnapshot = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
+  // The deskset write lands inside the fixture dir (#334) — the real
+  // file's pre-run snapshot (taken at shotApp start) proves it below.
   const QA_ACCEL = 'Control+Alt+Shift+F9'; // virtually never claimed
   const hintBefore = await win.webContents.executeJavaScript(
     `document.getElementById('hudTitle')?.textContent`,
@@ -515,10 +570,24 @@ async function shotApp() {
       if (!kept) process.exitCode = 1;
     }
   }
-  // Leave zero persisted footprint — restores the pre-probe file bytes
-  // (or absence) regardless of what the deskset writes above landed.
-  if (settingsSnapshot === null) fs.rmSync(settingsFile, { force: true });
-  else fs.writeFileSync(settingsFile, settingsSnapshot);
+  // Fixture hermeticity (issue #334): every desktop-settings write this
+  // run (setup:done, deskset) must have landed inside the temp dir, and
+  // the real file must be byte-identical to its pre-run snapshot. A leak
+  // gets repaired below AND fails the run — the fixture was broken.
+  const fixtureSettings = path.join(fixtureDir, 'desktop-settings.json');
+  const fixtureOk = fs.existsSync(fixtureSettings);
+  const realNow = fs.existsSync(realSettingsFile) ? fs.readFileSync(realSettingsFile) : null;
+  const realUnchanged =
+    (realSettingsSnapshot === null && realNow === null) ||
+    (realSettingsSnapshot !== null && realNow !== null && realNow.equals(realSettingsSnapshot));
+  console.log(
+    `[visual-qa] fixture hermeticity → temp file ${fixtureOk ? 'present' : 'MISSING'}, real file ${realUnchanged ? 'unchanged' : 'MUTATED'}`,
+  );
+  if (!fixtureOk || !realUnchanged) process.exitCode = 1;
+  // Restore the pre-run bytes — no-op write of identical content when the
+  // fixture held; repairs the file if a write ever escaped it.
+  if (realSettingsSnapshot === null) fs.rmSync(realSettingsFile, { force: true });
+  else fs.writeFileSync(realSettingsFile, realSettingsSnapshot);
 }
 
 app.whenReady().then(async () => {
@@ -531,6 +600,12 @@ app.whenReady().then(async () => {
     console.error('[visual-qa] failed:', err);
     process.exitCode = 1;
   } finally {
+    // Remove the first-run fixture profile — nothing persists.
+    try {
+      if (fixtureDir) fs.rmSync(fixtureDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup — OS temp dirs are reclaimed anyway */
+    }
     app.quit();
     /* close-to-tray can veto window close and leave the app running —
      * hard-exit if quit doesn't take within a few seconds. */

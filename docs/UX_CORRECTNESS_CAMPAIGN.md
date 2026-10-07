@@ -1,10 +1,8 @@
 # UX Correctness Campaign
 
-**Status:** planned; issues not yet created externally.
-**Handoff:** Proposed GitHub milestone **UX Correctness Pass** on
-`DurdeuVlad/agent-secretary` — four issues below, unassigned, no dates.
-Creating the milestone/issues requires explicit authorization; this doc is
-the executable draft until then.
+**Status:** in flight — milestone **UX Correctness Pass** and issues
+created on `DurdeuVlad/florina-your-ai-agent-secretary`; #331 (PR #335),
+#332 (PR #336), #333 (PR #337) merged; #334 in progress.
 
 **Source:** live findings from the 2026-10-07 evidence run catalogued in
 [`UX_ISSUE_CATALOGUE.md`](UX_ISSUE_CATALOGUE.md) (v0.3.0, real daemon,
@@ -154,7 +152,7 @@ fixed UI; #279 itself stays open and out of scope here.
 - **Scope:** `scripts/visual-qa-entry.cjs`; possibly a dir-override env
   wired in bootstrap (`desktopSettingsPath(dir)` already accepts a dir).
   Unassigned.
-- **Non-goals:** a fully unconfigured *daemon* fixture (larger —
+- **Non-goals:** a fully unconfigured _daemon_ fixture (larger —
   follow-up); reconnect-state capture (#122) — next candidate for the
   same pattern.
 - **Dependencies:** none. **Open decision (implementer-owned):**
