@@ -29,7 +29,10 @@ else shipped.
 | Setup card (in chat, first-run only) | — not visible (this machine is configured)   | —                                            | #277, #278                               |
 | Cross-cutting / architectural        | all                                          | —                                            | #42, #49, #50, #65, #183, #261, #279     |
 
-## ux/onboarding-labeled issues (authoritative)
+## All UX-surface issues (authoritative)
+
+18 `ux`/`onboarding`-labeled + 13 unlabeled screen-owners (120, 122,
+127–130, 133, 160, 181, 183, 218, 221, 223).
 
 | #   | State    | Closed     | Contract                                                       | Evidence shot(s)                                                                            |
 | --- | -------- | ---------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -74,7 +77,7 @@ event wiring, #132 daemon auto-start, #157/#158 chat thread+turns,
 #198/#219 five-item IA, #199/#221/#222 history+journal search, #200/#224
 memory browse+inline actions, #201 provenance trail, #202 failover
 indicator, #253 repos picker, #264 journal-failure cards, #265 icon/color
-consistency, #270 shared confirmation, #272 inbox persistence,
+consistency, #270 shared confirmation (merged PR, not an issue), #272 inbox persistence,
 #294 provider-readiness UI, #292 secrets surfaces. All closed; most are
 visible in today's shots (nav IA, inspector columns, repos picker, journal
 search bar, provenance affordances).
