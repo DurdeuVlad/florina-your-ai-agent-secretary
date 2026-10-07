@@ -143,6 +143,12 @@ if (bridge) {
     if (d.config) {
       micDeviceId = d.config.micDeviceId || null;
       applyDesktopSettings(d.config);
+      // Env override disclosure (issue #332): pushed alongside config so
+      // the PTT field can say when FLORINA_PTT_HOTKEY wins over it.
+      if (typeof d.pttHotkeyEnv === 'string' && d.pttHotkeyEnv.length > 0) {
+        pttEnvAccelerator = d.pttHotkeyEnv;
+      }
+      setPttNote(pttEnvNote());
       if (d.config.voiceModeDefault && !voiceOn && !voiceDefaultApplied) {
         voiceDefaultApplied = true;
         toggleVoiceMode();
@@ -687,6 +693,29 @@ function setMicListening(on) {
 
 /* ---------- desktop & voice settings card (issue #163) ---------- */
 
+/** FLORINA_PTT_HOTKEY snapshot pushed with voice:update (issue #332). */
+let pttEnvAccelerator = null;
+
+/** Inline note under the PTT field — env disclosure or rebind failure. */
+function setPttNote(text, isErr) {
+  const el = $('deskPttNote');
+  if (!el) return;
+  if (!text) {
+    el.hidden = true;
+    el.classList.remove('err');
+    return;
+  }
+  el.textContent = text;
+  el.classList.toggle('err', isErr === true);
+  el.hidden = false;
+}
+
+function pttEnvNote() {
+  return pttEnvAccelerator
+    ? `FLORINA_PTT_HOTKEY is set to "${pttEnvAccelerator}" — it overrides this field`
+    : null;
+}
+
 /** Reflect saved desktop settings into the prefs card fields. */
 function applyDesktopSettings(cfg) {
   const micSel = $('deskMic');
@@ -708,6 +737,9 @@ function applyDesktopSettings(cfg) {
   if (cfg.voiceModeDefault !== undefined) $('deskVoiceMode').checked = cfg.voiceModeDefault;
   if (cfg.stopDaemonOnQuit !== undefined) $('deskStopDaemon').checked = cfg.stopDaemonOnQuit;
   if (cfg.dictationLanguage !== undefined) $('deskLang').value = cfg.dictationLanguage || '';
+  // Always reflects the saved value (cleared → empty). A failed rebind is
+  // never persisted, so what lands here is what the app will bind.
+  $('deskPtt').value = cfg.pttHotkey || '';
 }
 
 /** Enumerate mics once; labels need a prior getUserMedia grant. */
@@ -739,10 +771,19 @@ $('deskSave').addEventListener('click', () => {
     dictationLanguage: $('deskLang').value.trim() || null,
     voiceModeDefault: $('deskVoiceMode').checked,
     stopDaemonOnQuit: $('deskStopDaemon').checked,
+    // Empty → null clears back to env/default (issue #332).
+    pttHotkey: $('deskPtt').value.trim() || null,
   };
   void bridge.command('deskset:' + encodeURIComponent(JSON.stringify(patch))).then((res) => {
-    if (res && res.ok === false) toast(res.error || 'could not save desktop settings');
-    else toast('desktop settings saved');
+    if (res && res.ok === false) {
+      // A failed rebind names the accelerator — surface it inline on the
+      // field; other failures keep the toast path.
+      if (res.error && /register|hotkey/i.test(res.error)) setPttNote(res.error, true);
+      else toast(res.error || 'could not save desktop settings');
+    } else {
+      setPttNote(pttEnvNote());
+      toast('desktop settings saved');
+    }
   });
 });
 

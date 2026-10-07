@@ -39,6 +39,8 @@ import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-b
 import { ElectronFolderPicker } from '../adapters/inbound/desktop/electron/folder-picker.js';
 import { installCopyContextMenu } from '../adapters/inbound/desktop/electron/context-menu.js';
 import { HotkeyManager, DEFAULT_HOTKEYS } from '../adapters/inbound/desktop/hotkeys.js';
+import { createPttHotkey } from '../adapters/inbound/desktop/ptt-hotkey.js';
+import type { PttHotkey } from '../adapters/inbound/desktop/ptt-hotkey.js';
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
 import { ensureLocalAuthToken } from '../adapters/outbound/credentials/local-auth-token.js';
@@ -283,6 +285,9 @@ async function main(): Promise<void> {
     overlayHtmlPath: VOICE_OVERLAY_HTML,
   });
 
+  // Assigned by the hotkey block below — deskset: patches can only arrive
+  // after the window loads, by which point `ptt` is always set.
+  let ptt: PttHotkey | undefined;
   const desktopApp = new DesktopApp({
     window,
     ipcTransport: ipc,
@@ -324,6 +329,18 @@ async function main(): Promise<void> {
     },
     // Settings > Repos "+ Add folder"/"Use default folder" (issue #253).
     folderPicker: new ElectronFolderPicker(),
+    // PTT rebind (issue #332): a deskset `pttHotkey` patch lands here —
+    // the controller is wired below; until then fail honestly rather
+    // than pretending a renderer-driven rebind can run before the hotkey
+    // system exists.
+    pttHotkeyRebind: (saved) =>
+      ptt === undefined
+        ? { ok: false, error: 'hotkey system is not ready yet — try again' }
+        : ptt.rebind(saved),
+    // Surface the env override in the Settings field hint (issue #332).
+    ...(process.env['FLORINA_PTT_HOTKEY'] !== undefined
+      ? { pttHotkeyEnv: process.env['FLORINA_PTT_HOTKEY'] }
+      : {}),
     // First-run setup chooser (issue #277): the packaged/source default
     // comes from the real runtime — the user can still flip it in the
     // welcome step.
@@ -383,22 +400,26 @@ async function main(): Promise<void> {
 
   // Global push-to-talk hotkey (issue #124): OS-level via Electron's
   // globalShortcut — works with no window focused and the main window
-  // closed. The accelerator is configurable (env until #128 lands the
-  // preferences editor); registration failure = conflict, surfaced on the
-  // HUD's idle hint.
+  // closed. Accelerator precedence (#332): FLORINA_PTT_HOTKEY env >
+  // saved desktop setting > built-in default. Registration failure =
+  // conflict, surfaced on the HUD's idle hint with a pointer at
+  // Settings → Desktop & voice.
   const keyboard = new ElectronKeyboardBackend();
   const hotkeys = new HotkeyManager(keyboard);
   keyboard.setFireHandler((accelerator) => hotkeys.dispatch(accelerator));
-  const pttAccelerator = process.env['FLORINA_PTT_HOTKEY'] ?? DEFAULT_HOTKEYS.PTT_HOLD;
-  const hintAccel = pttAccelerator.replace(
-    'CommandOrControl',
-    process.platform === 'darwin' ? 'Cmd' : 'Ctrl',
-  );
-  if (hotkeys.register(pttAccelerator, () => void desktopApp.pttToggle())) {
-    hud.viewModel.setHotkeyHint(`${hintAccel} to talk — or click`);
-  } else {
-    hud.viewModel.setHotkeyHint(`Hotkey conflict: ${pttAccelerator} — set FLORINA_PTT_HOTKEY`);
-    console.warn(`[desktop] global hotkey "${pttAccelerator}" could not be registered (conflict)`);
+  ptt = createPttHotkey({
+    hotkeys,
+    ...(process.env['FLORINA_PTT_HOTKEY'] !== undefined
+      ? { envAccelerator: process.env['FLORINA_PTT_HOTKEY'] }
+      : {}),
+    ...(settings.pttHotkey !== undefined ? { savedAccelerator: settings.pttHotkey } : {}),
+    defaultAccelerator: DEFAULT_HOTKEYS.PTT_HOLD,
+    onFire: () => void desktopApp.pttToggle(),
+    onHint: (hint) => hud.viewModel.setHotkeyHint(hint),
+    hintFor: (a) => a.replace('CommandOrControl', process.platform === 'darwin' ? 'Cmd' : 'Ctrl'),
+  });
+  if (!ptt.register()) {
+    console.warn(`[desktop] global hotkey "${ptt.effective()}" could not be registered (conflict)`);
   }
   app.on('will-quit', () => hotkeys.unregisterAll());
 

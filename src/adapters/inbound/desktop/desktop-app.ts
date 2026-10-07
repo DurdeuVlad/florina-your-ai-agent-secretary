@@ -202,6 +202,20 @@ export interface DesktopAppOptions {
    * threshold deterministically. Default: 30-minute threshold.
    */
   readonly catchUpTrigger?: CatchUpAutoTrigger;
+  /**
+   * PTT-hotkey rebinding (issue #332): called when a `deskset:` patch
+   * carries `pttHotkey`. The composition root attempts the OS-level
+   * registration and reports the outcome — the renderer never touches
+   * Electron globals. `{ok: false}` rejects the whole patch (nothing is
+   * persisted for a binding that didn't land). Absent → the value is
+   * persisted and takes effect at next capable launch.
+   */
+  readonly pttHotkeyRebind?: (saved: string | null) => { ok: boolean; error?: string };
+  /**
+   * Snapshot of `FLORINA_PTT_HOTKEY` when set (issue #332) — pushed to the
+   * renderer so the Settings field can disclose that env wins.
+   */
+  readonly pttHotkeyEnv?: string;
 }
 
 /**
@@ -227,6 +241,8 @@ export interface DesktopSettingsShape {
   readonly micDeviceId?: string;
   readonly voiceModeDefault: boolean;
   readonly dictationLanguage?: string;
+  /** Saved PTT accelerator (issue #332) — see `DesktopSettings`. */
+  readonly pttHotkey?: string;
   /** First-run setup state (issue #277) — see `DesktopSettings`. */
   readonly onboardingState?: 'open' | 'skipped' | 'done';
 }
@@ -291,6 +307,9 @@ export class DesktopApp {
   private readonly voiceConfig: DesktopAppOptions['voiceConfig'];
   private readonly desktopSettings: DesktopSettingsStore | undefined;
   private readonly folderPicker: FolderPickerPort | undefined;
+  private readonly pttHotkeyRebind:
+    ((saved: string | null) => { ok: boolean; error?: string }) | undefined;
+  private readonly pttHotkeyEnv: string | undefined;
   /** Voice-mode on/off + whether a talk turn is capturing (issue #162). */
   private voiceActive = false;
   private voiceListening = false;
@@ -371,6 +390,8 @@ export class DesktopApp {
     this.voiceConfig = options.voiceConfig;
     this.desktopSettings = options.desktopSettings;
     this.folderPicker = options.folderPicker;
+    this.pttHotkeyRebind = options.pttHotkeyRebind;
+    this.pttHotkeyEnv = options.pttHotkeyEnv;
     this.catchUpTrigger = options.catchUpTrigger ?? new CatchUpAutoTrigger();
     this.installMode = options.packaged === true ? 'packaged' : 'source';
     // Voice-mode state + live transcript captions reach the renderer on
@@ -1545,7 +1566,10 @@ export class DesktopApp {
   replayVoiceConfig(): void {
     const config = this.desktopSettings?.read() ?? this.voiceConfig;
     if (config !== undefined) {
-      this.bridge.sendToRenderer('voice:update', { config });
+      this.bridge.sendToRenderer('voice:update', {
+        config,
+        ...(this.pttHotkeyEnv !== undefined ? { pttHotkeyEnv: this.pttHotkeyEnv } : {}),
+      });
     }
   }
 
@@ -1576,6 +1600,28 @@ export class DesktopApp {
     }
     const p = patch as Record<string, unknown>;
     const current = this.desktopSettings.read();
+    // pttHotkey (issue #332): `null` clears, a non-empty string sets. The
+    // requested value is attempted at the OS level first — a binding that
+    // fails is never persisted, and the whole patch is rejected so the
+    // user sees one honest failure instead of a half-saved card.
+    let requestedPtt: string | null | undefined; // undefined = leave as-is
+    if ('pttHotkey' in p) {
+      const pv = p['pttHotkey'];
+      if (pv === null) requestedPtt = null;
+      else if (typeof pv === 'string' && pv.trim().length > 0) requestedPtt = pv.trim();
+      // other types: leave as-is, like the other fields
+      // `null` with nothing persisted is a no-op — skipping the rebind
+      // stops an unrelated save from failing on a conflicted default the
+      // user never asked to bind.
+      const pttNoop = requestedPtt === null && current.pttHotkey === undefined;
+      if (requestedPtt !== undefined && !pttNoop && this.pttHotkeyRebind !== undefined) {
+        const res = this.pttHotkeyRebind(requestedPtt);
+        if (!res.ok) {
+          ack({ ok: false, error: res.error ?? `could not register hotkey "${requestedPtt}"` });
+          return;
+        }
+      }
+    }
     const next: DesktopSettingsShape = {
       stopDaemonOnQuit:
         typeof p['stopDaemonOnQuit'] === 'boolean'
@@ -1598,6 +1644,13 @@ export class DesktopApp {
           ? { dictationLanguage: p['dictationLanguage'] }
           : current.dictationLanguage !== undefined
             ? { dictationLanguage: current.dictationLanguage }
+            : {}),
+      ...(requestedPtt === null
+        ? {}
+        : requestedPtt !== undefined
+          ? { pttHotkey: requestedPtt }
+          : current.pttHotkey !== undefined
+            ? { pttHotkey: current.pttHotkey }
             : {}),
       // onboardingState (issue #277) is written only by the setup:* verbs —
       // a deskset save must carry it through, not wipe it.

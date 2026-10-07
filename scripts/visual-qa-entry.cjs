@@ -409,6 +409,78 @@ async function shotApp() {
     );
     if (!popOk) process.exitCode = 1;
   }
+
+  // PTT rebind recovery (issue #332): save a replacement accelerator
+  // through the real deskset path and confirm the HUD hint switches to
+  // it — on a machine where Ctrl+Space is held this exercises the full
+  // conflict → Settings-rebind → working-shortcut story live. A
+  // synthesized keypress can't reach the OS global-shortcut layer, so
+  // dispatch→pttToggle stays covered by tests/ptt-hotkey.test.ts.
+  // The settings file is snapshotted and restored so the probe leaves no
+  // persisted override behind (#334 will isolate the whole run).
+  const settingsFile = path.join(os.homedir(), '.florina', 'desktop-settings.json');
+  const settingsSnapshot = fs.existsSync(settingsFile)
+    ? fs.readFileSync(settingsFile)
+    : null;
+  const QA_ACCEL = 'Control+Alt+Shift+F9'; // virtually never claimed
+  const hintBefore = await win.webContents.executeJavaScript(
+    `document.getElementById('hudTitle')?.textContent`,
+  );
+  console.log(`[visual-qa] ptt hint before rebind → ${hintBefore}`);
+  const rebindRes = await win.webContents.executeJavaScript(
+    `window.florina.command('deskset:' + encodeURIComponent(JSON.stringify({ pttHotkey: '${QA_ACCEL}' })))`,
+  );
+  if (rebindRes?.ok !== true) {
+    console.log(`[visual-qa] WARN: ptt rebind rejected — ${JSON.stringify(rebindRes)}`);
+    process.exitCode = 1;
+  } else {
+    let bound = false;
+    for (let i = 0; i < 20; i++) {
+      const hint = await win.webContents.executeJavaScript(
+        `document.getElementById('hudTitle')?.textContent`,
+      );
+      if (hint === `${QA_ACCEL} to talk — or click`) {
+        bound = true;
+        break;
+      }
+      await sleep(250);
+    }
+    // The persisted value must also land back in the Settings field via
+    // the config re-push — the same path a user's save takes.
+    const fieldVal = await win.webContents.executeJavaScript(
+      `document.getElementById('deskPtt')?.value`,
+    );
+    console.log(
+      bound
+        ? `[visual-qa] ptt rebind bound ${QA_ACCEL} live — field shows "${fieldVal}"`
+        : '[visual-qa] WARN: HUD hint never switched to the rebound accelerator',
+    );
+    if (!bound || fieldVal !== QA_ACCEL) process.exitCode = 1;
+    // Revert attempt: on a clean machine the default re-binds and clears;
+    // where the default is held the rebind must fail honestly AND keep
+    // the working QA_ACCEL binding — the hint must not flip to conflict.
+    const revertRes = await win.webContents.executeJavaScript(
+      `window.florina.command('deskset:' + encodeURIComponent(JSON.stringify({ pttHotkey: null })))`,
+    );
+    if (revertRes?.ok === true) {
+      console.log('[visual-qa] ptt reverted to default');
+    } else {
+      const hintAfter = await win.webContents.executeJavaScript(
+        `document.getElementById('hudTitle')?.textContent`,
+      );
+      const kept = hintAfter === `${QA_ACCEL} to talk — or click`;
+      console.log(
+        kept
+          ? `[visual-qa] ptt revert rejected (${revertRes?.error}) — working binding kept`
+          : `[visual-qa] WARN: revert failed and the working binding was lost — ${hintAfter}`,
+      );
+      if (!kept) process.exitCode = 1;
+    }
+  }
+  // Leave zero persisted footprint — restores the pre-probe file bytes
+  // (or absence) regardless of what the deskset writes above landed.
+  if (settingsSnapshot === null) fs.rmSync(settingsFile, { force: true });
+  else fs.writeFileSync(settingsFile, settingsSnapshot);
 }
 
 app.whenReady().then(async () => {

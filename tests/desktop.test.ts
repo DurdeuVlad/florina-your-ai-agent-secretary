@@ -3490,7 +3490,12 @@ describe('deskset: desktop settings command (issue #163)', () => {
 
   function settingsApp(
     transport: MockIpcTransport,
-    options?: { desktopSettings?: DesktopSettingsStore; dictation?: DictationService },
+    options?: {
+      desktopSettings?: DesktopSettingsStore;
+      dictation?: DictationService;
+      pttHotkeyRebind?: (saved: string | null) => { ok: boolean; error?: string };
+      pttHotkeyEnv?: string;
+    },
   ): DesktopApp {
     const app = new DesktopApp({
       window: new MockWindowBackend(),
@@ -3499,6 +3504,10 @@ describe('deskset: desktop settings command (issue #163)', () => {
         ? { desktopSettings: options.desktopSettings }
         : {}),
       ...(options?.dictation !== undefined ? { dictation: options.dictation } : {}),
+      ...(options?.pttHotkeyRebind !== undefined
+        ? { pttHotkeyRebind: options.pttHotkeyRebind }
+        : {}),
+      ...(options?.pttHotkeyEnv !== undefined ? { pttHotkeyEnv: options.pttHotkeyEnv } : {}),
     });
     app.start();
     return app;
@@ -3620,6 +3629,113 @@ describe('deskset: desktop settings command (issue #163)', () => {
     await app.handleRendererCommand({ id: 's5', cmd: deskset({ dictationLanguage: 'ro' }) });
     expect(resultFor(transport, 's5')?.ok).toBe(true);
     expect(spy).toHaveBeenCalledWith('ro');
+    await app.disconnect();
+  });
+
+  // --- pttHotkey rebinding (issue #332) ---
+
+  it('persists pttHotkey only after the rebind port accepts it', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore();
+    const rebind = vi.fn().mockReturnValue({ ok: true });
+    const app = settingsApp(transport, { desktopSettings: store, pttHotkeyRebind: rebind });
+    await app.handleRendererCommand({ id: 'p1', cmd: deskset({ pttHotkey: 'Alt+P' }) });
+    expect(rebind).toHaveBeenCalledWith('Alt+P');
+    expect(resultFor(transport, 'p1')?.ok).toBe(true);
+    expect(written[0]?.pttHotkey).toBe('Alt+P');
+    // The config re-push carries the bound value to the renderer.
+    const configs = transport.toRenderer
+      .filter((m) => m.channel === 'voice:update')
+      .map((m) => m.data as { config?: DesktopSettingsShape })
+      .map((d) => d.config);
+    expect(configs.at(-1)?.pttHotkey).toBe('Alt+P');
+    await app.disconnect();
+  });
+
+  it('a failed rebind rejects the whole patch and names the accelerator', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore({ dictationLanguage: 'en' });
+    const rebind = vi
+      .fn()
+      .mockReturnValue({ ok: false, error: 'could not register "Alt+P" — held by another app' });
+    const app = settingsApp(transport, { desktopSettings: store, pttHotkeyRebind: rebind });
+    await app.handleRendererCommand({
+      id: 'p2',
+      cmd: deskset({ pttHotkey: 'Alt+P', dictationLanguage: 'fr' }),
+    });
+    const res = resultFor(transport, 'p2');
+    expect(res?.ok).toBe(false);
+    expect(res?.error).toContain('Alt+P');
+    // Nothing lands on disk — not even the unrelated language field.
+    expect(written).toHaveLength(0);
+    expect(store.read().dictationLanguage).toBe('en');
+    await app.disconnect();
+  });
+
+  it('pttHotkey null clears the saved binding via the rebind port', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore({ pttHotkey: 'Alt+P' });
+    const rebind = vi.fn().mockReturnValue({ ok: true });
+    const app = settingsApp(transport, { desktopSettings: store, pttHotkeyRebind: rebind });
+    await app.handleRendererCommand({ id: 'p3', cmd: deskset({ pttHotkey: null }) });
+    expect(rebind).toHaveBeenCalledWith(null);
+    expect(resultFor(transport, 'p3')?.ok).toBe(true);
+    expect(written[0]?.pttHotkey).toBeUndefined();
+    await app.disconnect();
+  });
+
+  it('a wrong-typed pttHotkey keeps the current value and skips rebind', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore({ pttHotkey: 'Alt+P' });
+    const rebind = vi.fn().mockReturnValue({ ok: true });
+    const app = settingsApp(transport, { desktopSettings: store, pttHotkeyRebind: rebind });
+    await app.handleRendererCommand({ id: 'p4', cmd: deskset({ pttHotkey: 42 }) });
+    expect(rebind).not.toHaveBeenCalled();
+    expect(resultFor(transport, 'p4')?.ok).toBe(true);
+    expect(written[0]?.pttHotkey).toBe('Alt+P');
+    await app.disconnect();
+  });
+
+  it('without a rebind port the value persists for the next launch', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore();
+    const app = settingsApp(transport, { desktopSettings: store });
+    await app.handleRendererCommand({ id: 'p5', cmd: deskset({ pttHotkey: 'Alt+Q' }) });
+    expect(resultFor(transport, 'p5')?.ok).toBe(true);
+    expect(written[0]?.pttHotkey).toBe('Alt+Q');
+    await app.disconnect();
+  });
+
+  it('a null clear with nothing saved never touches the rebind port', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore();
+    const rebind = vi.fn().mockReturnValue({ ok: true });
+    const app = settingsApp(transport, { desktopSettings: store, pttHotkeyRebind: rebind });
+    // The field was never populated — clearing it must not rebind the
+    // (possibly conflicted) default and must not block unrelated saves.
+    await app.handleRendererCommand({
+      id: 'p5b',
+      cmd: deskset({ pttHotkey: null, dictationLanguage: 'ro' }),
+    });
+    expect(rebind).not.toHaveBeenCalled();
+    expect(resultFor(transport, 'p5b')?.ok).toBe(true);
+    expect(written[0]?.dictationLanguage).toBe('ro');
+    await app.disconnect();
+  });
+
+  it('pushes pttHotkeyEnv to the renderer when the env override is wired', async () => {
+    const transport = new MockIpcTransport();
+    const { store } = memStore();
+    const app = settingsApp(transport, {
+      desktopSettings: store,
+      pttHotkeyEnv: 'Control+Alt+V',
+    });
+    await app.handleRendererCommand({ id: 'p6', cmd: deskset({ voiceModeDefault: true }) });
+    expect(resultFor(transport, 'p6')?.ok).toBe(true);
+    const payloads = transport.toRenderer
+      .filter((m) => m.channel === 'voice:update')
+      .map((m) => m.data as Record<string, unknown>);
+    expect(payloads.at(-1)?.['pttHotkeyEnv']).toBe('Control+Alt+V');
     await app.disconnect();
   });
 });
