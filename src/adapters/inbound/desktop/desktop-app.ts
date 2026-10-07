@@ -1610,7 +1610,11 @@ export class DesktopApp {
       if (pv === null) requestedPtt = null;
       else if (typeof pv === 'string' && pv.trim().length > 0) requestedPtt = pv.trim();
       // other types: leave as-is, like the other fields
-      if (requestedPtt !== undefined && this.pttHotkeyRebind !== undefined) {
+      // `null` with nothing persisted is a no-op — skipping the rebind
+      // stops an unrelated save from failing on a conflicted default the
+      // user never asked to bind.
+      const pttNoop = requestedPtt === null && current.pttHotkey === undefined;
+      if (requestedPtt !== undefined && !pttNoop && this.pttHotkeyRebind !== undefined) {
         const res = this.pttHotkeyRebind(requestedPtt);
         if (!res.ok) {
           ack({ ok: false, error: res.error ?? `could not register hotkey "${requestedPtt}"` });

@@ -3706,6 +3706,23 @@ describe('deskset: desktop settings command (issue #163)', () => {
     await app.disconnect();
   });
 
+  it('a null clear with nothing saved never touches the rebind port', async () => {
+    const transport = new MockIpcTransport();
+    const { store, written } = memStore();
+    const rebind = vi.fn().mockReturnValue({ ok: true });
+    const app = settingsApp(transport, { desktopSettings: store, pttHotkeyRebind: rebind });
+    // The field was never populated — clearing it must not rebind the
+    // (possibly conflicted) default and must not block unrelated saves.
+    await app.handleRendererCommand({
+      id: 'p5b',
+      cmd: deskset({ pttHotkey: null, dictationLanguage: 'ro' }),
+    });
+    expect(rebind).not.toHaveBeenCalled();
+    expect(resultFor(transport, 'p5b')?.ok).toBe(true);
+    expect(written[0]?.dictationLanguage).toBe('ro');
+    await app.disconnect();
+  });
+
   it('pushes pttHotkeyEnv to the renderer when the env override is wired', async () => {
     const transport = new MockIpcTransport();
     const { store } = memStore();
