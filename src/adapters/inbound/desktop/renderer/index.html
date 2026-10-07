@@ -12,7 +12,27 @@
       body {
         height: 100vh;
         overflow: hidden;
+        /* App chrome stays click-first (issue #331); view content
+           re-enables selection below — DG-01 wants errors and messages
+           copyable. */
         -webkit-user-select: none;
+        user-select: none;
+      }
+      /* Selectable content: inside an active view, text selects and
+         copies; interactive controls stay unselectable so a click can
+         never drag-select. Inputs/textareas stay editable regardless. */
+      .view,
+      input,
+      textarea {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      .view button,
+      .view select,
+      .view label,
+      .view .worksubtab {
+        -webkit-user-select: none;
+        user-select: none;
       }
       .card.sel {
         outline: 1px solid var(--accent);

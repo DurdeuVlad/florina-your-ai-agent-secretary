@@ -341,6 +341,24 @@ async function shotApp() {
   }
   ws.close();
 
+  // Issue #331 selection contract (DG-01 "readable/copyable"): the
+  // active view — and a real content node when one exists — must compute
+  // user-select:text. The probe runs on whatever view is active, so it
+  // holds on empty daemons too.
+  const selProbe = await win.webContents.executeJavaScript(
+    `(() => {
+      const view = document.querySelector('.view.active');
+      const content = view?.querySelector('.msg, .card, .col .row, .sect, .mono');
+      const pick = content ?? view;
+      return pick ? getComputedStyle(pick).userSelect : 'no-view';
+    })()`,
+  );
+  console.log(`[visual-qa] user-select probe → ${selProbe}`);
+  if (selProbe !== 'text') {
+    console.log('[visual-qa] WARN: view content is not selectable (want user-select:text)');
+    process.exitCode = 1;
+  }
+
   // Esc pop order on Work (issue #266): select a task row, then Esc
   // clears the selection but stays in Work; Esc again (fully collapsed)
   // lands on Attention. Real keypresses through sendInputEvent — the

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 // require('electron') in the main process resolves to the real API object;
 // named ESM imports can hit the npm shim (issue #114).
 const require = createRequire(import.meta.url);
-const { app, session } = require('electron') as typeof import('electron');
+const { app, session, Menu } = require('electron') as typeof import('electron');
 
 import { DesktopApp } from '../adapters/inbound/desktop/desktop-app.js';
 import { DictationService } from '../core/application/use-cases/voice/dictation-service.js';
@@ -37,6 +37,7 @@ import { ElectronIpcTransport } from '../adapters/inbound/desktop/electron/ipc-t
 import { ElectronKeyboardBackend } from '../adapters/inbound/desktop/electron/keyboard-backend.js';
 import { ElectronTrayBackend } from '../adapters/inbound/desktop/electron/tray-backend.js';
 import { ElectronFolderPicker } from '../adapters/inbound/desktop/electron/folder-picker.js';
+import { installCopyContextMenu } from '../adapters/inbound/desktop/electron/context-menu.js';
 import { HotkeyManager, DEFAULT_HOTKEYS } from '../adapters/inbound/desktop/hotkeys.js';
 import type { TrayAction } from '../adapters/inbound/desktop/system-tray.js';
 import { loadEnvFile } from '../adapters/outbound/credentials/dotenv.js';
@@ -354,6 +355,17 @@ async function main(): Promise<void> {
   desktopApp.start();
   if (window.contents !== null) {
     ipc.attachContents(window.contents);
+    // Right-click Copy for selectable content (issue #331, DG-01): the
+    // menu offers editing roles only — never Inspect/Reload — so it
+    // cannot widen the sandboxed renderer.
+    installCopyContextMenu(window.contents, (items) => Menu.buildFromTemplate(items));
+    // Packaged macOS apps have no default Edit menu, and without one
+    // Cmd+C never reaches the renderer's selection — install the role
+    // menu there only (Windows/Linux copy via the context menu above and
+    // Chromium's built-in Ctrl+C path).
+    if (process.platform === 'darwin' && Menu.getApplicationMenu() === null) {
+      Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }]));
+    }
     // Re-push once the page finishes loading — the initial hud:state,
     // daemon:status, and view-tree pushes can all land before the
     // renderer's listeners attach (#133 screenshots caught the sidebar
