@@ -98,6 +98,26 @@ function pressKey(win, key) {
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
 }
 
+/* Horizontal-overflow gate (issue #333): .content overflowing sideways
+ * renders a horizontal scrollbar — the pale strip at the window's bottom
+ * edge. Run after every capture; a real overflow fails the run. */
+async function checkNoHOverflow(win, label) {
+  const res = await win.webContents.executeJavaScript(
+    `(() => {
+      const c = document.querySelector('.content');
+      return c ? c.scrollWidth + '>' + c.clientWidth : 'no .content';
+    })()`,
+  );
+  const overflowed = res !== 'no .content' && Number(res.split('>')[0]) > Number(res.split('>')[1]);
+  console.log(`[visual-qa] ${label} .content h-overflow → ${res}`);
+  if (overflowed) {
+    console.log(
+      `[visual-qa] WARN: ${label} overflows .content horizontally — bottom-edge strip regressed`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 async function shotApp() {
   // Booting the real bootstrap starts DesktopApp, tray, HUD, hotkeys —
   // exactly what a user sees. It connects to the running daemon (or
@@ -132,6 +152,7 @@ async function shotApp() {
     }
     await captureWindow(win, path.join(SHOTS, `app-${view}.png`));
     console.log(`[visual-qa] captured view ${view}`);
+    await checkNoHOverflow(win, view);
   }
 
   // Work sub-tabs (issue #220): already on 'tasks' from the loop above
@@ -148,6 +169,7 @@ async function shotApp() {
     await sleep(SETTLE_MS);
     await captureWindow(win, path.join(SHOTS, `app-work-${sub}.png`));
     console.log(`[visual-qa] captured Work sub-tab ${sub}`);
+    await checkNoHOverflow(win, `work-${sub}`);
   }
 
   // Settings > Repos (issue #253): scrolled below Routing rules/Memory,
@@ -171,6 +193,7 @@ async function shotApp() {
   await sleep(SETTLE_MS);
   await captureWindow(win, path.join(SHOTS, 'app-settings-repos.png'));
   console.log('[visual-qa] captured Settings > Repos');
+  await checkNoHOverflow(win, 'settings-repos');
 
   // Secretary lens (issue #262): reachable via the g e chord inside
   // Florina. Waits for the lens view to be active, captures, then Esc
@@ -184,6 +207,7 @@ async function shotApp() {
   await win.webContents.executeJavaScript(`document.querySelector('.content').scrollTop = 0`);
   await captureWindow(win, path.join(SHOTS, 'app-secretary.png'));
   console.log('[visual-qa] captured Secretary lens');
+  await checkNoHOverflow(win, 'secretary');
   pressKey(win, 'Escape');
   await sleep(SETTLE_MS);
 
@@ -209,6 +233,7 @@ async function shotApp() {
   }
   await captureWindow(win, path.join(SHOTS, 'app-chat-senderror.png'));
   console.log('[visual-qa] captured chat send-failure row');
+  await checkNoHOverflow(win, 'chat-senderror');
 
   // Journal-gap card (issue #264): a second WS client sends the real
   // raise-attention command (itemKind 'JournalFailure') to the running
@@ -315,6 +340,7 @@ async function shotApp() {
   }
   await captureWindow(win, path.join(SHOTS, 'app-inbox-journalfail.png'));
   console.log('[visual-qa] captured journal-failure inbox card');
+  await checkNoHOverflow(win, 'inbox-journalfail');
   // Prove the acknowledge path end-to-end: the renderer's resolve:<id>
   // verb → real resolve-item → post-mutation refresh → card gone. All
   // raised items are resolved so the daemon is left clean.
@@ -410,6 +436,20 @@ async function shotApp() {
     if (!popOk) process.exitCode = 1;
   }
 
+  // Non-standard geometry (issue #333): the strip fix must hold below the
+  // default 1180×760 — shrink to 900×640 on Settings (the view that
+  // overflowed) and re-check .content for horizontal overflow.
+  pressKey(win, 'g');
+  await sleep(80);
+  pressKey(win, 's');
+  await sleep(SETTLE_MS);
+  win.setSize(900, 640);
+  await sleep(SETTLE_MS);
+  await checkNoHOverflow(win, 'prefs@900x640');
+  await captureWindow(win, path.join(SHOTS, 'app-prefs-narrow.png'));
+  win.setSize(WIDTH, HEIGHT);
+  await sleep(SETTLE_MS);
+
   // PTT rebind recovery (issue #332): save a replacement accelerator
   // through the real deskset path and confirm the HUD hint switches to
   // it — on a machine where Ctrl+Space is held this exercises the full
@@ -419,9 +459,7 @@ async function shotApp() {
   // The settings file is snapshotted and restored so the probe leaves no
   // persisted override behind (#334 will isolate the whole run).
   const settingsFile = path.join(os.homedir(), '.florina', 'desktop-settings.json');
-  const settingsSnapshot = fs.existsSync(settingsFile)
-    ? fs.readFileSync(settingsFile)
-    : null;
+  const settingsSnapshot = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
   const QA_ACCEL = 'Control+Alt+Shift+F9'; // virtually never claimed
   const hintBefore = await win.webContents.executeJavaScript(
     `document.getElementById('hudTitle')?.textContent`,
