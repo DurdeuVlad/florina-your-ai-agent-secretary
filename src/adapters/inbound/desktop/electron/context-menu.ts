@@ -13,7 +13,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 /** The slice of Electron's context-menu params the installer reads. */
 export interface CopyMenuParams {
   readonly isEditable: boolean;
-  readonly selectionText: string;
+  readonly selectionText?: string;
   readonly editFlags?: { canCut?: boolean; canCopy?: boolean; canPaste?: boolean };
 }
 
@@ -43,7 +43,7 @@ export function installCopyContextMenu(
       if (flags.canCopy) items.push({ role: 'copy' });
       if (flags.canPaste) items.push({ role: 'paste' });
       items.push({ role: 'selectAll' });
-    } else if (flags.canCopy !== false && params.selectionText.trim().length > 0) {
+    } else if (flags.canCopy !== false && (params.selectionText ?? '').trim().length > 0) {
       items.push({ role: 'copy' });
     }
     if (items.length === 0) return;
