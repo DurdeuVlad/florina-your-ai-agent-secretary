@@ -204,6 +204,9 @@ export {
 } from './hotkeys.js';
 export type { HotkeyAction, KeyEventLike, KeyboardBackend, ParsedAccelerator } from './hotkeys.js';
 
+export { createPttHotkey } from './ptt-hotkey.js';
+export type { PttHotkey, PttHotkeyDeps, PttHotkeyResult } from './ptt-hotkey.js';
+
 export { SystemTrayManager, MockTrayBackend } from './system-tray.js';
 export type { TrayAction, TrayActionCallback, TrayBackend, TrayMenuItem } from './system-tray.js';
 

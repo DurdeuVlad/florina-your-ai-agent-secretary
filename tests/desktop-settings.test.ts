@@ -106,6 +106,27 @@ describe('desktop settings (issue #132)', () => {
     expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
   });
 
+  it('round-trips the saved PTT hotkey (issue #332)', () => {
+    const dir = tmpDir();
+    writeDesktopSettings(
+      { stopDaemonOnQuit: false, voiceModeDefault: false, pttHotkey: 'Alt+P' },
+      dir,
+    );
+    expect(readDesktopSettings(dir)).toEqual({
+      stopDaemonOnQuit: false,
+      voiceModeDefault: false,
+      pttHotkey: 'Alt+P',
+    });
+  });
+
+  it('drops a malformed pttHotkey (empty/non-string)', () => {
+    const dir = tmpDir();
+    writeFileSync(desktopSettingsPath(dir), JSON.stringify({ pttHotkey: 42 }));
+    expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
+    writeFileSync(desktopSettingsPath(dir), JSON.stringify({ pttHotkey: '' }));
+    expect(readDesktopSettings(dir)).toEqual(DEFAULT_DESKTOP_SETTINGS);
+  });
+
   it('round-trips the onboarding state (issue #277)', () => {
     const dir = tmpDir();
     writeDesktopSettings(

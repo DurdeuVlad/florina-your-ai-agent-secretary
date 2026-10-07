@@ -35,6 +35,13 @@ export interface DesktopSettings {
    */
   readonly dictationLanguage?: string;
   /**
+   * Saved push-to-talk accelerator (issue #332). Persisted only after the
+   * OS-level registration succeeds — a saved value always means "this is
+   * bound". `FLORINA_PTT_HOTKEY` env wins over this when set; both fall
+   * back to the built-in default.
+   */
+  readonly pttHotkey?: string;
+  /**
    * First-run setup state (issue #277): `open` (or undefined on a fresh
    * install) shows the guided setup on the Florina view; `skipped`
    * collapses it to a resumable row; `done` hides it. Desktop-local —
@@ -76,6 +83,9 @@ export function readDesktopSettings(dir?: string): DesktopSettings {
         : {}),
       ...(typeof parsed['dictationLanguage'] === 'string' && parsed['dictationLanguage'].length > 0
         ? { dictationLanguage: parsed['dictationLanguage'] }
+        : {}),
+      ...(typeof parsed['pttHotkey'] === 'string' && parsed['pttHotkey'].length > 0
+        ? { pttHotkey: parsed['pttHotkey'] }
         : {}),
       ...(parsed['onboardingState'] === 'open' ||
       parsed['onboardingState'] === 'skipped' ||

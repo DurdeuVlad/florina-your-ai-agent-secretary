@@ -148,6 +148,13 @@
         border: none;
         background: transparent;
       }
+      .fieldnote {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .fieldnote.err {
+        color: var(--red);
+      }
       .icon {
         font-size: 13px;
       }
@@ -820,6 +827,11 @@
                     Dictation language
                     <input id="deskLang" type="text" placeholder="auto-detect (e.g. en, fr, ro)" />
                   </label>
+                  <label class="desk-row">
+                    Push-to-talk hotkey
+                    <input id="deskPtt" type="text" placeholder="default: CommandOrControl+Space" />
+                  </label>
+                  <div class="fieldnote" id="deskPttNote" hidden></div>
                   <label class="desk-check"
                     ><input type="checkbox" id="deskVoiceMode" /> Open chat in voice mode</label
                   >
