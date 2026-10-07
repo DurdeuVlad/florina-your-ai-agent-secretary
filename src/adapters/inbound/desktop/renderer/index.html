@@ -54,6 +54,10 @@
       }
       .pref-form {
         display: flex;
+        /* wrap: the memory-section filter chips exceed the column width —
+           without wrap they overflow .content and force a horizontal
+           scrollbar (the bottom-edge strip, issue #333). */
+        flex-wrap: wrap;
         gap: 6px;
         margin-top: 8px;
       }
@@ -66,6 +70,10 @@
       .pref-addform input,
       .pref-addform textarea {
         flex: 1;
+        /* flex items default to min-width:auto — without this an input
+           can't shrink below its intrinsic width and overflows a narrow
+           row (#333). */
+        min-width: 0;
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
