@@ -21,6 +21,11 @@
  *   `running->completed` emits `AgentCompleted`, `running->failed` emits
  *   `AgentFailed`, any `->cancelled` emits `AgentStopped`).
  * - Cancellation and failure are reachable from any non-terminal state.
+ * - `running -> completed` additionally requires journaled verification
+ *   proof (DEC-032, issue #339): the latest `VerificationObserved` fact
+ *   for the task must be positive — an agent's claim or a process exit
+ *   alone can never close a task. No verification evidence at all means
+ *   the claim is unproven and the transition is rejected.
  */
 import type {
   EntityId,
@@ -277,6 +282,27 @@ export class TaskStateMachine {
         toState,
         `Transition "${fromState} -> ${toState}" is not in the transition table.`,
       );
+    }
+
+    // DEC-032 / issue #339 — "done means proven": completion requires the
+    // latest journaled verification fact for this task to be positive.
+    // The journal is the source of truth — caller-supplied flags cannot
+    // bypass it.
+    if (fromState === TaskState.Running && toState === TaskState.Completed) {
+      const latestVerification = this.events
+        .listByTask(taskId)
+        .filter((e) => e.kind === 'VerificationObserved')
+        .at(-1);
+      if (latestVerification === undefined || latestVerification.payload['success'] !== true) {
+        throw new IllegalTransitionError(
+          taskId,
+          fromState,
+          toState,
+          'Completion requires journaled positive verification evidence ' +
+            '(latest VerificationObserved fact must succeed); ' +
+            'an unverified or failed claim cannot close the task.',
+        );
+      }
     }
 
     const kind = eventKindForTransition(fromState, toState);

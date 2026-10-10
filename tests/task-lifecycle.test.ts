@@ -248,6 +248,10 @@ describe('TaskStateMachine: every valid transition succeeds and emits the correc
     it(`${from} -> ${to} is allowed and emits ${EXPECTED_EVENT_KIND[`${from}->${to}`]}`, () => {
       // Seed the task into the `from` state.
       seedState(f, from);
+      // running -> completed requires journaled verification proof (#339).
+      if (from === TaskState.Running && to === TaskState.Completed) {
+        seedVerification(f, true);
+      }
 
       const beforeCount = f.events.listByTask(f.taskId).length;
       const result = f.sm.transition(f.taskId, from, to, f.ctx);
@@ -452,27 +456,33 @@ describe('TaskStateMachine: every transition appends an event to the journal', (
     expect(f.events.listByTask(f.taskId).length).toBe(0);
 
     for (const [from, to] of path) {
+      if (to === TaskState.Completed) {
+        seedVerification(f, true);
+      }
       const before = f.events.listByTask(f.taskId).length;
       f.sm.transition(f.taskId, from, to, f.ctx);
       const after = f.events.listByTask(f.taskId).length;
       expect(after).toBe(before + 1);
     }
 
-    expect(f.events.listByTask(f.taskId).length).toBe(path.length);
+    // 5 transitions + 1 journaled verification fact.
+    expect(f.events.listByTask(f.taskId).length).toBe(path.length + 1);
   });
 
   it('getTransitionHistory returns the chronological event stream for the task', () => {
     f.sm.transition(f.taskId, TaskState.Created, TaskState.Delegated, f.ctx);
     f.sm.transition(f.taskId, TaskState.Delegated, TaskState.Running, f.ctx);
+    seedVerification(f, true);
     f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx);
 
     const history = f.sm.getTransitionHistory(f.taskId);
-    expect(history.length).toBe(3);
+    expect(history.length).toBe(4);
     expect(history[0].kind).toBe('AgentStarted');
     expect(history[1].kind).toBe('AgentProgress');
-    expect(history[2].kind).toBe('AgentCompleted');
+    expect(history[2].kind).toBe('VerificationObserved');
+    expect(history[3].kind).toBe('AgentCompleted');
     // Chronological: timestamps non-decreasing.
-    expect(history[2].timestamp >= history[0].timestamp).toBe(true);
+    expect(history[3].timestamp >= history[0].timestamp).toBe(true);
   });
 
   it('illegal transitions do NOT append an event', () => {
@@ -533,3 +543,77 @@ function seedState(f: Fixture, target: TaskStateType): void {
   }
   f.tasks.update({ ...task, state: target, updatedAt: new Date().toISOString() });
 }
+
+/**
+ * Append a `VerificationObserved` journal row (issue #339): the
+ * running -> completed gate reads the latest verification fact, so tests
+ * exercising that transition seed the evidence it requires.
+ */
+function seedVerification(f: Fixture, success: boolean): void {
+  f.events.insert({
+    id: `event_verify_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`,
+    sessionId: f.sessionId,
+    taskId: f.taskId,
+    timestamp: new Date().toISOString(),
+    kind: 'VerificationObserved',
+    payload: { taskId: f.taskId, sessionId: f.sessionId, kind: 'other', success },
+  });
+}
+
+describe('TaskStateMachine: completion requires verification evidence (#339)', () => {
+  let f: Fixture;
+
+  beforeEach(() => {
+    f = createFixture();
+    seedState(f, TaskState.Running);
+  });
+
+  afterEach(() => {
+    f.db.close();
+  });
+
+  it('running -> completed is rejected with no verification evidence at all', () => {
+    expect(() => f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx)).toThrow(
+      IllegalTransitionError,
+    );
+    // State must remain running — the claim stays unproven.
+    expect(f.sm.getCurrentState(f.taskId)).toBe(TaskState.Running);
+    // And no AgentCompleted event leaked into the journal.
+    expect(f.events.listByTask(f.taskId).some((e) => e.kind === 'AgentCompleted')).toBe(false);
+  });
+
+  it('running -> completed is rejected when the latest verification fact failed', () => {
+    seedVerification(f, false);
+    expect(() => f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx)).toThrow(
+      IllegalTransitionError,
+    );
+    expect(f.sm.getCurrentState(f.taskId)).toBe(TaskState.Running);
+  });
+
+  it('a stale pass does not rescue a newer failure — the latest fact decides', () => {
+    seedVerification(f, true);
+    seedVerification(f, false);
+    expect(() => f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx)).toThrow(
+      IllegalTransitionError,
+    );
+  });
+
+  it('a converged fix cycle may complete — failure then a positive latest fact', () => {
+    seedVerification(f, false);
+    seedVerification(f, true);
+    f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx);
+    expect(f.sm.getCurrentState(f.taskId)).toBe(TaskState.Completed);
+  });
+
+  it('a positive latest fact permits completion', () => {
+    seedVerification(f, true);
+    f.sm.transition(f.taskId, TaskState.Running, TaskState.Completed, f.ctx);
+    expect(f.sm.getCurrentState(f.taskId)).toBe(TaskState.Completed);
+  });
+
+  it('the gate does not affect non-completion transitions', () => {
+    // No verification evidence at all — running may still escalate/fail.
+    f.sm.transition(f.taskId, TaskState.Running, TaskState.AttentionNeeded, f.ctx);
+    expect(f.sm.getCurrentState(f.taskId)).toBe(TaskState.AttentionNeeded);
+  });
+});

@@ -1,10 +1,10 @@
 # Agent Supervision Campaign
 
-**Status:** planned; issues not yet created externally.
-**Handoff:** Proposed GitHub milestone(s) on
-`DurdeuVlad/florina-your-ai-agent-secretary` — three milestones, issues
-below. Creating them requires explicit authorization; this doc is the
-executable draft until then.
+**Status:** in flight — milestones 16–18 and issues #339–#345 created on
+`DurdeuVlad/florina-your-ai-agent-secretary`.
+**Issue map:** M1 #339 (verify gates) + #340 (nudge/escalate) ·
+M2 #341 (capability matrix) + #342 (session pool) ·
+M3 #343 (queue) + #344 (parallel gate) + #345 (queue surface).
 
 **Source:** user feature request 2026-10-07 — *"florina knows to
 automatically compact the ai between tasks and tries to keep the same

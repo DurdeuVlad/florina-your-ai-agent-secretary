@@ -25,6 +25,7 @@
  */
 import type { AgentRuntimePort, SessionConfig } from '../../ports/outbound/agent-runtime.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
+import type { SupervisorEvent } from '../../../domain/events.js';
 
 /**
  * Information tracked for each active agent session.
@@ -95,6 +96,15 @@ export interface SessionManagerOptions {
   readonly secretEnvResolver?: (
     context: SecretInjectionContext,
   ) => Promise<Record<string, string> | undefined>;
+  /**
+   * Called for each adapter event immediately BEFORE it is published to
+   * the bus (issue #339). The daemon uses this to run task verification
+   * on a completion claim so Florina-observed `VerificationObserved`
+   * facts are journaled before the verification gate assesses the claim
+   * (gate wiring reacts to the published event — ordering matters).
+   * Awaited; a hook failure is swallowed so it cannot swallow the event.
+   */
+  readonly beforePublish?: (event: SupervisorEvent) => void | Promise<void>;
 }
 
 /**
@@ -105,6 +115,7 @@ export class SessionManager {
   private readonly bus: EventPublisherPort;
   private readonly onSessionEnd?: (taskId: string, sessionId: string) => void | Promise<void>;
   private readonly secretEnvResolver?: SessionManagerOptions['secretEnvResolver'];
+  private readonly beforePublish?: SessionManagerOptions['beforePublish'];
   /** Map of taskId → active session info (one session per task in MVP). */
   private readonly sessions = new Map<string, SessionInfo>();
 
@@ -112,6 +123,7 @@ export class SessionManager {
     this.bus = bus;
     this.onSessionEnd = options.onSessionEnd;
     this.secretEnvResolver = options.secretEnvResolver;
+    this.beforePublish = options.beforePublish;
   }
 
   /**
@@ -289,6 +301,13 @@ export class SessionManager {
           // and we avoid publishing stale events after teardown.
           if (!this.sessions.has(info.taskId)) {
             break;
+          }
+          if (this.beforePublish !== undefined) {
+            try {
+              await this.beforePublish(event);
+            } catch {
+              /* a pre-publish hook must never drop the event itself */
+            }
           }
           this.bus.publish(event);
         }
