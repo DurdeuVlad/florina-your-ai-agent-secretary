@@ -352,6 +352,48 @@ describe('NudgeLoop', () => {
     const loop = f.makeLoop();
     expect(loop.onVerifyFailed('task_missing', 's', 'a', failedOutcome())).toBe('ignored');
   });
+
+  it('a task with no declared contract is ignored — no pointless re-runs', async () => {
+    const loop = f.makeLoop();
+    const decision = loop.onVerifyFailed(
+      f.taskId,
+      f.sessionId,
+      f.agentId,
+      failedOutcome({ declaredChecks: [], checks: [] }),
+    );
+    expect(decision).toBe('ignored');
+    await loop.dispatchPending(f.taskId);
+    expect(eventsOf(f, 'TaskVerifyFailed').length).toBe(0);
+    expect(eventsOf(f, 'TaskNudged').length).toBe(0);
+    expect(f.executor.commands.length).toBe(0);
+    expect(f.sm.getCurrentState(f.taskId)).toBe(TaskState.Running);
+  });
+
+  it('a dirty-worktree failure under a declared contract nudges honestly', async () => {
+    const loop = f.makeLoop();
+    const dirty = failedOutcome({
+      checks: [
+        {
+          command: 'npm test',
+          kind: 'test',
+          success: true,
+          exitCode: 0,
+          timedOut: false,
+          spawnFailed: false,
+          summary: 'ok',
+          outputTail: '',
+        },
+      ],
+      worktree: { clean: false, dirty: true, branch: 'florina/t' },
+    });
+    expect(loop.onVerifyFailed(f.taskId, f.sessionId, f.agentId, dirty)).toBe('nudge-pending');
+    await loop.dispatchPending(f.taskId);
+    const cmd = f.executor.commands.at(-1);
+    if (cmd?.kind === 'start-task') {
+      expect(cmd.sessionConfig.prompt).toContain('worktree gate failed');
+      expect(cmd.sessionConfig.prompt).toContain('Worktree is dirty');
+    }
+  });
 });
 
 /* ================================================================== *

@@ -117,6 +117,12 @@ export class NudgeLoop {
     if (task === null) {
       return 'ignored';
     }
+    // A task that declared no verification contract cannot be corrected
+    // by re-dispatch — the unverified claim follows the ordinary
+    // attention path (#339) rather than burning corrective attempts.
+    if (outcome.declaredChecks.length === 0) {
+      return 'ignored';
+    }
     try {
       const priorNudges = this.journal
         .listByTask(taskId)
@@ -130,7 +136,7 @@ export class NudgeLoop {
       const summary =
         failedChecks.length > 0
           ? `attempt ${attempt}: ${failedChecks.length} of ${outcome.checks.length} declared check(s) failed`
-          : 'attempt ' + attempt + ': no declared checks — claim unproven';
+          : `attempt ${attempt}: declared checks passed but the worktree gate failed`;
 
       this.journalEvent<TaskVerifyFailedEvent>({
         type: 'TaskVerifyFailed',
@@ -348,7 +354,9 @@ function buildNudgePrompt(input: {
       }
     }
   } else {
-    lines.push('No declared checks ran — the claim carried no objective proof.');
+    // Reachable only when declared checks passed but the worktree gate
+    // failed — a contract-less task never enters the loop.
+    lines.push('Declared checks passed, but the worktree gate failed.');
   }
   const wt = outcome.worktree;
   if (wt !== null && 'clean' in wt && !wt.clean) {
