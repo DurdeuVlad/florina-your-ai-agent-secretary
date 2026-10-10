@@ -166,6 +166,13 @@ export interface SessionConfig {
    * report is never a substitute for Florina-run evidence.
    */
   readonly verifyCommands?: readonly string[];
+  /**
+   * Corrective re-dispatch budget for verify-failed runs (issue #340):
+   * maximum nudges before the task parks and escalates. Journaled on the
+   * delegation event beside `verifyCommands`; absent → the loop's
+   * default budget applies.
+   */
+  readonly verifyBudget?: number;
 }
 
 /**
@@ -1986,8 +1993,10 @@ export class CommandApi {
         workingDir: cmd.sessionConfig.workingDir,
         model: cmd.sessionConfig.model ?? null,
         // The declared verification contract — the runner re-reads it
-        // from this journal event at completion time (#339).
+        // from this journal event at completion time (#339), and the
+        // nudge loop reads its retry budget the same way (#340).
         verifyCommands: cmd.sessionConfig.verifyCommands ?? null,
+        verifyBudget: cmd.sessionConfig.verifyBudget ?? null,
       },
     };
 
@@ -2152,6 +2161,7 @@ export class CommandApi {
       autonomyLevel: cmd.sessionConfig.autonomyLevel,
       executionBrief: cmd.sessionConfig.executionBrief,
       verifyCommands: cmd.sessionConfig.verifyCommands,
+      verifyBudget: cmd.sessionConfig.verifyBudget,
       // Journal the contract the dispatched prompt *actually* carries —
       // the real version even when an upstream embedding overrode the
       // flag, 'disabled' when the opt-out held, absent when nothing was

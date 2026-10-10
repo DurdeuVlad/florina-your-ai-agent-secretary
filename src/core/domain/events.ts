@@ -150,6 +150,12 @@ export interface AgentStartedEvent extends SupervisorEventBase {
    * survives restarts and failover — the latest dispatch wins.
    */
   verifyCommands?: readonly string[];
+  /**
+   * Corrective re-dispatch budget for verify-failed runs (issue #340):
+   * how many nudges the bounded loop may spend before escalating. The
+   * latest dispatch's declaration wins; absent → the service default.
+   */
+  verifyBudget?: number;
 }
 
 /**
@@ -511,6 +517,37 @@ export interface TaskResumedEvent extends SupervisorEventBase {
 }
 
 /**
+ * Emitted when Florina-run verification judges a completion claim
+ * unproven (issue #340): the deterministic supervision signal that starts
+ * the bounded nudge loop. `attempt` is the run ordinal — 1 for the
+ * original dispatch, N+1 after N nudges.
+ */
+export interface TaskVerifyFailedEvent extends SupervisorEventBase {
+  type: 'TaskVerifyFailed';
+  /** Run ordinal that failed verification (1-based). */
+  attempt: number;
+  /** Deterministic summary of why the claim is unproven. */
+  summary: string;
+  /** Declared checks that failed, when any. */
+  failedChecks?: readonly string[];
+}
+
+/**
+ * Emitted when a verify-failed task is re-dispatched to its agent with
+ * the failure evidence (issue #340). Bounded: `budget` is the maximum
+ * number of corrective dispatches for this task before escalation.
+ */
+export interface TaskNudgedEvent extends SupervisorEventBase {
+  type: 'TaskNudged';
+  /** Run ordinal being dispatched (2 for the first nudge). */
+  attempt: number;
+  /** Maximum corrective dispatches allowed for the task. */
+  budget: number;
+  /** The corrective prompt carried to the next attempt. */
+  prompt?: string;
+}
+
+/**
  * Emitted when a context condenser compacts part of an event/message
  * history (DEC-035, issue #75). Compression is itself journaled so the
  * summary is auditable and re-expandable: `forgottenEventIds` names the
@@ -591,6 +628,8 @@ export type SupervisorEvent =
   | TaskFailedOverEvent
   | TaskParkedEvent
   | TaskResumedEvent
+  | TaskVerifyFailedEvent
+  | TaskNudgedEvent
   | ContextCondensedEvent
   | ContextHealthChangedEvent
   | VerificationObservedEvent;
@@ -617,6 +656,8 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
   'TaskFailedOver',
   'TaskParked',
   'TaskResumed',
+  'TaskVerifyFailed',
+  'TaskNudged',
   'ContextCondensed',
   'ContextHealthChanged',
   'VerificationObserved',
@@ -841,6 +882,12 @@ export function validateEvent(value: unknown): SupervisorEvent {
       break;
     case 'TaskResumed':
       validateTaskResumed(value, problems);
+      break;
+    case 'TaskVerifyFailed':
+      validateTaskVerifyFailed(value, problems);
+      break;
+    case 'TaskNudged':
+      validateTaskNudged(value, problems);
       break;
     case 'ContextCondensed':
       validateContextCondensed(value, problems);
@@ -1239,6 +1286,30 @@ function validateTaskParked(value: Record<string, unknown>, problems: string[]):
     !isString(value['resumeAt'])
   ) {
     problems.push('TaskParked: optional field "resumeAt" must be a string or null.');
+  }
+}
+
+function validateTaskVerifyFailed(value: Record<string, unknown>, problems: string[]): void {
+  if (!isNumber(value['attempt'])) {
+    problems.push('TaskVerifyFailed: missing or non-number required field "attempt".');
+  }
+  if (!isString(value['summary']) || value['summary'].length === 0) {
+    problems.push('TaskVerifyFailed: missing or empty required field "summary".');
+  }
+  if (value['failedChecks'] !== undefined && !Array.isArray(value['failedChecks'])) {
+    problems.push('TaskVerifyFailed: optional field "failedChecks" must be an array.');
+  }
+}
+
+function validateTaskNudged(value: Record<string, unknown>, problems: string[]): void {
+  if (!isNumber(value['attempt'])) {
+    problems.push('TaskNudged: missing or non-number required field "attempt".');
+  }
+  if (!isNumber(value['budget'])) {
+    problems.push('TaskNudged: missing or non-number required field "budget".');
+  }
+  if (value['prompt'] !== undefined && !isString(value['prompt'])) {
+    problems.push('TaskNudged: optional field "prompt" must be a string.');
   }
 }
 

@@ -132,6 +132,12 @@ export interface SpawnTaskInput {
    * the verification gate honestly reports as unproven.
    */
   readonly verifyCommands?: readonly string[];
+  /**
+   * Corrective re-dispatch budget for verify-failed runs (issue #340):
+   * how many nudges the bounded loop may spend before the task parks and
+   * escalates to the human. Absent → the loop default (2).
+   */
+  readonly verifyBudget?: number;
 }
 
 /** Result of {@link ManagerToolService.spawnTask}. */
@@ -279,6 +285,7 @@ export class ManagerToolService {
         ...(launch.prompt !== undefined ? { prompt: launch.prompt } : {}),
         ...(launch.executionBrief !== undefined ? { executionBrief: launch.executionBrief } : {}),
         ...(input.verifyCommands !== undefined ? { verifyCommands: input.verifyCommands } : {}),
+        ...(input.verifyBudget !== undefined ? { verifyBudget: input.verifyBudget } : {}),
       },
     });
     if (!res.ok || !('sessionId' in res) || typeof res.sessionId !== 'string') {

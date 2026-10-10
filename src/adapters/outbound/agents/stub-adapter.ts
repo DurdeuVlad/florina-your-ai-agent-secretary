@@ -61,7 +61,7 @@ export function buildDefaultStubEvents(ctx: {
   };
   return [
     { ...base, type: 'AgentStarted', objective: 'Stub objective', workingDir: '/repo/stub' },
-    { ...base, type: 'AgentProgress', message: 'Stub progress', step: 1, totalSteps: 23 },
+    { ...base, type: 'AgentProgress', message: 'Stub progress', step: 1, totalSteps: 25 },
     { ...base, type: 'ToolStarted', toolName: 'shell', args: { cmd: 'echo stub' } },
     {
       ...base,
@@ -185,6 +185,20 @@ export function buildDefaultStubEvents(ctx: {
     { ...base, type: 'TaskResumed', provider: 'stub-2' },
     {
       ...base,
+      type: 'TaskVerifyFailed',
+      attempt: 1,
+      summary: 'stub verify failure',
+      failedChecks: ['npm test'],
+    },
+    {
+      ...base,
+      type: 'TaskNudged',
+      attempt: 2,
+      budget: 2,
+      prompt: 'stub corrective dispatch',
+    },
+    {
+      ...base,
       type: 'ContextCondensed',
       summary: 'stub condensation',
       forgottenEventIds: ['evt-1'],
@@ -205,7 +219,7 @@ export function buildDefaultStubEvents(ctx: {
 /**
  * A Tier E stub adapter for pipeline testing.
  *
- * Emits synthetic events across all 23 {@link SupervisorEvent} variants. The
+ * Emits synthetic events across all 25 {@link SupervisorEvent} variants. The
  * event sequence is configurable via {@link StubAdapterOptions.events}; by
  * default the stub emits one of each variant in canonical order.
  */

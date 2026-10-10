@@ -246,6 +246,8 @@ export type SupervisorEventKind =
   | 'TaskFailedOver'
   | 'TaskParked'
   | 'TaskResumed'
+  | 'TaskVerifyFailed'
+  | 'TaskNudged'
   | 'ContextCondensed'
   | 'ContextHealthChanged'
   | 'VerificationObserved';
