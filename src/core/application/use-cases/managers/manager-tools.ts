@@ -124,6 +124,14 @@ export interface SpawnTaskInput {
    * dispatch event so it gets journaled (#208).
    */
   readonly executionBrief?: ExecutionBrief;
+  /**
+   * Objective verification checks Florina runs when the task's session
+   * ends in a completion claim (issue #339): shell commands executed in
+   * the task worktree (`npm test`, `npm run build`, …). Journaled at
+   * dispatch; absent → the worktree-cleanliness gate alone decides, which
+   * the verification gate honestly reports as unproven.
+   */
+  readonly verifyCommands?: readonly string[];
 }
 
 /** Result of {@link ManagerToolService.spawnTask}. */
@@ -270,6 +278,7 @@ export class ManagerToolService {
         ...(launch.mcpServers !== undefined ? { mcpServers: launch.mcpServers } : {}),
         ...(launch.prompt !== undefined ? { prompt: launch.prompt } : {}),
         ...(launch.executionBrief !== undefined ? { executionBrief: launch.executionBrief } : {}),
+        ...(input.verifyCommands !== undefined ? { verifyCommands: input.verifyCommands } : {}),
       },
     });
     if (!res.ok || !('sessionId' in res) || typeof res.sessionId !== 'string') {

@@ -157,6 +157,15 @@ export interface SessionConfig {
    * reconstructed after the fact.
    */
   readonly executionBrief?: ExecutionBrief;
+  /**
+   * Objective verification checks Florina runs when the session ends in a
+   * completion claim (issue #339, DEC-032): shell commands executed in the
+   * task worktree (e.g. `npm test`, `npm run build`). Journaled on the
+   * delegation event so the declared contract survives restarts and
+   * failover — the latest dispatch's declaration wins. An agent's own
+   * report is never a substitute for Florina-run evidence.
+   */
+  readonly verifyCommands?: readonly string[];
 }
 
 /**
@@ -1976,6 +1985,9 @@ export class CommandApi {
         agentId: cmd.agentId,
         workingDir: cmd.sessionConfig.workingDir,
         model: cmd.sessionConfig.model ?? null,
+        // The declared verification contract — the runner re-reads it
+        // from this journal event at completion time (#339).
+        verifyCommands: cmd.sessionConfig.verifyCommands ?? null,
       },
     };
 
@@ -2139,6 +2151,7 @@ export class CommandApi {
       model: cmd.sessionConfig.model,
       autonomyLevel: cmd.sessionConfig.autonomyLevel,
       executionBrief: cmd.sessionConfig.executionBrief,
+      verifyCommands: cmd.sessionConfig.verifyCommands,
       // Journal the contract the dispatched prompt *actually* carries —
       // the real version even when an upstream embedding overrode the
       // flag, 'disabled' when the opt-out held, absent when nothing was

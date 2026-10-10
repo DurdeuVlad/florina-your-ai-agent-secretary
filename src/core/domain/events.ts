@@ -143,6 +143,13 @@ export interface AgentStartedEvent extends SupervisorEventBase {
    * explicit opt-out dispatch.
    */
   methodVersion?: string;
+  /**
+   * Objective verification checks declared for this dispatch (issue #339):
+   * shell commands Florina runs in the task worktree when a completion
+   * claim arrives. Journaled on this event so the declared contract
+   * survives restarts and failover — the latest dispatch wins.
+   */
+  verifyCommands?: readonly string[];
 }
 
 /**

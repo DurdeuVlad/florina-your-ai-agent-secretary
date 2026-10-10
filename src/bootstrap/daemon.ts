@@ -82,6 +82,8 @@ import {
   isPermanentJournalError,
 } from '../core/application/use-cases/journal/event-journal-writer.js';
 import { VerificationGate } from '../core/application/use-cases/verification/verification-gate.js';
+import { VerificationRunner } from '../core/application/use-cases/verification/verification-runner.js';
+import { ProcessCommandRunner } from '../adapters/outbound/platform/command-runner.js';
 import { ContextHealthMonitor } from '../core/application/use-cases/context/context-health-monitor.js';
 import {
   IdeaService,
@@ -315,6 +317,7 @@ export class FlorinaDaemon extends EventEmitter {
   private grantService: GrantService | null = null;
   private journalWriter: EventJournalWriter | null = null;
   private verificationGate: VerificationGate | null = null;
+  private verificationRunner: VerificationRunner | null = null;
   private contextHealth: ContextHealthMonitor | null = null;
   private ideaService: IdeaService | null = null;
   private startedAt = 0;
@@ -597,6 +600,26 @@ export class FlorinaDaemon extends EventEmitter {
       this.contextHealth = new ContextHealthMonitor({ bus: this.bus });
       this.contextHealth.start();
       this.worktreeManager = new GitWorktreeAdapter();
+
+      // Florina-run verification (issue #339): declared checks execute
+      // deterministically in the task worktree and journal
+      // `VerificationObserved` facts the gate can trust — an agent's own
+      // report is never the only evidence. Constructed before the
+      // session manager wires it into the pre-publish hook.
+      this.verificationRunner = new VerificationRunner({
+        journal: repos.events,
+        tasks: repos.tasks,
+        worktree: this.worktreeManager,
+        runner: new ProcessCommandRunner(),
+        onJournalFailure: (err, row) => {
+          this.attentionAggregator?.reportJournalFailure({
+            source: 'verification-runner',
+            error: err instanceof Error ? err.message : String(err),
+            write: row,
+            retryable: !isPermanentJournalError(err),
+          });
+        },
+      });
       this.taskStateMachine = new TaskStateMachine(repos.tasks, repos.events);
 
       // Wire the adapter registry and session manager (issue #35). The
@@ -672,6 +695,19 @@ export class FlorinaDaemon extends EventEmitter {
       this.sessionManager = new SessionManager(this.bus, {
         onSessionEnd: async (taskId, sessionId) => {
           await rollup.rollUpSession(taskId, sessionId);
+        },
+        // Florina-run verification on completion claims (issue #339):
+        // facts must be journaled BEFORE `AgentCompleted` reaches the
+        // bus, where the aggregator's verification gate assesses them.
+        beforePublish: async (event) => {
+          if (event.type === 'AgentCompleted' && this.verificationRunner !== null) {
+            try {
+              await this.verificationRunner.run(event.taskId, event.sessionId, event.agentId);
+            } catch {
+              /* a verification failure degrades to unverified — it must
+                 never swallow the completion claim itself */
+            }
+          }
         },
         // Scoped secret injection at spawn time (issue #293). Resolved
         // lazily at session start — the vault service is constructed
