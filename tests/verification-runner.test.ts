@@ -192,12 +192,18 @@ function createFixture(input?: { worktreePath?: string }): Fixture {
 }
 
 /** Journal a dispatch event carrying the declared verification contract. */
+let lastDispatchMs = 0;
 function seedDispatch(f: Fixture, verifyCommands: readonly string[] | null): void {
+  // Strictly increasing real-time stamps among seeds — the journal
+  // orders by `timestamp` and the runner reads the latest dispatch's
+  // contract; a seed pair must keep its order even within the same ms.
+  const ms = Math.max(Date.now(), lastDispatchMs + 1);
+  lastDispatchMs = ms;
   f.events.insert({
     id: `event_dispatch_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`,
     sessionId: f.sessionId,
     taskId: f.task.id,
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(ms).toISOString(),
     kind: 'AgentStarted',
     payload: { fromState: 'created', toState: 'delegated', agentId: f.agentId, verifyCommands },
   });

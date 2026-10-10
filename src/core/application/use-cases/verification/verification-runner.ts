@@ -87,6 +87,13 @@ export class VerificationRunner {
   private readonly timeoutMs: number;
   private readonly now: () => Date;
   private readonly onJournalFailure?: (err: unknown, row: Event) => void;
+  /**
+   * Monotonic sequence for fact timestamps: the journal orders by the
+   * observed `timestamp`, and same-millisecond ties have undefined order.
+   * A strictly increasing stamp per fact guarantees the terminal
+   * aggregate is always the latest fact the gate reads.
+   */
+  private seq = 0;
 
   constructor(deps: VerificationRunnerDeps) {
     this.journal = deps.journal;
@@ -145,7 +152,6 @@ export class VerificationRunner {
 
     this.journalFact({
       type: 'VerificationObserved',
-      timestamp: this.now().toISOString(),
       taskId,
       sessionId,
       agentId,
@@ -316,7 +322,6 @@ export class VerificationRunner {
   ): void {
     this.journalFact({
       type: 'VerificationObserved',
-      timestamp: this.now().toISOString(),
       taskId,
       sessionId,
       agentId,
@@ -349,7 +354,6 @@ export class VerificationRunner {
   ): void {
     this.journalFact({
       type: 'VerificationObserved',
-      timestamp: this.now().toISOString(),
       taskId,
       sessionId,
       agentId,
@@ -362,9 +366,16 @@ export class VerificationRunner {
     });
   }
 
+  /** Strictly increasing observed timestamp for the next journaled fact. */
+  private stamp(): string {
+    const stamped = new Date(this.now().getTime() + this.seq).toISOString();
+    this.seq += 1;
+    return stamped;
+  }
+
   /** Convert + insert; failures go to the provenance-gap sink, never thrown. */
-  private journalFact(event: VerificationObservedEvent): void {
-    const row = supervisorEventToJournalRow(event);
+  private journalFact(event: Omit<VerificationObservedEvent, 'timestamp'>): void {
+    const row = supervisorEventToJournalRow({ ...event, timestamp: this.stamp() });
     try {
       this.journal.insert(row);
     } catch (err) {

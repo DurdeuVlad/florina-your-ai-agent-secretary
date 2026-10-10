@@ -260,15 +260,19 @@ describe('TaskStateMachine: every valid transition succeeds and emits the correc
       expect(f.sm.getCurrentState(f.taskId)).toBe(to);
       expect(result.task.state).toBe(to);
 
-      // An event was appended.
+      // An event was appended — identified by its transition payload
+      // (seeded verification facts may tie on the same millisecond).
       const afterEvents = f.events.listByTask(f.taskId);
       expect(afterEvents.length).toBe(beforeCount + 1);
-      const appended = afterEvents[afterEvents.length - 1];
-      expect(appended.kind).toBe(EXPECTED_EVENT_KIND[`${from}->${to}`]);
-      expect(appended.taskId).toBe(f.taskId);
-      expect(appended.sessionId).toBe(f.sessionId);
-      expect(appended.payload['fromState']).toBe(from);
-      expect(appended.payload['toState']).toBe(to);
+      const appended = afterEvents.find(
+        (e) => e.payload['fromState'] === from && e.payload['toState'] === to,
+      );
+      expect(appended).toBeDefined();
+      expect(appended?.kind).toBe(EXPECTED_EVENT_KIND[`${from}->${to}`]);
+      expect(appended?.taskId).toBe(f.taskId);
+      expect(appended?.sessionId).toBe(f.sessionId);
+      expect(appended?.payload['fromState']).toBe(from);
+      expect(appended?.payload['toState']).toBe(to);
     });
   }
 });
@@ -477,12 +481,17 @@ describe('TaskStateMachine: every transition appends an event to the journal', (
 
     const history = f.sm.getTransitionHistory(f.taskId);
     expect(history.length).toBe(4);
-    expect(history[0].kind).toBe('AgentStarted');
-    expect(history[1].kind).toBe('AgentProgress');
-    expect(history[2].kind).toBe('VerificationObserved');
-    expect(history[3].kind).toBe('AgentCompleted');
+    // The transition events keep their order; the seeded verification
+    // fact may sort anywhere in the same-millisecond band.
+    const kinds = history.map((e) => e.kind);
+    expect(kinds.filter((k) => k !== 'VerificationObserved')).toEqual([
+      'AgentStarted',
+      'AgentProgress',
+      'AgentCompleted',
+    ]);
+    expect(kinds).toContain('VerificationObserved');
     // Chronological: timestamps non-decreasing.
-    expect(history[3].timestamp >= history[0].timestamp).toBe(true);
+    expect(history[history.length - 1].timestamp >= history[0].timestamp).toBe(true);
   });
 
   it('illegal transitions do NOT append an event', () => {
@@ -549,12 +558,18 @@ function seedState(f: Fixture, target: TaskStateType): void {
  * running -> completed gate reads the latest verification fact, so tests
  * exercising that transition seed the evidence it requires.
  */
+let lastSeedMs = 0;
 function seedVerification(f: Fixture, success: boolean): void {
+  // Strictly increasing real-time stamps among seeds: the journal orders
+  // by `timestamp` and the gate reads the latest verification fact —
+  // a pass-then-fail pair must keep its order even within the same ms.
+  const ms = Math.max(Date.now(), lastSeedMs + 1);
+  lastSeedMs = ms;
   f.events.insert({
     id: `event_verify_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`,
     sessionId: f.sessionId,
     taskId: f.taskId,
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(ms).toISOString(),
     kind: 'VerificationObserved',
     payload: { taskId: f.taskId, sessionId: f.sessionId, kind: 'other', success },
   });
