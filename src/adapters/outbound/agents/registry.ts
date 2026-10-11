@@ -20,7 +20,10 @@
  * {@link AgentRuntimeRegistryPort} and never depends on the concrete daemon
  * `EventPublisherPort` or the event-stream ports.
  */
-import type { AgentRuntimePort } from '../../../core/application/ports/outbound/agent-runtime.js';
+import type {
+  AgentRuntimePort,
+  AgentSessionCapabilities,
+} from '../../../core/application/ports/outbound/agent-runtime.js';
 import type { AgentRuntimeRegistryPort } from '../../../core/application/ports/outbound/runtime-registry.js';
 
 /**
@@ -116,5 +119,18 @@ export class AdapterRegistry implements AgentRuntimeRegistryPort {
    */
   list(): readonly string[] {
     return [...this.factories.keys()];
+  }
+
+  /**
+   * The static session-reuse capability matrix an adapter declares
+   * (issue #341). Instantiated fresh via the factory — adapter
+   * construction performs no connection, so reading the declaration is
+   * side-effect-free. The single source of truth is the adapter itself:
+   * no parallel registry table that could drift from the real flags.
+   *
+   * @throws {UnknownAdapterError} if the id is not registered.
+   */
+  capabilities(adapterId: string): AgentSessionCapabilities {
+    return this.create(adapterId).capabilities;
   }
 }

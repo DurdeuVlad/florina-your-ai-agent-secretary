@@ -26,6 +26,7 @@ import type {
 class FakeAdapter implements AgentRuntimePort {
   readonly id = 'codex';
   readonly fidelityTier = 'B' as const;
+  readonly capabilities = { sendMessage: false, resume: false, compact: false } as const;
   connectionState: 'disconnected' | 'connecting' | 'connected' = 'disconnected';
   async connect(): Promise<void> {
     this.connectionState = 'connected';

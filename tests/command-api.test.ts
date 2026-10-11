@@ -2563,6 +2563,7 @@ import type {
 /** Adapter stub that records the SessionConfig handed to startRun. */
 class CapturingAdapter implements AgentRuntimePort {
   readonly fidelityTier = 'B' as const;
+  readonly capabilities = { sendMessage: false, resume: false, compact: false } as const;
   readonly runs: SessionConfig[] = [];
 
   async connect(): Promise<void> {}

@@ -31,10 +31,7 @@ import { AdapterFidelityTier } from '../../../core/domain/enums.js';
 import type { SupervisorEvent } from '../../../core/domain/events.js';
 import type { EventPublisherPort } from '../../../core/application/ports/outbound/event-stream.js';
 import { BaseAdapter, type SessionConfig, type StartRunResult } from './base.js';
-import {
-  mapCodexNotification,
-  type MapperContext,
-} from './codex-mapper.js';
+import { mapCodexNotification, type MapperContext } from './codex-mapper.js';
 
 /** Stable id for the Codex adapter. */
 export const CODEX_ADAPTER_ID = 'codex';
@@ -146,7 +143,14 @@ export class CodexAdapter extends BaseAdapter {
   private streamComplete = false;
 
   constructor(bus?: EventPublisherPort | null, options?: CodexAdapterOptions) {
-    super(CODEX_ADAPTER_ID, AdapterFidelityTier.A, bus);
+    super(CODEX_ADAPTER_ID, AdapterFidelityTier.A, bus, {
+      // The thread/turn protocol supports follow-up turns on a live
+      // thread (issue #341); resume/compact are not declared until a
+      // real provider mechanism is verified.
+      sendMessage: true,
+      resume: false,
+      compact: false,
+    });
     this.options = options ?? { endpoint: 'ws://127.0.0.1:0' };
     if (this.options.protocolMode === 'legacy') {
       this.isModernProtocol = false;
@@ -324,6 +328,41 @@ export class CodexAdapter extends BaseAdapter {
           this.eventResolvers.push(resolve);
         });
       }
+    }
+  }
+
+  /**
+   * Deliver a follow-up message as a new turn on the live thread
+   * (issue #341). Real capability: `turn/start` (modern) or
+   * `codex.startTurn` (legacy) against `activeThreadId`. Returns `false`
+   * when the session is gone or the server rejects the turn — never a
+   * fake delivery.
+   */
+  async sendMessage(sessionId: string, message: string): Promise<boolean> {
+    this.requireConnected();
+    if (this.activeSession?.sessionId !== sessionId || this.activeThreadId === null) {
+      return false;
+    }
+    try {
+      if (this.isModernProtocol !== false) {
+        const turnResult = (await this.sendRequest('turn/start', {
+          threadId: this.activeThreadId,
+          input: [{ type: 'text', text: message, text_elements: [] }],
+          cwd: this.activeSession.workingDir,
+          model: this.activeSession.model,
+        })) as { turn?: { id?: string } } | null;
+        this.activeTurnId = turnResult?.turn?.id ?? this.activeTurnId;
+        return true;
+      }
+      const result = await this.sendRequest('codex.startTurn', {
+        threadId: this.activeThreadId,
+        objective: message,
+        workingDir: this.activeSession.workingDir,
+        model: this.activeSession.model,
+      });
+      return result !== null;
+    } catch {
+      return false;
     }
   }
 
@@ -540,11 +579,7 @@ export class CodexAdapter extends BaseAdapter {
     if (!this.activeSession || this.streamComplete || !this.mapperCtx) {
       return;
     }
-    const mapped = mapCodexNotification(
-      notification.method,
-      notification.params,
-      this.mapperCtx,
-    );
+    const mapped = mapCodexNotification(notification.method, notification.params, this.mapperCtx);
     if (mapped) {
       this.enqueueEvent(mapped);
       // Terminal events complete the stream.

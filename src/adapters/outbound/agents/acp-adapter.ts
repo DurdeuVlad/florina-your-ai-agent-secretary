@@ -177,7 +177,13 @@ export class AcpAdapter extends BaseAdapter {
   private acpSessionId: string | null = null;
 
   constructor(bus: EventPublisherPort | null | undefined, options: AcpAdapterOptions) {
-    super(options.id, AdapterFidelityTier.C, bus);
+    super(options.id, AdapterFidelityTier.C, bus, {
+      // ACP `session/prompt` delivers follow-up messages into a live
+      // session (issue #341); resume/compact have no ACP mechanism.
+      sendMessage: true,
+      resume: false,
+      compact: false,
+    });
     this.options = options;
   }
 
@@ -236,6 +242,21 @@ export class AcpAdapter extends BaseAdapter {
       // Prompt failures are already turned into AgentFailed events.
     });
     return { sessionId: sessionConfig.sessionId, started: true };
+  }
+
+  /**
+   * Deliver a follow-up message via `session/prompt` on the live ACP
+   * session (issue #341). Returns `false` when no live session exists;
+   * wire failures surface as `AgentFailed` events through the normal
+   * stream rather than a silent boolean.
+   */
+  async sendMessage(sessionId: string, message: string): Promise<boolean> {
+    this.requireConnected();
+    if (this.session?.sessionId !== sessionId || this.acpSessionId === null) {
+      return false;
+    }
+    await this.prompt(message);
+    return true;
   }
 
   /** Send `session/prompt` and map the turn-ending response. */

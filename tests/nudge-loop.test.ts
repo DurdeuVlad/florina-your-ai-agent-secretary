@@ -405,6 +405,7 @@ describe('NudgeLoop', () => {
 class ScriptedAdapter implements AgentRuntimePort {
   readonly id = 'codex';
   readonly fidelityTier = 'B' as const;
+  readonly capabilities = { sendMessage: false, resume: false, compact: false } as const;
   connectionState: 'disconnected' | 'connecting' | 'connected' = 'disconnected';
   constructor(private readonly events: readonly SupervisorEvent[]) {}
   async connect(): Promise<void> {

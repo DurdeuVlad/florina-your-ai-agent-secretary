@@ -152,7 +152,14 @@ export class ClaudePtyAdapter extends BaseAdapter {
   private lineBuffer = '';
 
   constructor(bus?: EventPublisherPort | null, options: ClaudeAdapterOptions = {}) {
-    super(CLAUDE_PTY_ADAPTER_ID, AdapterFidelityTier.E, bus);
+    super(CLAUDE_PTY_ADAPTER_ID, AdapterFidelityTier.E, bus, {
+      // The interactive REPL genuinely accepts follow-up prompts as
+      // keystrokes (issue #341); resume/compact have no verifiable
+      // mechanism through this transport.
+      sendMessage: true,
+      resume: false,
+      compact: false,
+    });
     this.options = options;
   }
 
@@ -218,6 +225,20 @@ export class ClaudePtyAdapter extends BaseAdapter {
 
     void taskId; // taskId is carried in sessionConfig; kept for interface parity.
     return { sessionId: sessionConfig.sessionId, started: true };
+  }
+
+  /**
+   * Deliver a follow-up message to the live interactive REPL as a
+   * keystroke prompt (issue #341) — the same mechanism startRun uses.
+   * Returns `false` when there is no live session or PTY.
+   */
+  async sendMessage(sessionId: string, message: string): Promise<boolean> {
+    this.requireConnected();
+    if (this.activeSession?.sessionId !== sessionId || this.pty === null) {
+      return false;
+    }
+    this.pty.write(`${message}${ENTER}`);
+    return true;
   }
 
   async *streamEvents(): AsyncIterable<SupervisorEvent> {
