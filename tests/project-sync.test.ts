@@ -13,12 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import type {
-  EntityId,
-  Event,
-  Project,
-  Task,
-} from '../src/core/domain/types.js';
+import type { EntityId, Event, Project, Task } from '../src/core/domain/types.js';
 import type {
   EventJournalPort,
   ProjectRepositoryPort,
@@ -119,10 +114,7 @@ class InMemoryTaskRepository implements TaskRepositoryPort {
 
 class StaticCanonicalizer implements PathCanonicalizerPort {
   canonicalize(rawPath: string): string {
-    return rawPath
-      .replace(/\\/g, '/')
-      .replace(/\/+$/, '')
-      .toLowerCase();
+    return rawPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
   }
 }
 
@@ -199,9 +191,7 @@ describe('Project Sync (issue #175)', () => {
         platform: 'win32',
         realpathFn: (p) => p,
       });
-      expect(canonicalizer.canonicalize('\\\\?\\C:\\Users\\Vlad\\Repo')).toBe(
-        'c:/users/vlad/repo',
-      );
+      expect(canonicalizer.canonicalize('\\\\?\\C:\\Users\\Vlad\\Repo')).toBe('c:/users/vlad/repo');
       expect(canonicalizer.canonicalize('\\\\?\\UNC\\server\\share\\repo')).toBe(
         '//server/share/repo',
       );
@@ -323,9 +313,7 @@ describe('Project Sync (issue #175)', () => {
 
       const scanner: ProviderProjectScannerPort = {
         providerId: 'claude-code',
-        scanProjects: () => [
-          { provider: 'claude-code', folderPath: '/workspace/existing-repo/' },
-        ],
+        scanProjects: () => [{ provider: 'claude-code', folderPath: '/workspace/existing-repo/' }],
       };
 
       const result = await syncService.sync([scanner]);
@@ -560,7 +548,13 @@ describe('Project Sync (issue #175)', () => {
       expect(DevinProjectScanner.prototype).not.toHaveProperty('saveWorkspace');
     });
 
-    it('LIVE SYSTEM PROOF: real provider scanners discover existing local projects on host', async () => {
+    // Live-host scan walks real provider dirs (~/.claude, devin
+    // workspaceStorage, …) — scales with what providers stored locally;
+    // the 5s default is not a safe bound on a real workstation.
+    it(
+      'LIVE SYSTEM PROOF: real provider scanners discover existing local projects on host',
+      { timeout: 60_000 },
+      async () => {
       const realCanonicalizer = new NodePathCanonicalizer();
       const realScanner = new CompositeProviderScanner();
       const discovered = await realScanner.scanProjects();
@@ -588,12 +582,10 @@ describe('Project Sync (issue #175)', () => {
     });
 
     it('INTEGRATION PROOF: runs ProjectSyncService against real SQLite StorageDatabase with foreign_keys ON', async () => {
-      const { StorageDatabase } = await import(
-        '../src/adapters/outbound/persistence/sqlite/database.js'
-      );
-      const { ProjectRepository } = await import(
-        '../src/adapters/outbound/persistence/sqlite/repositories/project.js'
-      );
+      const { StorageDatabase } =
+        await import('../src/adapters/outbound/persistence/sqlite/database.js');
+      const { ProjectRepository } =
+        await import('../src/adapters/outbound/persistence/sqlite/repositories/project.js');
 
       const db = new StorageDatabase({ path: ':memory:' });
       await db.open();
@@ -607,9 +599,7 @@ describe('Project Sync (issue #175)', () => {
 
         const scanner: ProviderProjectScannerPort = {
           providerId: 'codex',
-          scanProjects: () => [
-            { provider: 'codex', folderPath: '/repos/real-sqlite-project' },
-          ],
+          scanProjects: () => [{ provider: 'codex', folderPath: '/repos/real-sqlite-project' }],
         };
 
         const result = await syncService.sync([scanner]);
@@ -632,4 +622,3 @@ describe('Project Sync (issue #175)', () => {
     });
   });
 });
-
