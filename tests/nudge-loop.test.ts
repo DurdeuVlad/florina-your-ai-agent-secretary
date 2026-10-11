@@ -348,6 +348,22 @@ describe('NudgeLoop', () => {
     expect(f.executor.commands.length).toBe(0);
   });
 
+  it('a delegated task is re-dispatched — delegate-task leaves tasks delegated, not running', async () => {
+    // Delegated tasks sit in `delegated` for the whole run; a pending nudge
+    // must still dispatch (startable state), without the running->blocked
+    // slot-freeing transition.
+    f.tasks.update({ ...f.tasks.getById(f.taskId)!, state: TaskState.Delegated });
+    const loop = f.makeLoop();
+    expect(loop.onVerifyFailed(f.taskId, f.sessionId, f.agentId, failedOutcome())).toBe(
+      'nudge-pending',
+    );
+    await loop.dispatchPending(f.taskId);
+    expect(eventsOf(f, 'TaskNudged').length).toBe(1);
+    expect(f.executor.commands.length).toBe(1);
+    expect(f.executor.commands[0]?.kind).toBe('start-task');
+    expect(f.sm.getCurrentState(f.taskId)).toBe(TaskState.Delegated); // no park transition
+  });
+
   it('onVerifyFailed ignores unknown tasks and never throws', () => {
     const loop = f.makeLoop();
     expect(loop.onVerifyFailed('task_missing', 's', 'a', failedOutcome())).toBe('ignored');
