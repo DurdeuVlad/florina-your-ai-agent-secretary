@@ -200,21 +200,33 @@ export class NudgeLoop {
     this.pending.delete(taskId);
 
     const task = this.tasks.getById(taskId);
-    if (task === null || task.state !== TaskState.Running) {
-      // Stopped/cancelled between claim and session end — honest skip.
+    if (task === null) {
       return;
     }
 
-    // running -> blocked opens a dispatch slot in the lifecycle (blocked
-    // is startable) and journals the park as AgentBlocked.
-    try {
-      this.stateMachine.transition(taskId, TaskState.Running, TaskState.Blocked, {
-        sessionId: nudge.sessionId,
-        agentId: nudge.agentId,
-        payload: { reason: 'verify-nudge-dispatch' },
-      });
-    } catch {
-      return; // state raced elsewhere — leave the record intact
+    if (task.state === TaskState.Running) {
+      // running -> blocked opens a dispatch slot in the lifecycle (blocked
+      // is startable) and journals the park as AgentBlocked.
+      try {
+        this.stateMachine.transition(taskId, TaskState.Running, TaskState.Blocked, {
+          sessionId: nudge.sessionId,
+          agentId: nudge.agentId,
+          payload: { reason: 'verify-nudge-dispatch' },
+        });
+      } catch {
+        return; // state raced elsewhere — leave the record intact
+      }
+    } else if (
+      // Delegated tasks sit in `delegated` for their whole run (delegate-task
+      // does not transition to running) — a verify-failed delegation must be
+      // re-dispatchable too, through the same states start-task accepts.
+      // Cancelled/completed/failed between claim and session end — honest skip.
+      task.state !== TaskState.Delegated &&
+      task.state !== TaskState.Created &&
+      task.state !== TaskState.Blocked &&
+      task.state !== TaskState.AttentionNeeded
+    ) {
+      return;
     }
 
     this.journalEvent<TaskNudgedEvent>({
