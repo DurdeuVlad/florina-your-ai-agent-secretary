@@ -20,6 +20,7 @@ interface TaskRow {
   capsule_id: string;
   worktree_path: string | null;
   priority: string | null;
+  parallelizable: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -34,9 +35,9 @@ export class TaskRepository extends BaseRepository implements TaskRepositoryPort
     super(db);
     this.insertStmt = this.prepare(
       `INSERT INTO tasks (id, project_id, objective, state, agent_ids, session_ids,
-        deliverable_ids, attention_item_ids, capsule_id, worktree_path, priority, created_at, updated_at)
+        deliverable_ids, attention_item_ids, capsule_id, worktree_path, priority, parallelizable, created_at, updated_at)
        VALUES (@id, @project_id, @objective, @state, @agent_ids, @session_ids,
-        @deliverable_ids, @attention_item_ids, @capsule_id, @worktree_path, @priority, @created_at, @updated_at)`,
+        @deliverable_ids, @attention_item_ids, @capsule_id, @worktree_path, @priority, @parallelizable, @created_at, @updated_at)`,
     );
     this.getByIdStmt = this.prepare('SELECT * FROM tasks WHERE id = ?');
     this.listByProjectStmt = this.prepare(
@@ -46,7 +47,8 @@ export class TaskRepository extends BaseRepository implements TaskRepositoryPort
       `UPDATE tasks SET objective = @objective, state = @state, agent_ids = @agent_ids,
         session_ids = @session_ids, deliverable_ids = @deliverable_ids,
         attention_item_ids = @attention_item_ids, capsule_id = @capsule_id,
-        worktree_path = @worktree_path, priority = @priority, updated_at = @updated_at
+        worktree_path = @worktree_path, priority = @priority,
+        parallelizable = @parallelizable, updated_at = @updated_at
        WHERE id = @id`,
     );
   }
@@ -64,6 +66,7 @@ export class TaskRepository extends BaseRepository implements TaskRepositoryPort
       capsule_id: task.capsuleId,
       worktree_path: task.worktreePath ?? null,
       priority: task.priority ?? null,
+      parallelizable: task.parallelizable === undefined ? null : task.parallelizable ? 1 : 0,
       created_at: task.createdAt,
       updated_at: task.updatedAt,
     });
@@ -97,6 +100,7 @@ export class TaskRepository extends BaseRepository implements TaskRepositoryPort
       capsule_id: task.capsuleId,
       worktree_path: task.worktreePath ?? null,
       priority: task.priority ?? null,
+      parallelizable: task.parallelizable === undefined ? null : task.parallelizable ? 1 : 0,
       updated_at: task.updatedAt,
     });
   }
@@ -114,6 +118,7 @@ export class TaskRepository extends BaseRepository implements TaskRepositoryPort
       capsuleId: row.capsule_id,
       worktreePath: row.worktree_path ?? undefined,
       ...(row.priority !== null ? { priority: row.priority as Task['priority'] } : {}),
+      ...(row.parallelizable !== null ? { parallelizable: row.parallelizable === 1 } : {}),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

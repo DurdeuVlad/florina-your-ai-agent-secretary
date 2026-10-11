@@ -174,6 +174,23 @@ export const MIGRATION_006_TASK_PRIORITY: Migration = {
 };
 
 /**
+ * Migration 7 (issue #344): `tasks.parallelizable` — the declared
+ * consent to run alongside a busy provider session when quota headroom
+ * exists. Nullable INTEGER (0/1): absent → serial-per-provider.
+ * Defensive `ALTER` for the same reason as migration 6.
+ */
+export const MIGRATION_007_TASK_PARALLELIZABLE: Migration = {
+  version: 7,
+  description: 'Add tasks.parallelizable for consent-gated parallel dispatch',
+  run: (db: Database.Database) => {
+    const cols = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'parallelizable')) {
+      db.exec('ALTER TABLE tasks ADD COLUMN parallelizable INTEGER');
+    }
+  },
+};
+
+/**
  * The ordered list of all known migrations. New migrations are appended here
  * with an incrementing version number; the framework applies only those not
  * yet recorded in the `_migrations` table.
@@ -185,6 +202,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_004_CHAT,
   MIGRATION_005_ATTENTION_INBOX_SNAPSHOT,
   MIGRATION_006_TASK_PRIORITY,
+  MIGRATION_007_TASK_PARALLELIZABLE,
 ];
 
 /**

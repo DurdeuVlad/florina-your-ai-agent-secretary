@@ -138,6 +138,13 @@ export interface SpawnTaskInput {
    * escalates to the human. Absent → the loop default (2).
    */
   readonly verifyBudget?: number;
+  /**
+   * Task-declared parallelism consent (issue #344): the spawned task may
+   * run alongside another session on the same provider when quota
+   * headroom exists. Persisted on the task and journaled on
+   * `TaskQueued`; absent → serial-per-provider (default).
+   */
+  readonly parallelizable?: boolean;
 }
 
 /** Result of {@link ManagerToolService.spawnTask}. */
@@ -252,6 +259,7 @@ export class ManagerToolService {
       deliverableIds: [],
       attentionItemIds: [],
       capsuleId: genId('capsule'),
+      ...(input.parallelizable !== undefined ? { parallelizable: input.parallelizable } : {}),
       createdAt: now,
       updatedAt: now,
     };

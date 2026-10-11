@@ -54,6 +54,7 @@
 
 import type { AdapterFidelityTier, ApprovalAuthorityLevel } from './enums.js';
 import type { SupervisorEventKind } from './types.js';
+import type { ISODateString } from './types.js';
 import { CAPABILITY_TYPE_VALUES, CAPABILITY_RISK_LEVEL_VALUES } from './capabilities.js';
 import type { ExecutionBrief } from './execution-brief.js';
 import type {
@@ -698,6 +699,18 @@ export interface TaskQueuedEvent extends SupervisorEventBase {
   mcpServers?: readonly unknown[];
   /** Compiled Execution Brief carried to dispatch, when supplied. */
   executionBrief?: object;
+  /**
+   * Task-declared parallelism consent (issue #344): the task's owner
+   * marked it safe to run alongside another session on the same
+   * provider. Journaled — never inferred.
+   */
+  parallelizable?: boolean;
+  /**
+   * Per-submission user consent for parallel dispatch (issue #344):
+   * the caller explicitly asked this run to spawn alongside a busy
+   * provider session.
+   */
+  userRequestedParallel?: boolean;
 }
 
 /** Why a queued task left the durable queue (issue #343). */
@@ -717,6 +730,39 @@ export interface TaskDequeuedEvent extends SupervisorEventBase {
   reason: TaskDequeueReason;
   /** Honest detail, e.g. the dispatch error behind a retry. */
   detail?: string;
+}
+
+/** The scheduler's per-task verdict (issue #344). */
+export type RoutingDecisionKind =
+  /** Lane idle — normal serial dispatch. */
+  | 'serial-dispatch'
+  /** Parallel dispatch: consent given AND quota headroom confirmed. */
+  | 'parallel-ok'
+  /** Provider session busy and no parallel consent — the task waits. */
+  | 'session-busy'
+  /** Parallel consent given but quota headroom absent — parked until reset. */
+  | 'quota-blocked';
+
+/**
+ * Emitted when the scheduler decides a queued task's dispatch
+ * (issue #344): every spawn/wait verdict is journaled with its reason
+ * so `query-fleet` can explain why a task is running, waiting, or
+ * parked. Published on the bus (the journal writer records it); the
+ * scheduler journals on decision-identity change, not per pump tick,
+ * so a long wait is one honest fact, not a flood.
+ */
+export interface RoutingDecisionEvent extends SupervisorEventBase {
+  type: 'RoutingDecision';
+  /** Provider+project lane the task waited in. */
+  queueKey: string;
+  /** The verdict. */
+  decision: RoutingDecisionKind;
+  /** Human-readable explanation, e.g. "parallel consent + quota headroom". */
+  reason: string;
+  /** For `quota-blocked`: the earliest known capacity reset, when known. */
+  resumeAt?: ISODateString;
+  /** Whether the task carried parallel consent when the verdict was made. */
+  parallelRequested?: boolean;
 }
 
 /**
@@ -752,7 +798,8 @@ export type SupervisorEvent =
   | SessionReusedEvent
   | ContextMaintainedEvent
   | TaskQueuedEvent
-  | TaskDequeuedEvent;
+  | TaskDequeuedEvent
+  | RoutingDecisionEvent;
 
 /** Ordered list of all valid event type discriminants. */
 export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
@@ -786,6 +833,7 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
   'ContextMaintained',
   'TaskQueued',
   'TaskDequeued',
+  'RoutingDecision',
 ] as const;
 
 const ADAPTER_FIDELITY_TIERS: readonly AdapterFidelityTier[] = ['A', 'B', 'C', 'D', 'E'] as const;
@@ -1037,6 +1085,9 @@ export function validateEvent(value: unknown): SupervisorEvent {
       break;
     case 'TaskDequeued':
       validateTaskDequeued(value, problems);
+      break;
+    case 'RoutingDecision':
+      validateRoutingDecision(value, problems);
       break;
     // Unknown types are already reported via the envelope check above.
     default:
@@ -1595,6 +1646,11 @@ function validateTaskQueued(value: Record<string, unknown>, problems: string[]):
   if (value['executionBrief'] !== undefined && !isObject(value['executionBrief'])) {
     problems.push('TaskQueued: optional field "executionBrief" must be an object.');
   }
+  for (const field of ['parallelizable', 'userRequestedParallel'] as const) {
+    if (value[field] !== undefined && typeof value[field] !== 'boolean') {
+      problems.push(`TaskQueued: optional field "${field}" must be a boolean.`);
+    }
+  }
 }
 
 function validateTaskDequeued(value: Record<string, unknown>, problems: string[]): void {
@@ -1608,6 +1664,33 @@ function validateTaskDequeued(value: Record<string, unknown>, problems: string[]
   }
   if (value['detail'] !== undefined && !isString(value['detail'])) {
     problems.push('TaskDequeued: optional field "detail" must be a string.');
+  }
+}
+
+const ROUTING_DECISION_KINDS: readonly RoutingDecisionKind[] = [
+  'serial-dispatch',
+  'parallel-ok',
+  'session-busy',
+  'quota-blocked',
+] as const;
+
+function validateRoutingDecision(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['queueKey']) || value['queueKey'].length === 0) {
+    problems.push('RoutingDecision: missing or empty required field "queueKey".');
+  }
+  if (!isOneOf(value['decision'], ROUTING_DECISION_KINDS)) {
+    problems.push(
+      `RoutingDecision: field "decision" must be one of ${ROUTING_DECISION_KINDS.join(', ')}.`,
+    );
+  }
+  if (!isString(value['reason']) || value['reason'].length === 0) {
+    problems.push('RoutingDecision: missing or empty required field "reason".');
+  }
+  if (value['resumeAt'] !== undefined && !isString(value['resumeAt'])) {
+    problems.push('RoutingDecision: optional field "resumeAt" must be a string.');
+  }
+  if (value['parallelRequested'] !== undefined && typeof value['parallelRequested'] !== 'boolean') {
+    problems.push('RoutingDecision: optional field "parallelRequested" must be a boolean.');
   }
 }
 
