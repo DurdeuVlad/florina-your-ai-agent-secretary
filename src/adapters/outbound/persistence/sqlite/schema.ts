@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   capsule_id         TEXT NOT NULL,
   worktree_path      TEXT,
   priority           TEXT,
+  parallelizable     INTEGER,
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects(id)

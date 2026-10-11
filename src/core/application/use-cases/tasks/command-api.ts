@@ -26,6 +26,7 @@ import type { Approval, ConversationMessage, Event, Session, Task } from '../../
 import type {
   AgentStartedEvent,
   AgentStoppedEvent,
+  RoutingDecisionEvent,
   SupervisorEvent,
 } from '../../../domain/events.js';
 import type {
@@ -119,8 +120,9 @@ import type {
   MetricsQueryService,
 } from '../attention/attention-metrics.js';
 import type { SessionManager } from './session-manager.js';
-import type { TaskQueue, QueueSnapshotEntry } from '../scheduling/task-queue.js';
-import { queueKeyOf } from '../scheduling/task-queue.js';
+import type { TaskQueue, QueueSnapshotEntry, QueuedTask } from '../scheduling/task-queue.js';
+import { decideScheduling } from '../scheduling/scheduler-policy.js';
+import type { SchedulingDecision } from '../scheduling/scheduler-policy.js';
 
 /* ================================================================== *
  * Shared types
@@ -244,6 +246,13 @@ export interface StartTaskCommand {
   readonly scheduledByQueue?: boolean;
   /** Reserved run id carried by the queued entry — scheduler dispatch only. */
   readonly queueSessionId?: string;
+  /**
+   * User-requested parallel dispatch (issue #344): the caller explicitly
+   * asked this run to spawn alongside a busy provider session. Honored
+   * only when the provider has quota headroom — journaled on
+   * `TaskQueued`/`RoutingDecision`, never silently granted.
+   */
+  readonly parallel?: boolean;
 }
 
 /** Stop (cancel) a running task. */
@@ -2359,8 +2368,13 @@ export class CommandApi {
           ...(cmd.sessionConfig.executionBrief !== undefined
             ? { executionBrief: cmd.sessionConfig.executionBrief }
             : {}),
+          ...(task.parallelizable !== undefined ? { parallelizable: task.parallelizable } : {}),
+          ...(cmd.parallel === true ? { userRequestedParallel: true } : {}),
         },
       });
+      // A re-enqueue after a prior wait verdict — the first decision
+      // for the fresh entry must journal, not dedupe against history.
+      this.journaledDecisions.delete(cmd.taskId);
     } catch (err) {
       // Journal write failed — nothing is durable, so roll back the
       // pending session row rather than leave an orphan (DEC-011).
@@ -2409,7 +2423,7 @@ export class CommandApi {
     }
   }
 
-  private readonly pumpingLanes = new Set<string>();
+  private readonly pumpingProviders = new Set<string>();
 
   private async pumpQueue(
     queueKey: string,
@@ -2418,16 +2432,40 @@ export class CommandApi {
     if (queue === undefined) {
       return undefined;
     }
-    // Reentrancy guard: one in-flight dispatch per lane — two tasks in
-    // the same lane must never race a `laneBusy` check into two spawns.
-    if (this.pumpingLanes.has(queueKey)) {
-      return undefined;
-    }
     const head = queue.head(queueKey); // prunes expired entries first
-    if (head === undefined || this.laneBusy(queueKey)) {
+    if (head === undefined) {
       return undefined;
     }
-    this.pumpingLanes.add(queueKey);
+    // Reentrancy guard, provider-scoped (issue #344): the policy is
+    // serial-per-provider, so one in-flight dispatch per provider —
+    // two lanes on the same agent must never race a `providerBusy`
+    // check into two "serial" spawns. A skipped lane retries on the
+    // next drain trigger; its wait reason computes live until then.
+    if (this.pumpingProviders.has(head.agentId)) {
+      return undefined;
+    }
+    // Scheduler policy (issue #344): serial-per-provider by default —
+    // parallel only when consented (task flag or user verb) AND quota
+    // headroom reads true on the QuotaLedger, the same source
+    // CapacityRouter consults. The verdict is journaled on change.
+    const decision = decideScheduling({
+      providerBusy: queue.providerBusy(head.agentId),
+      parallelizable: head.spec.parallelizable === true,
+      userRequestedParallel: head.spec.userRequestedParallel === true,
+      hasCapacity: this.quotaLedger?.hasCapacity(head.agentId) ?? true,
+      resumeAt: this.quotaLedger?.nextResetFor(head.agentId) ?? null,
+    });
+    this.journalDecision(head, decision);
+    if (decision.action === 'wait') {
+      queue.recordWait(head.taskId, {
+        decision: decision.decision,
+        detail: decision.reason,
+        ...(decision.resumeAt !== undefined ? { resumeAt: decision.resumeAt } : {}),
+      });
+      return undefined;
+    }
+    queue.clearWait(head.taskId);
+    this.pumpingProviders.add(head.agentId);
     const response = (await this.execute({
       kind: 'start-task',
       taskId: head.taskId,
@@ -2470,26 +2508,51 @@ export class CommandApi {
             `dispatch succeeded but dequeue journal failed: ${errorMessage(err)}`,
           );
         }
+        this.journaledDecisions.delete(head.taskId);
         return { taskId: head.taskId, response };
       }
       queue.recordDispatchFailure(head.taskId, response.error ?? 'dispatch failed');
+      this.journaledDecisions.delete(head.taskId);
       return { taskId: head.taskId, response };
     } finally {
-      this.pumpingLanes.delete(queueKey);
+      this.pumpingProviders.delete(head.agentId);
     }
   }
 
-  /** Whether the lane currently holds an active session. */
-  private laneBusy(queueKey: string): boolean {
-    if (this.sessionManager === undefined) {
-      return false;
+  /**
+   * Journal the scheduling verdict once per outcome (issue #344): a
+   * wait that lasts a hundred pump ticks is one `RoutingDecision`
+   * fact, not a flood — re-journal only when the decision kind or the
+   * quoted reset changes.
+   */
+  private readonly journaledDecisions = new Map<string, string>();
+
+  private journalDecision(head: QueuedTask, decision: SchedulingDecision): void {
+    const resume = decision.action === 'wait' ? (decision.resumeAt ?? '') : '';
+    const key = `${decision.decision}|${resume}`;
+    if (this.journaledDecisions.get(head.taskId) === key) {
+      return;
     }
-    for (const session of this.sessionManager.getActiveSessions().values()) {
-      if (queueKeyOf(session.agentId, session.projectId) === queueKey) {
-        return true;
-      }
-    }
-    return false;
+    this.journaledDecisions.set(head.taskId, key);
+    const event: RoutingDecisionEvent = {
+      type: 'RoutingDecision',
+      timestamp: new Date().toISOString(),
+      taskId: head.taskId,
+      sessionId: head.sessionId,
+      agentId: head.agentId,
+      adapterFidelityTier: head.agentTier,
+      queueKey: head.queueKey,
+      decision: decision.decision,
+      reason: decision.reason,
+      ...(decision.action === 'wait' && decision.resumeAt !== undefined
+        ? { resumeAt: decision.resumeAt }
+        : {}),
+      parallelRequested:
+        head.spec.parallelizable === true || head.spec.userRequestedParallel === true,
+    };
+    // The journal writer records bus events — same durable path every
+    // decision-class fact takes.
+    this.eventBus.publish(event);
   }
 
   /** The honest queued response — position + computed wait reason. */

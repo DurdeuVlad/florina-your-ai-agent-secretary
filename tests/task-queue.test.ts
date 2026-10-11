@@ -21,6 +21,8 @@ import { SessionManager } from '../src/core/application/use-cases/tasks/session-
 import { CommandApi } from '../src/daemon/command-api.js';
 import type { CommandApiDeps, StartTaskResponse } from '../src/daemon/command-api.js';
 import { TaskQueue } from '../src/core/application/use-cases/scheduling/task-queue.js';
+import { EventJournalWriter } from '../src/core/application/use-cases/journal/event-journal-writer.js';
+import { QuotaLedger } from '../src/daemon/quota-ledger.js';
 import { EventBus } from '../src/daemon/event-stream.js';
 import { TaskStateMachine } from '../src/daemon/task-lifecycle.js';
 import { AttentionInbox } from '../src/attention/attention-inbox.js';
@@ -184,13 +186,13 @@ function createFixture(): Fixture {
   const queue = new TaskQueue({
     journal: eventRepo,
     publish: (e) => eventBus.publish(e),
-    isLaneBusy: (key) => {
+    isProviderBusy: (agentId) => {
       const manager = smRef.current;
       if (manager === undefined) {
         return false;
       }
       for (const session of manager.getActiveSessions().values()) {
-        if (`${session.agentId}::${session.projectId ?? ''}` === key) {
+        if (session.agentId === agentId) {
           return true;
         }
       }
@@ -392,7 +394,7 @@ describe('TaskQueue — durable membership', () => {
   it('reports waiting: session busy when the lane is occupied', () => {
     const busyQueue = new TaskQueue({
       journal: f.eventRepo,
-      isLaneBusy: () => true,
+      isProviderBusy: () => true,
     });
     const task = makeTask(f);
     f.insertSession(task.id, 'sess_busy', 'pending');
@@ -788,5 +790,157 @@ describe('CommandApi — durable queue path', () => {
     // to running instead of a duplicate session being inserted.
     expect(adapter2.runs[0]?.sessionId).toBe(reservedId);
     expect(f.sessionRepo.getById(reservedId)?.status).toBe('running');
+  });
+});
+
+/* ================================================================== *
+ * Integration: capacity- and consent-gated parallelism (issue #344)
+ * ================================================================== */
+
+describe('start-task + scheduler policy (issue #344)', () => {
+  let f: Fixture;
+  beforeEach(() => {
+    f = createFixture();
+  });
+  afterEach(() => {
+    f.db.close();
+  });
+
+  function apiWithAdapter(
+    adapter: AgentRuntimePort,
+    opts: { ledger?: QuotaLedger } = {},
+  ): { api: CommandApi; sm: SessionManager; writer: EventJournalWriter } {
+    let api!: CommandApi;
+    const sm = new SessionManager(f.eventBus, {
+      onSessionEnd: async () => {
+        await api.drainQueue();
+      },
+    });
+    f.smRef.current = sm;
+    // The journal writer mirrors the daemon's composition — decisions
+    // are bus-published facts the writer lands in the journal.
+    const writer = new EventJournalWriter({ journal: f.eventRepo, bus: f.eventBus });
+    writer.start();
+    api = new CommandApi({
+      ...queueDeps(f, adapter),
+      sessionManager: sm,
+      ...(opts.ledger !== undefined ? { quotaLedger: opts.ledger } : {}),
+    });
+    return { api, sm, writer };
+  }
+
+  const startTask = (
+    api: CommandApi,
+    taskId: string,
+    opts: { parallel?: boolean } = {},
+  ): Promise<StartTaskResponse> =>
+    api.execute({
+      kind: 'start-task',
+      taskId,
+      agentId: f.agentId,
+      ...(opts.parallel === true ? { parallel: true } : {}),
+      sessionConfig: { workingDir: '/repo/wt' },
+    }) as Promise<StartTaskResponse>;
+
+  it('a parallelizable task dispatches alongside a busy provider session', async () => {
+    const adapter = new BlockingAdapter();
+    const { api } = apiWithAdapter(adapter);
+    const running = makeTask(f, { id: 'task_running' });
+    const parallel = makeTask(f, { id: 'task_parallel', parallelizable: true });
+
+    await startTask(api, running.id);
+    const res = await startTask(api, parallel.id);
+
+    expect(res.ok).toBe(true);
+    expect(res.queued).not.toBe(true);
+    expect(adapter.runs).toHaveLength(2);
+    expect(f.queue.isQueued(parallel.id)).toBe(false);
+    expect(f.eventsOf(parallel.id, 'TaskDequeued')[0]!.payload['reason']).toBe('scheduled');
+
+    // The consent flag was journaled on the queue event, not inferred.
+    const queued = f.eventsOf(parallel.id, 'TaskQueued');
+    expect(queued[0]!.payload['parallelizable']).toBe(true);
+
+    const decisions = f.eventsOf(parallel.id, 'RoutingDecision');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.payload['decision']).toBe('parallel-ok');
+    expect(decisions[0]!.payload['parallelRequested']).toBe(true);
+  });
+
+  it('a non-consented task stays queued behind a busy provider with a journaled reason', async () => {
+    const adapter = new BlockingAdapter();
+    const { api } = apiWithAdapter(adapter);
+    const running = makeTask(f, { id: 'task_running' });
+    const serial = makeTask(f, { id: 'task_serial' });
+
+    await startTask(api, running.id);
+    const res = await startTask(api, serial.id);
+
+    expect(res.ok).toBe(true);
+    expect(res.queued).toBe(true);
+    expect(res.waitReason).toBe('waiting: session busy');
+    expect(adapter.runs).toHaveLength(1);
+
+    const decisions = f.eventsOf(serial.id, 'RoutingDecision');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.payload['decision']).toBe('session-busy');
+    expect(decisions[0]!.payload['parallelRequested']).toBe(false);
+  });
+
+  it('a consented task with no quota headroom parks with the ledger resume time', async () => {
+    const adapter = new BlockingAdapter();
+    const ledger = new QuotaLedger();
+    ledger.markExhausted(f.agentId, { resetsAt: '2026-10-11T06:00:00.000Z' });
+    const { api } = apiWithAdapter(adapter, { ledger });
+    const running = makeTask(f, { id: 'task_running' });
+    const parked = makeTask(f, { id: 'task_parked', parallelizable: true });
+
+    await startTask(api, running.id);
+    const res = await startTask(api, parked.id);
+
+    expect(res.ok).toBe(true);
+    expect(res.queued).toBe(true);
+    expect(res.waitReason).toBe('waiting: quota — resets at 2026-10-11T06:00:00.000Z');
+    expect(adapter.runs).toHaveLength(1);
+    expect(f.queue.isQueued(parked.id)).toBe(true);
+
+    const decisions = f.eventsOf(parked.id, 'RoutingDecision');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.payload['decision']).toBe('quota-blocked');
+    expect(decisions[0]!.payload['resumeAt']).toBe('2026-10-11T06:00:00.000Z');
+  });
+
+  it('a user parallel verb dispatches while the provider is busy', async () => {
+    const adapter = new BlockingAdapter();
+    const { api } = apiWithAdapter(adapter);
+    const running = makeTask(f, { id: 'task_running' });
+    const asked = makeTask(f, { id: 'task_asked' });
+
+    await startTask(api, running.id);
+    const res = await startTask(api, asked.id, { parallel: true });
+
+    expect(res.ok).toBe(true);
+    expect(adapter.runs).toHaveLength(2);
+    expect(f.eventsOf(asked.id, 'TaskQueued')[0]!.payload['userRequestedParallel']).toBe(true);
+    expect(f.eventsOf(asked.id, 'RoutingDecision')[0]!.payload['decision']).toBe('parallel-ok');
+  });
+
+  it('journals a wait verdict once — repeated pumps do not re-journal', async () => {
+    const adapter = new BlockingAdapter();
+    const { api } = apiWithAdapter(adapter);
+    const running = makeTask(f, { id: 'task_running' });
+    const serial = makeTask(f, { id: 'task_serial' });
+    const serial2 = makeTask(f, { id: 'task_serial2' });
+
+    await startTask(api, running.id);
+    await startTask(api, serial.id);
+    await startTask(api, serial2.id); // a second pump ticks over the lane
+
+    expect(f.eventsOf(serial.id, 'RoutingDecision')).toHaveLength(1);
+    expect(f.eventsOf(serial2.id, 'RoutingDecision')).toHaveLength(0); // never pumped — behind head
+    expect(f.queue.snapshot().map((e) => e.waitReason)).toEqual([
+      'waiting: session busy',
+      'waiting: session busy',
+    ]);
   });
 });

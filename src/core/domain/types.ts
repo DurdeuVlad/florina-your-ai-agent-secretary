@@ -109,6 +109,13 @@ export interface Task {
    * on the `TaskQueued` event — never inferred after the fact.
    */
   readonly priority?: AttentionPriority;
+  /**
+   * Declared parallelism consent (issue #344): the task's owner marked
+   * it safe to run alongside another session on the same provider when
+   * quota headroom exists. Absent → serial-per-provider (default).
+   * Journaled on `TaskQueued` — never inferred.
+   */
+  readonly parallelizable?: boolean;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
 }
@@ -262,7 +269,8 @@ export type SupervisorEventKind =
   | 'SessionReused'
   | 'ContextMaintained'
   | 'TaskQueued'
-  | 'TaskDequeued';
+  | 'TaskDequeued'
+  | 'RoutingDecision';
 
 /* ------------------------------------------------------------------ *
  * 7. AttentionItem

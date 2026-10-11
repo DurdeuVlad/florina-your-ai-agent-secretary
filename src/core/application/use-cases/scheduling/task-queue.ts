@@ -55,6 +55,10 @@ export interface QueuedDispatchSpec {
   readonly executionBrief?: ExecutionBrief;
   /** Caller-declared adapter tier, when supplied. */
   readonly adapterFidelityTier?: string;
+  /** Task-declared parallel consent (issue #344) — journaled, never inferred. */
+  readonly parallelizable?: boolean;
+  /** Per-submission user parallel request (issue #344) — journaled. */
+  readonly userRequestedParallel?: boolean;
 }
 
 /** A durable queue entry — journaled identity plus derived bookkeeping. */
@@ -72,6 +76,20 @@ export interface QueuedTask {
   readonly agentTier: SupervisorEvent['adapterFidelityTier'];
   /** Most recent dispatch failure — in-memory only, never journaled. */
   readonly lastError?: string;
+  /**
+   * Policy-parked state (issue #344): the scheduler's last `wait`
+   * verdict for this entry — in-memory only; the `RoutingDecision`
+   * event is the journaled record.
+   */
+  readonly wait?: QueuedWait;
+}
+
+/** Why the scheduler is holding an entry — in-memory projection of `RoutingDecision`. */
+export interface QueuedWait {
+  readonly decision: 'session-busy' | 'quota-blocked';
+  readonly detail: string;
+  /** Earliest known capacity reset — `quota-blocked` only, when known. */
+  readonly resumeAt?: string;
 }
 
 /** What a snapshot row reports for a queued task. */
@@ -91,11 +109,13 @@ export interface TaskQueueOptions {
    */
   readonly publish?: (event: SupervisorEvent) => void;
   /**
-   * Whether a lane currently holds an active session. Supplied by the
-   * composition root (SessionManager's live map); absent → lanes are
-   * never busy.
+   * Whether the entry's provider currently holds an active session —
+   * serial-per-provider is the default stance (issue #344), so a
+   * running codex session blocks queued codex heads across projects.
+   * Supplied by the composition root (SessionManager's live map);
+   * absent → providers are never busy.
    */
-  readonly isLaneBusy?: (queueKey: string) => boolean;
+  readonly isProviderBusy?: (agentId: string) => boolean;
   /** Idle time after which a queued task dequeues as `expired` (default 30 min). */
   readonly queuedTtlMs?: number;
   /** Injectable clock — deterministic expiry/ordering tests. */
@@ -118,7 +138,7 @@ const PRIORITY_RANK: Readonly<Record<string, number>> = {
 export class TaskQueue {
   private readonly journal: EventJournalPort;
   private readonly publish?: (event: SupervisorEvent) => void;
-  private readonly isLaneBusy?: (queueKey: string) => boolean;
+  private readonly isProviderBusy?: (agentId: string) => boolean;
   private readonly queuedTtlMs: number;
   private readonly now: () => number;
   private readonly entries = new Map<string, QueuedTask>();
@@ -126,7 +146,7 @@ export class TaskQueue {
   constructor(options: TaskQueueOptions) {
     this.journal = options.journal;
     this.publish = options.publish;
-    this.isLaneBusy = options.isLaneBusy;
+    this.isProviderBusy = options.isProviderBusy;
     this.queuedTtlMs = options.queuedTtlMs ?? DEFAULT_QUEUE_TTL_MS;
     this.now = options.now ?? (() => Date.now());
   }
@@ -186,6 +206,12 @@ export class TaskQueue {
       ...(input.spec.mcpServers !== undefined ? { mcpServers: input.spec.mcpServers } : {}),
       ...(input.spec.executionBrief !== undefined
         ? { executionBrief: input.spec.executionBrief }
+        : {}),
+      ...(input.spec.parallelizable !== undefined
+        ? { parallelizable: input.spec.parallelizable }
+        : {}),
+      ...(input.spec.userRequestedParallel !== undefined
+        ? { userRequestedParallel: input.spec.userRequestedParallel }
         : {}),
     };
     this.journalEvent(event);
@@ -266,25 +292,56 @@ export class TaskQueue {
       lanes.set(entry.queueKey, list);
     }
     const out: QueueSnapshotEntry[] = [];
-    for (const [key, lane] of lanes) {
+    for (const lane of lanes.values()) {
       lane.sort(compareQueueOrder);
-      const busy = this.isLaneBusy?.(key) === true;
       lane.forEach((entry, i) => {
         out.push({
           ...entry,
           position: i + 1,
-          waitReason: waitReasonFor(entry, busy, i),
+          waitReason: waitReasonFor(entry, this.providerBusy(entry.agentId), i),
         });
       });
     }
     return out.sort(compareQueueOrder);
   }
 
+  /**
+   * Whether the entry's provider holds an active session — the pump
+   * consults the same fact the snapshot reports, through the queue so
+   * both read one source.
+   */
+  providerBusy(agentId: string): boolean {
+    return this.isProviderBusy?.(agentId) === true;
+  }
+
+  /**
+   * Record the scheduler's `wait` verdict on an entry (issue #344) —
+   * in-memory only; the journaled record is the `RoutingDecision`
+   * event the caller published. Replaces any prior wait/failure mark.
+   */
+  recordWait(taskId: string, wait: QueuedWait): void {
+    const entry = this.entries.get(taskId);
+    if (entry !== undefined) {
+      const { lastError: _, ...rest } = entry;
+      this.entries.set(taskId, { ...rest, wait });
+    }
+  }
+
+  /** Clear a wait mark — the scheduler moved the entry forward. */
+  clearWait(taskId: string): void {
+    const entry = this.entries.get(taskId);
+    if (entry !== undefined && entry.wait !== undefined) {
+      const { wait: _, ...rest } = entry;
+      this.entries.set(taskId, rest);
+    }
+  }
+
   /** Record a failed dispatch attempt — the error tail becomes the wait reason. */
   recordDispatchFailure(taskId: string, error: string): void {
     const entry = this.entries.get(taskId);
     if (entry !== undefined) {
-      this.entries.set(taskId, { ...entry, lastError: error });
+      const { wait: _, ...rest } = entry;
+      this.entries.set(taskId, { ...rest, lastError: error });
     }
   }
 
@@ -367,6 +424,8 @@ export class TaskQueue {
           ...(typeof p['executionBrief'] === 'object' && p['executionBrief'] !== null
             ? { executionBrief: p['executionBrief'] as ExecutionBrief }
             : {}),
+          ...(p['parallelizable'] === true ? { parallelizable: true } : {}),
+          ...(p['userRequestedParallel'] === true ? { userRequestedParallel: true } : {}),
         },
       });
     }
@@ -420,7 +479,12 @@ function compareQueueOrder(a: QueuedTask, b: QueuedTask): number {
 
 /** The computed wait reason — a derived fact, never stored state. */
 function waitReasonFor(entry: QueuedTask, laneBusy: boolean, laneIndex: number): string {
-  if (laneBusy) {
+  if (entry.wait?.decision === 'quota-blocked') {
+    return entry.wait.resumeAt !== undefined
+      ? `waiting: quota — resets at ${entry.wait.resumeAt}`
+      : 'waiting: quota';
+  }
+  if (laneBusy || entry.wait?.decision === 'session-busy') {
     return 'waiting: session busy';
   }
   if (entry.lastError !== undefined) {

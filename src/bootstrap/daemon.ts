@@ -66,7 +66,7 @@ import { ControlPlaneApi } from '../core/application/use-cases/control-plane/con
 import { CommandApi } from '../core/application/use-cases/tasks/command-api.js';
 import { TaskStateMachine } from '../core/application/use-cases/tasks/task-lifecycle.js';
 import { SessionManager } from '../core/application/use-cases/tasks/session-manager.js';
-import { TaskQueue, queueKeyOf } from '../core/application/use-cases/scheduling/task-queue.js';
+import { TaskQueue } from '../core/application/use-cases/scheduling/task-queue.js';
 import { MetricsCollector } from '../core/application/use-cases/metrics.js';
 import {
   AttentionInbox,
@@ -826,13 +826,13 @@ export class FlorinaDaemon extends EventEmitter {
         publish: (event) => {
           this.bus?.publish(event);
         },
-        isLaneBusy: (key) => {
+        isProviderBusy: (agentId) => {
           const manager = this.sessionManager;
           if (manager === null) {
             return false;
           }
           for (const session of manager.getActiveSessions().values()) {
-            if (queueKeyOf(session.agentId, session.projectId) === key) {
+            if (session.agentId === agentId) {
               return true;
             }
           }

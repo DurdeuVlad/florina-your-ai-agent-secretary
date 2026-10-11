@@ -36,6 +36,7 @@ import {
   type ContextMaintainedEvent,
   type TaskQueuedEvent,
   type TaskDequeuedEvent,
+  type RoutingDecisionEvent,
 } from '../src/domain/events.js';
 
 /** Common envelope shared by every test event. */
@@ -289,12 +290,21 @@ const validExamples: SupervisorEvent[] = [
     queueKey: 'codex::proj-1',
     reason: 'scheduled',
   } satisfies TaskDequeuedEvent,
+  {
+    ...base,
+    type: 'RoutingDecision',
+    queueKey: 'codex::proj-1',
+    decision: 'quota-blocked',
+    reason: 'parallel consented but provider quota exhausted',
+    resumeAt: '2026-10-11T06:00:00.000Z',
+    parallelRequested: true,
+  } satisfies RoutingDecisionEvent,
 ];
 
 describe('SupervisorEvent schema', () => {
   describe('SUPERVISOR_EVENT_TYPES', () => {
-    it('lists exactly the 30 canonical variants', () => {
-      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(30);
+    it('lists exactly the 31 canonical variants', () => {
+      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(31);
       expect(SUPERVISOR_EVENT_TYPES).toEqual([
         'AgentStarted',
         'AgentProgress',
@@ -326,6 +336,7 @@ describe('SupervisorEvent schema', () => {
         'ContextMaintained',
         'TaskQueued',
         'TaskDequeued',
+        'RoutingDecision',
       ]);
     });
   });
