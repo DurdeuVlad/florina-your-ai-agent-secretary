@@ -31,6 +31,9 @@ import {
   type ContextCondensedEvent,
   type ContextHealthChangedEvent,
   type VerificationObservedEvent,
+  type SessionPooledEvent,
+  type SessionReusedEvent,
+  type ContextMaintainedEvent,
 } from '../src/domain/events.js';
 
 /** Common envelope shared by every test event. */
@@ -248,12 +251,33 @@ const validExamples: SupervisorEvent[] = [
     summary: '1623 passed, 0 failed',
     evidence: { exitCode: 0 },
   } satisfies VerificationObservedEvent,
+  {
+    ...base,
+    type: 'SessionPooled',
+    poolKey: 'codex::proj-1',
+  } satisfies SessionPooledEvent,
+  {
+    ...base,
+    type: 'SessionReused',
+    previousTaskId: 'task-41',
+    previousSessionId: 'sess-6',
+    poolKey: 'codex::proj-1',
+    mode: 'compacted',
+  } satisfies SessionReusedEvent,
+  {
+    ...base,
+    type: 'ContextMaintained',
+    mode: 'restarted-with-carryover',
+    poolKey: 'codex::proj-1',
+    previousTaskId: 'task-41',
+    detail: 'provider resumed with carry-over digest',
+  } satisfies ContextMaintainedEvent,
 ];
 
 describe('SupervisorEvent schema', () => {
   describe('SUPERVISOR_EVENT_TYPES', () => {
-    it('lists exactly the 25 canonical variants', () => {
-      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(25);
+    it('lists exactly the 28 canonical variants', () => {
+      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(28);
       expect(SUPERVISOR_EVENT_TYPES).toEqual([
         'AgentStarted',
         'AgentProgress',
@@ -280,6 +304,9 @@ describe('SupervisorEvent schema', () => {
         'ContextCondensed',
         'ContextHealthChanged',
         'VerificationObserved',
+        'SessionPooled',
+        'SessionReused',
+        'ContextMaintained',
       ]);
     });
   });

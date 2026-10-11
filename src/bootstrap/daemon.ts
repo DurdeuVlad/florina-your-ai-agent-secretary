@@ -795,6 +795,21 @@ export class FlorinaDaemon extends EventEmitter {
             return undefined;
           }
         },
+        // Session pool (issue #342): sessions that end with
+        // AgentCompleted stay live in a per-provider+project reuse cache;
+        // the next same-key task attaches with context maintenance rather
+        // than spawning fresh. The carry-over digest is the Task Capsule's
+        // rolled summaries — resolved at attach so the freshest rollup wins.
+        sessionPool: {
+          carryoverResolver: async (priorTaskId) => {
+            const capsule = repos.capsules.loadByScope('task', priorTaskId);
+            const summaries = capsule?.content.rolledUpEventSummaries ?? [];
+            if (summaries.length === 0) {
+              return `Continuing from prior task "${priorTaskId}" on this provider session.`;
+            }
+            return `Prior session digest (task "${priorTaskId}"):\n${summaries.join('\n')}`;
+          },
+        },
       });
 
       // Idea ledger + Brief pipeline (DEC-033, issue #69): ledgers live

@@ -226,13 +226,33 @@ export function buildDefaultStubEvents(ctx: {
       command: 'npm test',
       summary: 'stub verified',
     },
+    {
+      ...base,
+      type: 'SessionPooled',
+      poolKey: 'stub::proj-1',
+    },
+    {
+      ...base,
+      type: 'SessionReused',
+      previousTaskId: 'task-0',
+      previousSessionId: 'sess-0',
+      poolKey: 'stub::proj-1',
+      mode: 'compacted',
+    },
+    {
+      ...base,
+      type: 'ContextMaintained',
+      mode: 'compacted',
+      poolKey: 'stub::proj-1',
+      previousTaskId: 'task-0',
+    },
   ];
 }
 
 /**
  * A Tier E stub adapter for pipeline testing.
  *
- * Emits synthetic events across all 25 {@link SupervisorEvent} variants. The
+ * Emits synthetic events across all 28 {@link SupervisorEvent} variants. The
  * event sequence is configurable via {@link StubAdapterOptions.events}; by
  * default the stub emits one of each variant in canonical order.
  */
@@ -306,13 +326,23 @@ export class StubAdapter extends BaseAdapter {
     this.activeSession = null;
   }
 
-  /** Deliver a follow-up message — recorded for test inspection. */
+  /**
+   * Deliver a follow-up message — recorded for test inspection. When the
+   * event queue is drained (the session is idle between turns) this
+   * seeds a fresh scripted work sequence stamped with the *current*
+   * session envelope — after a compacted maintenance that envelope is
+   * the new task's, so a pooled reuse produces a full follow-up turn
+   * (issue #342).
+   */
   async sendMessage(sessionId: string, message: string): Promise<boolean> {
     this.requireConnected();
     if (this.activeSession?.sessionId !== sessionId) {
       return false;
     }
     this.sentMessages.push({ sessionId, message });
+    if (this.eventQueue.length === 0) {
+      this.eventQueue = this.buildEventQueue(this.activeSession);
+    }
     return true;
   }
 
@@ -325,20 +355,31 @@ export class StubAdapter extends BaseAdapter {
     return super.maintainContext(sessionId, request);
   }
 
-  /** Synthetic provider compaction — honored when `compact` is declared. */
-  protected override async performCompact(_sessionId: string): Promise<boolean> {
+  /**
+   * Synthetic provider compaction (issue #342): the provider session is
+   * "kept", so only the run envelope rebinds to the new task/run ids —
+   * follow-up work streams when the next delegation arrives via
+   * `sendMessage`. Honored when `compact` is declared.
+   */
+  protected override async performCompact(
+    _sessionId: string,
+    request: MaintainContextRequest,
+  ): Promise<boolean> {
+    this.activeSession = request.restartConfig;
     return true;
   }
 
   /**
-   * Synthetic provider-resume: swaps in the restart config and reports
-   * the new session id — honored when `resume` is declared.
+   * Synthetic provider-resume: swaps in the restart config, restages the
+   * scripted event queue for the new run, and reports the new session
+   * id — honored when `resume` is declared.
    */
   protected override async performResumeWithCarryover(
     _sessionId: string,
     request: MaintainContextRequest,
   ): Promise<string | null> {
     this.activeSession = request.restartConfig;
+    this.eventQueue = this.buildEventQueue(request.restartConfig);
     return request.restartConfig.sessionId;
   }
 
@@ -352,11 +393,24 @@ export class StubAdapter extends BaseAdapter {
 
   /**
    * Build the event queue for a run. Uses the configured event sequence when
-   * provided, otherwise the default 13-variant sequence.
+   * provided, otherwise the default 28-variant sequence. A scripted sequence
+   * is restamped onto the run's envelope — after a session-pool rebind the
+   * follow-up turn must carry the NEW task/run ids, not the stale scripted
+   * ones (issue #342).
    */
   private buildEventQueue(sessionConfig: SessionConfig): SupervisorEvent[] {
     if (this.options.events) {
-      return [...this.options.events];
+      const timestamp = new Date().toISOString();
+      return this.options.events.map(
+        (event) =>
+          ({
+            ...event,
+            timestamp,
+            taskId: sessionConfig.taskId,
+            sessionId: sessionConfig.sessionId,
+            agentId: sessionConfig.agentId,
+          }) as SupervisorEvent,
+      );
     }
     return buildDefaultStubEvents({
       taskId: sessionConfig.taskId,

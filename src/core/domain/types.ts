@@ -250,7 +250,10 @@ export type SupervisorEventKind =
   | 'TaskNudged'
   | 'ContextCondensed'
   | 'ContextHealthChanged'
-  | 'VerificationObserved';
+  | 'VerificationObserved'
+  | 'SessionPooled'
+  | 'SessionReused'
+  | 'ContextMaintained';
 
 /* ------------------------------------------------------------------ *
  * 7. AttentionItem

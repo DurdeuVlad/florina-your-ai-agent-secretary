@@ -160,7 +160,9 @@ describe('maintainContext — the same ladder every adapter inherits', () => {
       carryover: 'capsule digest',
       restartConfig: RESTART,
     });
-    expect(result).toEqual({ mode: 'compacted', sessionId: 'sess-1' });
+    // Provider continuity ≠ run identity (issue #342): the kept provider
+    // session serves the new task under the NEW run id.
+    expect(result).toEqual({ mode: 'compacted', sessionId: 'sess-2' });
     expect(stub.maintainCalls).toEqual([{ sessionId: 'sess-1', carryover: 'capsule digest' }]);
   });
 

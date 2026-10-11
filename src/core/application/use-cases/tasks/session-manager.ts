@@ -25,7 +25,7 @@
  */
 import type { AgentRuntimePort, SessionConfig } from '../../ports/outbound/agent-runtime.js';
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
-import type { SupervisorEvent } from '../../../domain/events.js';
+import type { SupervisorEvent, ContextMaintenanceMode } from '../../../domain/events.js';
 
 /**
  * Information tracked for each active agent session.
@@ -41,6 +41,57 @@ export interface SessionInfo {
   readonly adapter: AgentRuntimePort;
   /** Epoch-milliseconds timestamp when the session was started. */
   readonly startedAt: number;
+  /** Project context for pool keying (issue #342). */
+  readonly projectId?: string;
+  /** The task a pooled session previously served, when reused (#342). */
+  readonly reusedFromTaskId?: string;
+}
+
+/**
+ * A naturally-ended session kept live for reuse (issue #342). The pool
+ * is a reuse cache, not a leak: only sessions that ended with
+ * `AgentCompleted` are admitted, they are keyed by provider + project
+ * context, they idle-expire, and {@link SessionManager.stopAll} drains
+ * them. A pooled session serves exactly one task at a time — claiming
+ * it removes it from the pool.
+ */
+export interface PooledSession {
+  /** Provider+project context the session is reusable under. */
+  readonly poolKey: string;
+  /** The task that released this session. */
+  readonly taskId: string;
+  /** The run id the session carried while pooled. */
+  readonly sessionId: string;
+  /** The agent (adapter id) that owns the session. */
+  readonly agentId: string;
+  /** Project context the session is bound to. */
+  readonly projectId?: string;
+  /** The live adapter holding the session open. */
+  readonly adapter: AgentRuntimePort;
+  /** Epoch-milliseconds timestamp when the session was released. */
+  readonly releasedAt: number;
+}
+
+/**
+ * Session-pool behavior knobs (issue #342). Absent `sessionPool`
+ * entirely keeps the pre-#342 behavior: every session ends at task end.
+ */
+export interface SessionPoolOptions {
+  /**
+   * Composes the carry-over digest seeded into a reused session — the
+   * Task Capsule summaries for the pooled task in production. Called at
+   * attach time so the freshest rollup wins. Absent → a minimal honest
+   * digest naming the prior task.
+   */
+  readonly carryoverResolver?: (taskId: string) => Promise<string>;
+  /**
+   * How long an idle pooled session stays claimable (default 10 min).
+   * An expired entry is evicted — cancelled and disconnected — and the
+   * task spawns fresh. Degradation is graceful, not fatal.
+   */
+  readonly idleTtlMs?: number;
+  /** Clock for TTL checks — injectable for deterministic tests. */
+  readonly now?: () => number;
 }
 
 /** Result of a {@link SessionManager.startSession} call. */
@@ -105,6 +156,13 @@ export interface SessionManagerOptions {
    * Awaited; a hook failure is swallowed so it cannot swallow the event.
    */
   readonly beforePublish?: (event: SupervisorEvent) => void | Promise<void>;
+  /**
+   * Session-pool behavior (issue #342): sessions that end with
+   * `AgentCompleted` are released into a per-key reuse cache with
+   * `maintainContext` run at the next attach. Omit to disable pooling —
+   * every session is torn down at task end (pre-#342 behavior).
+   */
+  readonly sessionPool?: SessionPoolOptions;
 }
 
 /**
@@ -116,14 +174,18 @@ export class SessionManager {
   private readonly onSessionEnd?: (taskId: string, sessionId: string) => void | Promise<void>;
   private readonly secretEnvResolver?: SessionManagerOptions['secretEnvResolver'];
   private readonly beforePublish?: SessionManagerOptions['beforePublish'];
+  private readonly sessionPool?: SessionPoolOptions;
   /** Map of taskId → active session info (one session per task in MVP). */
   private readonly sessions = new Map<string, SessionInfo>();
+  /** Map of poolKey → idle pooled session (issue #342). */
+  private readonly pool = new Map<string, PooledSession>();
 
   constructor(bus: EventPublisherPort, options: SessionManagerOptions = {}) {
     this.bus = bus;
     this.onSessionEnd = options.onSessionEnd;
     this.secretEnvResolver = options.secretEnvResolver;
     this.beforePublish = options.beforePublish;
+    this.sessionPool = options.sessionPool;
   }
 
   /**
@@ -147,6 +209,17 @@ export class SessionManager {
       return { ok: false, error: `Task "${taskId}" already has an active session` };
     }
 
+    const config = await this.withSecretEnv(taskId, sessionConfig);
+
+    // Session pool attach (issue #342): a same-provider+project session
+    // that completed its prior task is reused with between-task context
+    // maintenance instead of spawning a fresh run. Reuse failures degrade
+    // to the normal spawn path — never fake continuity.
+    const reused = await this.tryAttachPooled(taskId, agentId, config);
+    if (reused !== null) {
+      return reused;
+    }
+
     try {
       await adapter.connect();
     } catch (err) {
@@ -155,7 +228,6 @@ export class SessionManager {
 
     let sessionId: string;
     try {
-      const config = await this.withSecretEnv(taskId, sessionConfig);
       const result = await adapter.startRun(taskId, config);
       if (!result.started) {
         await safeDisconnect(adapter);
@@ -173,6 +245,7 @@ export class SessionManager {
       sessionId,
       adapter,
       startedAt: Date.now(),
+      ...(config.projectId !== undefined ? { projectId: config.projectId } : {}),
     };
     this.sessions.set(taskId, info);
 
@@ -240,6 +313,13 @@ export class SessionManager {
     for (const taskId of taskIds) {
       await this.stopSession(taskId);
     }
+    // Drain the pool (issue #342): pooled sessions hold live provider
+    // resources — shutdown must end them, not orphan them.
+    const entries = [...this.pool.values()];
+    this.pool.clear();
+    for (const entry of entries) {
+      await evictPoolEntry(entry);
+    }
   }
 
   /* ---------------------------------------------------------------- *
@@ -294,6 +374,8 @@ export class SessionManager {
    */
   private pipeEvents(info: SessionInfo): void {
     void (async () => {
+      let lastEventType: string | null = null;
+      let streamErrored = false;
       try {
         for await (const event of info.adapter.streamEvents()) {
           // Only publish if this session is still tracked. If the session
@@ -310,10 +392,13 @@ export class SessionManager {
             }
           }
           this.bus.publish(event);
+          lastEventType = event.type;
         }
       } catch {
         // The adapter stream errored or was interrupted. Fall through to
-        // the auto-cleanup below so the session is not leaked.
+        // the auto-cleanup below so the session is not leaked — and is
+        // never pooled on a broken stream (issue #342).
+        streamErrored = true;
       }
       // Auto-cleanup: if the session is still tracked (i.e. the stream
       // ended naturally rather than via stopSession), remove it and
@@ -322,7 +407,15 @@ export class SessionManager {
       // removed, and safeDisconnect swallows errors).
       if (this.sessions.has(info.taskId)) {
         this.sessions.delete(info.taskId);
-        await safeDisconnect(info.adapter);
+        // Session pool (issue #342): a clean `AgentCompleted` end releases
+        // the session live into the pool instead of disconnecting — a
+        // reuse cache, not a leak. Stops, failures, and broken streams
+        // still disconnect: dead sessions are never pooled.
+        const pooled =
+          !streamErrored && lastEventType === 'AgentCompleted' && this.releaseToPool(info);
+        if (!pooled) {
+          await safeDisconnect(info.adapter);
+        }
         if (this.onSessionEnd !== undefined) {
           try {
             await this.onSessionEnd(info.taskId, info.sessionId);
@@ -332,6 +425,217 @@ export class SessionManager {
         }
       }
     })();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Session pool (issue #342)
+   * ---------------------------------------------------------------- */
+
+  /**
+   * Release a cleanly-ended session into the pool — journaled as
+   * `SessionPooled`. Returns `false` (caller disconnects) when pooling
+   * is disabled, the adapter cannot maintain context at all, or the key
+   * is already held by a live entry (the pool caches one session per
+   * provider+project context — a second release is torn down instead).
+   */
+  private releaseToPool(info: SessionInfo): boolean {
+    if (this.sessionPool === undefined) {
+      return false;
+    }
+    const { capabilities, maintainContext } = info.adapter;
+    if (typeof maintainContext !== 'function' || (!capabilities.compact && !capabilities.resume)) {
+      return false;
+    }
+    const key = poolKeyOf(info.agentId, info.projectId);
+    const existing = this.pool.get(key);
+    if (existing !== undefined && !this.isPoolEntryExpired(existing)) {
+      return false;
+    }
+    if (existing !== undefined) {
+      this.pool.delete(key);
+      void evictPoolEntry(existing);
+    }
+    this.pool.set(key, {
+      poolKey: key,
+      taskId: info.taskId,
+      sessionId: info.sessionId,
+      agentId: info.agentId,
+      ...(info.projectId !== undefined ? { projectId: info.projectId } : {}),
+      adapter: info.adapter,
+      releasedAt: this.poolNow(),
+    });
+    this.publishPoolEvent({
+      type: 'SessionPooled',
+      taskId: info.taskId,
+      sessionId: info.sessionId,
+      agentId: info.agentId,
+      adapterFidelityTier: info.adapter.fidelityTier,
+      poolKey: key,
+    });
+    return true;
+  }
+
+  /**
+   * Attach the task to a pooled session for the same provider+project
+   * key, running between-task context maintenance first (issue #342).
+   * Returns the start result on a successful bind, or `null` when no
+   * usable entry exists / maintenance could not preserve the session —
+   * in which case the entry is evicted and the caller spawns fresh.
+   * Maintenance outcomes are journaled: `ContextMaintained` always, plus
+   * `SessionReused` when the session actually binds.
+   */
+  private async tryAttachPooled(
+    taskId: string,
+    agentId: string,
+    config: SessionConfig,
+  ): Promise<StartSessionResult | null> {
+    if (this.sessionPool === undefined) {
+      return null;
+    }
+    const key = poolKeyOf(agentId, config.projectId);
+    const entry = this.pool.get(key);
+    if (entry === undefined) {
+      return null;
+    }
+    // Claim it: a pooled session serves one task at a time (issue #342).
+    this.pool.delete(key);
+    if (this.isPoolEntryExpired(entry) || entry.adapter.maintainContext === undefined) {
+      await evictPoolEntry(entry);
+      return null;
+    }
+
+    const envelope = {
+      taskId,
+      sessionId: config.sessionId,
+      agentId,
+      adapterFidelityTier: entry.adapter.fidelityTier,
+    };
+    const maintainBase = {
+      poolKey: key,
+      previousTaskId: entry.taskId,
+    };
+    let mode: ContextMaintenanceMode = 'unsupported';
+    let boundSessionId: string | undefined;
+    let detail: string | undefined;
+    try {
+      const carryover = await this.resolveCarryover(entry.taskId);
+      const result = await entry.adapter.maintainContext(entry.sessionId, {
+        carryover,
+        restartConfig: config,
+      });
+      mode = result.mode;
+      boundSessionId = result.sessionId;
+      detail = result.detail;
+    } catch (err) {
+      detail = `maintainContext threw: ${errorMessage(err)}`;
+    }
+
+    this.publishPoolEvent({
+      type: 'ContextMaintained',
+      ...envelope,
+      ...maintainBase,
+      mode,
+      ...(detail !== undefined ? { detail } : {}),
+    });
+
+    const needsMessage = mode === 'compacted';
+    const reusable =
+      (mode === 'compacted' || mode === 'restarted-with-carryover') &&
+      boundSessionId !== undefined &&
+      (!needsMessage ||
+        (entry.adapter.capabilities.sendMessage &&
+          typeof entry.adapter.sendMessage === 'function'));
+    if (!reusable || boundSessionId === undefined) {
+      // The old provider session is still live — kill it honestly rather
+      // than leak it, then spawn fresh on the caller's adapter.
+      await evictPoolEntry(entry);
+      return null;
+    }
+    const bound = boundSessionId;
+
+    const info: SessionInfo = {
+      taskId,
+      agentId,
+      sessionId: bound,
+      adapter: entry.adapter,
+      startedAt: Date.now(),
+      ...(config.projectId !== undefined ? { projectId: config.projectId } : {}),
+      reusedFromTaskId: entry.taskId,
+    };
+    this.sessions.set(taskId, info);
+
+    // A compacted session keeps its provider thread but has no work queued —
+    // the new task's delegation is delivered as a follow-up message. A
+    // restarted run already carries it inside restartConfig.
+    if (needsMessage) {
+      const sent = await entry.adapter.sendMessage!(bound, config.objective);
+      // sendMessage existence is proven by `reusable` above.
+      if (!sent) {
+        this.sessions.delete(taskId);
+        await evictPoolEntry(entry);
+        return null;
+      }
+    }
+
+    this.publishPoolEvent({
+      type: 'SessionReused',
+      ...envelope,
+      sessionId: bound,
+      ...maintainBase,
+      previousSessionId: entry.sessionId,
+      mode,
+    });
+    this.pipeEvents(info);
+    return { ok: true, sessionId: bound };
+  }
+
+  /** Idle TTL check — injectable clock for deterministic tests. */
+  private isPoolEntryExpired(entry: PooledSession): boolean {
+    const ttl = this.sessionPool?.idleTtlMs ?? DEFAULT_POOL_IDLE_TTL_MS;
+    return this.poolNow() - entry.releasedAt > ttl;
+  }
+
+  private poolNow(): number {
+    return this.sessionPool?.now?.() ?? Date.now();
+  }
+
+  /**
+   * The carry-over digest for a reused session — the Task Capsule
+   * summaries in production, composed by the composition root. A missing
+   * resolver still yields an honest minimal digest naming the prior task.
+   */
+  private async resolveCarryover(previousTaskId: string): Promise<string> {
+    const resolver = this.sessionPool?.carryoverResolver;
+    if (resolver === undefined) {
+      return `Continuing from prior task "${previousTaskId}" on this provider session.`;
+    }
+    try {
+      const digest = await resolver(previousTaskId);
+      if (digest.length > 0) {
+        return digest;
+      }
+    } catch {
+      /* a resolver hiccup must not block reuse — fall back to the minimal digest */
+    }
+    return `Continuing from prior task "${previousTaskId}" on this provider session.`;
+  }
+
+  /**
+   * Publish a pool lifecycle event onto the bus — the journal writer
+   * records it like every supervisor event (DEC-012). Publication is
+   * best-effort: a bus error must not break session scheduling.
+   */
+  private publishPoolEvent(event: WithoutTimestamp<SupervisorEvent>): void {
+    try {
+      this.bus.publish({ ...event, timestamp: new Date().toISOString() } as SupervisorEvent);
+    } catch {
+      /* the journal is the record; a bus hiccup must not break pooling */
+    }
+  }
+
+  /** Idle pooled sessions — surfaced for tests and pool visibility. */
+  get pooledCount(): number {
+    return this.pool.size;
   }
 }
 
@@ -345,6 +649,34 @@ async function safeDisconnect(adapter: AgentRuntimePort): Promise<void> {
   } catch {
     /* ignore — best-effort teardown */
   }
+}
+
+/** Idle pooled-session claim window (issue #342). */
+const DEFAULT_POOL_IDLE_TTL_MS = 10 * 60 * 1000;
+
+/** Distributive `Omit` — strips `timestamp` from each union variant. */
+type WithoutTimestamp<T> = T extends object ? Omit<T, 'timestamp'> : never;
+
+/**
+ * The provider+project context a session is reusable under (issue #342):
+ * a session never bleeds across providers or projects.
+ */
+function poolKeyOf(agentId: string, projectId?: string): string {
+  return `${agentId}::${projectId ?? ''}`;
+}
+
+/**
+ * End a pooled session honestly: cancel the live run (it may still be
+ * registered provider-side) then disconnect the adapter — best-effort,
+ * since a dead transport must not break eviction (issue #342).
+ */
+async function evictPoolEntry(entry: PooledSession): Promise<void> {
+  try {
+    await entry.adapter.cancel(entry.sessionId);
+  } catch {
+    /* best-effort — the session may already be gone */
+  }
+  await safeDisconnect(entry.adapter);
 }
 
 /** Extract a human-readable message from an unknown error. */
