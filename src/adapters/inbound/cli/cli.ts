@@ -74,7 +74,7 @@ import type {
 } from '../../../core/application/use-cases/attention/attention-item.js';
 
 /** CLI version (mirrors package.json version — pinned by cli.test.ts). */
-export const VERSION = '0.4.0';
+export const VERSION = '0.4.1';
 
 /* ================================================================== *
  * Argument parsing (minimal, no external deps)
