@@ -318,6 +318,92 @@ describe('AcpAdapter', () => {
     });
   });
 
+  it('grants the narrowest allow option when the run declares autonomyLevel auto', async () => {
+    const { adapter, proc } = makeAdapter();
+    await adapter.connect();
+    const events = collect(adapter);
+    await adapter.startRun('task-1', { ...config, autonomyLevel: 'auto' });
+
+    proc.feed({
+      jsonrpc: '2.0',
+      id: 902,
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'acp-s1',
+        toolCall: { toolCallId: 'tc10', title: 'git commit -m x', kind: 'execute' },
+        options: [
+          { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
+          { optionId: 'allow-always', kind: 'allow_always', name: 'Allow always' },
+          { optionId: 'allow-once', kind: 'allow_once', name: 'Allow once' },
+        ],
+      },
+    });
+    proc.feed({ jsonrpc: '2.0', id: proc.lastRequest().id, result: { stopReason: 'end_turn' } });
+    await events;
+    await new Promise((r) => setImmediate(r));
+    const responses = proc.responsesFor(902);
+    // allow_once wins over allow_always — narrowest grant first.
+    expect(responses[0]).toMatchObject({
+      result: { outcome: { outcome: 'selected', optionId: 'allow-once' } },
+    });
+  });
+
+  it('autonomyLevel auto cannot override a wired responder denial', async () => {
+    const proc = new FakeAcpProcess({
+      initialize: { protocolVersion: 1 },
+      'session/new': { sessionId: 'acp-s1' },
+    });
+    const adapter = new AcpAdapter(null, {
+      id: 'devin',
+      command: 'devin',
+      args: ['acp'],
+      spawner: () => proc,
+      permissionResponder: async () => null, // explicit deny
+    });
+    await adapter.connect();
+    const events = collect(adapter);
+    await adapter.startRun('task-1', { ...config, autonomyLevel: 'auto' });
+
+    proc.feed({
+      jsonrpc: '2.0',
+      id: 903,
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'acp-s1',
+        toolCall: { kind: 'execute' },
+        options: [{ optionId: 'allow-once', kind: 'allow_once' }],
+      },
+    });
+    proc.feed({ jsonrpc: '2.0', id: proc.lastRequest().id, result: { stopReason: 'end_turn' } });
+    await events;
+    await new Promise((r) => setImmediate(r));
+    const responses = proc.responsesFor(903);
+    expect(responses[0]).toMatchObject({ result: { outcome: { outcome: 'cancelled' } } });
+  });
+
+  it('autonomyLevel auto still cancels when no allow option exists', async () => {
+    const { adapter, proc } = makeAdapter();
+    await adapter.connect();
+    const events = collect(adapter);
+    await adapter.startRun('task-1', { ...config, autonomyLevel: 'auto' });
+
+    proc.feed({
+      jsonrpc: '2.0',
+      id: 904,
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'acp-s1',
+        toolCall: { kind: 'execute' },
+        options: [{ optionId: 'deny', kind: 'reject_once', name: 'Deny' }],
+      },
+    });
+    proc.feed({ jsonrpc: '2.0', id: proc.lastRequest().id, result: { stopReason: 'end_turn' } });
+    await events;
+    await new Promise((r) => setImmediate(r));
+    const responses = proc.responsesFor(904);
+    expect(responses[0]).toMatchObject({ result: { outcome: { outcome: 'cancelled' } } });
+  });
+
   it('answers fs/terminal agent requests with method-not-implemented', async () => {
     const { adapter, proc } = makeAdapter();
     await adapter.connect();

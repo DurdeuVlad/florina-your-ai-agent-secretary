@@ -39,7 +39,14 @@ export interface SessionConfig {
   readonly objective: string;
   /** Optional model identifier the agent should use. */
   readonly model?: string;
-  /** Optional autonomy/approval policy in effect. */
+  /**
+   * Optional autonomy/approval policy in effect — journaled on
+   * `AgentStarted` so the declaration is auditable per run. Adapters
+   * interpret known values: ACP adapters treat `'auto'` as "answer
+   * `session/request_permission` with the narrowest allow option when
+   * no permissionResponder is wired" (an explicit responder denial
+   * always wins). Absent/unknown values keep the attended default.
+   */
   readonly autonomyLevel?: string;
   /**
    * MCP servers the agent session should register at launch (DEC-018,
