@@ -74,6 +74,13 @@ interface PendingNudge {
   readonly budget: number;
   readonly prompt: string;
   readonly verifyCommands: readonly string[];
+  /**
+   * Dispatch policy carried forward from the failed run's own journaled
+   * `AgentStarted` — a corrective attempt must not silently downgrade the
+   * model or drop a declared autonomy grant the original dispatch had.
+   */
+  readonly autonomyLevel?: string;
+  readonly model?: string;
 }
 
 export class NudgeLoop {
@@ -150,6 +157,13 @@ export class NudgeLoop {
       });
 
       if (priorNudges < budget) {
+        // The failed run's own dispatch record is the honest source for
+        // what a corrective attempt should carry — the latest AgentStarted
+        // for this session declared the model and autonomy policy.
+        const priorStart = this.journal
+          .listByTask(taskId)
+          .filter((e) => e.kind === 'AgentStarted' && e.sessionId === sessionId)
+          .at(-1);
         this.pending.set(taskId, {
           sessionId,
           agentId,
@@ -162,6 +176,12 @@ export class NudgeLoop {
             outcome,
           }),
           verifyCommands: outcome.declaredChecks,
+          ...(typeof priorStart?.payload['autonomyLevel'] === 'string'
+            ? { autonomyLevel: priorStart.payload['autonomyLevel'] }
+            : {}),
+          ...(typeof priorStart?.payload['model'] === 'string'
+            ? { model: priorStart.payload['model'] }
+            : {}),
         });
         return 'nudge-pending';
       }
@@ -251,6 +271,10 @@ export class NudgeLoop {
           prompt: nudge.prompt,
           verifyCommands: nudge.verifyCommands,
           verifyBudget: nudge.budget,
+          ...(nudge.autonomyLevel !== undefined
+            ? { autonomyLevel: nudge.autonomyLevel }
+            : {}),
+          ...(nudge.model !== undefined ? { model: nudge.model } : {}),
         },
       });
     } catch (err) {

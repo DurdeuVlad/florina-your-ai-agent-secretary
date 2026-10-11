@@ -348,6 +348,48 @@ describe('NudgeLoop', () => {
     expect(f.executor.commands.length).toBe(0);
   });
 
+  it('a corrective dispatch carries the failed run’s model + autonomyLevel forward', async () => {
+    // The failed run's own journaled AgentStarted is the authority —
+    // a nudge must not silently downgrade the model or drop a declared
+    // autonomy grant (issue #78 path: delegate-task → nudge).
+    f.events.insert({
+      id: `event_dispatch_auto_${Date.now().toString(36)}`,
+      sessionId: f.sessionId,
+      taskId: f.taskId,
+      timestamp: new Date().toISOString(),
+      kind: 'AgentStarted',
+      payload: {
+        verifyCommands: ['npm test'],
+        verifyBudget: 2,
+        autonomyLevel: 'auto',
+        model: 'swe-2-high',
+      },
+    });
+    const loop = f.makeLoop();
+    expect(loop.onVerifyFailed(f.taskId, f.sessionId, f.agentId, failedOutcome())).toBe(
+      'nudge-pending',
+    );
+    await loop.dispatchPending(f.taskId);
+    const cmd = f.executor.commands.at(-1);
+    expect(cmd?.kind).toBe('start-task');
+    if (cmd?.kind === 'start-task') {
+      expect(cmd.sessionConfig.autonomyLevel).toBe('auto');
+      expect(cmd.sessionConfig.model).toBe('swe-2-high');
+    }
+  });
+
+  it('a corrective dispatch omits fields the failed run never declared', async () => {
+    // No AgentStarted on record → the re-dispatch carries no phantom policy.
+    const loop = f.makeLoop();
+    loop.onVerifyFailed(f.taskId, f.sessionId, f.agentId, failedOutcome());
+    await loop.dispatchPending(f.taskId);
+    const cmd = f.executor.commands.at(-1);
+    if (cmd?.kind === 'start-task') {
+      expect(cmd.sessionConfig.autonomyLevel).toBeUndefined();
+      expect(cmd.sessionConfig.model).toBeUndefined();
+    }
+  });
+
   it('a delegated task is re-dispatched — delegate-task leaves tasks delegated, not running', async () => {
     // Delegated tasks sit in `delegated` for the whole run; a pending nudge
     // must still dispatch (startable state), without the running->blocked

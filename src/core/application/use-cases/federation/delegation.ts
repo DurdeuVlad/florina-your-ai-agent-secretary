@@ -59,6 +59,11 @@ export interface DelegateTaskInput {
   readonly verifyCommands?: readonly string[];
   /** Corrective re-dispatch budget for verify-failed runs (issue #340). */
   readonly verifyBudget?: number;
+  /**
+   * Autonomy/approval policy for the spawned run (e.g. 'auto' grants
+   * in-session permission prompts) — journaled on AgentStarted.
+   */
+  readonly autonomyLevel?: string;
 }
 
 /** Raised when a delegation cannot be accepted. */
@@ -111,6 +116,7 @@ export class DelegationService {
       ...(input.excludeProviders !== undefined ? { excludeProviders: input.excludeProviders } : {}),
       ...(input.verifyCommands !== undefined ? { verifyCommands: input.verifyCommands } : {}),
       ...(input.verifyBudget !== undefined ? { verifyBudget: input.verifyBudget } : {}),
+      ...(input.autonomyLevel !== undefined ? { autonomyLevel: input.autonomyLevel } : {}),
     });
   }
 }
