@@ -66,6 +66,7 @@ import { ControlPlaneApi } from '../core/application/use-cases/control-plane/con
 import { CommandApi } from '../core/application/use-cases/tasks/command-api.js';
 import { TaskStateMachine } from '../core/application/use-cases/tasks/task-lifecycle.js';
 import { SessionManager } from '../core/application/use-cases/tasks/session-manager.js';
+import { TaskQueue, queueKeyOf } from '../core/application/use-cases/scheduling/task-queue.js';
 import { MetricsCollector } from '../core/application/use-cases/metrics.js';
 import {
   AttentionInbox,
@@ -320,6 +321,7 @@ export class FlorinaDaemon extends EventEmitter {
   private verificationGate: VerificationGate | null = null;
   private verificationRunner: VerificationRunner | null = null;
   private nudgeLoop: NudgeLoop | null = null;
+  private taskQueue: TaskQueue | null = null;
   private contextHealth: ContextHealthMonitor | null = null;
   private ideaService: IdeaService | null = null;
   private startedAt = 0;
@@ -734,6 +736,8 @@ export class FlorinaDaemon extends EventEmitter {
           // The session slot is free and the capsule settled — a queued
           // corrective nudge can dispatch now (#340).
           await this.nudgeLoop?.dispatchPending(taskId);
+          // And the freed lane can drain the durable task queue (#343).
+          await this.commandApi?.drainQueue();
         },
         // Florina-run verification on completion claims (issue #339):
         // facts must be journaled BEFORE `AgentCompleted` reaches the
@@ -803,7 +807,8 @@ export class FlorinaDaemon extends EventEmitter {
         sessionPool: {
           carryoverResolver: async (priorTaskId) => {
             const capsule = repos.capsules.loadByScope('task', priorTaskId);
-            const summaries = capsule?.content.rolledUpEventSummaries ?? [];
+            const summaries =
+              capsule?.scope === 'task' ? capsule.content.rolledUpEventSummaries : [];
             if (summaries.length === 0) {
               return `Continuing from prior task "${priorTaskId}" on this provider session.`;
             }
@@ -811,6 +816,30 @@ export class FlorinaDaemon extends EventEmitter {
           },
         },
       });
+
+      // Durable task queue (issue #343): journals its own lifecycle
+      // events (self-journaled kinds — the writer skips them) and
+      // rebuilds membership from the journal at boot (DEC-012). Lane
+      // busy-ness is read live from the session manager.
+      this.taskQueue = new TaskQueue({
+        journal: repos.events,
+        publish: (event) => {
+          this.bus?.publish(event);
+        },
+        isLaneBusy: (key) => {
+          const manager = this.sessionManager;
+          if (manager === null) {
+            return false;
+          }
+          for (const session of manager.getActiveSessions().values()) {
+            if (queueKeyOf(session.agentId, session.projectId) === key) {
+              return true;
+            }
+          }
+          return false;
+        },
+      });
+      this.taskQueue.rebuild();
 
       // Idea ledger + Brief pipeline (DEC-033, issue #69): ledgers live
       // beside the daemon database; confirmed Briefs dispatch through
@@ -1025,6 +1054,7 @@ export class FlorinaDaemon extends EventEmitter {
         // refresh rather than racing a second app-server spawn.
         providerAttachment: async () => this.refreshLocalProviders(),
         providerReadiness: this.providerReadiness ?? undefined,
+        taskQueue: this.taskQueue ?? undefined,
         // signin-provider launches the provider's own login in a visible
         // terminal (issue #294) — the spawn stays at the composition
         // boundary; core never touches child_process. The command's
@@ -1099,6 +1129,12 @@ export class FlorinaDaemon extends EventEmitter {
           void this.stop();
         },
       });
+
+      // Boot drain (issue #343): the queue rebuilt from the journal may
+      // hold entries whose lanes are idle — let them dispatch now.
+      // Fire-and-forget: failures record honest wait reasons on the
+      // entries, never throw into startup.
+      void this.commandApi.drainQueue();
 
       // Secretary chat turns (issue #158): the single conversation runs
       // the Florina loop on the configured model connector. Constructed

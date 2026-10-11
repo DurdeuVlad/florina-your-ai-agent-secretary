@@ -667,6 +667,59 @@ export interface ContextMaintainedEvent extends SupervisorEventBase {
 }
 
 /**
+ * Emitted when a task submission enters the durable task queue instead
+ * of racing for a session (issue #343, Agent Supervision Campaign M3).
+ * The event carries the full dispatch spec so a rebuilt queue can
+ * re-dispatch after a daemon restart (DEC-012) — `sessionId` is the
+ * run id RESERVED for the eventual dispatch, so queue events and the
+ * later AgentStarted share one identity.
+ */
+export interface TaskQueuedEvent extends SupervisorEventBase {
+  type: 'TaskQueued';
+  /** Provider+project lane the task waits in. */
+  queueKey: string;
+  /** The task's declared priority — promotes FIFO order when set. */
+  priority: string;
+  /** Project the task belongs to, when known. */
+  projectId?: string;
+  /** Worktree the run will execute in. */
+  workingDir: string;
+  /** Prompt override carried to dispatch, when supplied. */
+  prompt?: string;
+  /** Model requested for the run, when supplied. */
+  model?: string;
+  /** Autonomy policy requested, when supplied. */
+  autonomyLevel?: string;
+  /** Declared verification contract for the run, when supplied. */
+  verifyCommands?: readonly string[];
+  /** Corrective-dispatch budget for the run, when supplied. */
+  verifyBudget?: number;
+  /** Manager-role MCP servers carried to dispatch, when supplied. */
+  mcpServers?: readonly unknown[];
+  /** Compiled Execution Brief carried to dispatch, when supplied. */
+  executionBrief?: object;
+}
+
+/** Why a queued task left the durable queue (issue #343). */
+export type TaskDequeueReason = 'scheduled' | 'cancelled' | 'expired';
+
+/**
+ * Emitted when a queued task leaves the durable queue (issue #343):
+ * dispatched (`scheduled`), cancelled before dispatch (`cancelled`),
+ * or aged out (`expired`). Queue membership at any instant is provable
+ * from the journal: latest TaskQueued with no matching close event.
+ */
+export interface TaskDequeuedEvent extends SupervisorEventBase {
+  type: 'TaskDequeued';
+  /** Provider+project lane the task waited in. */
+  queueKey: string;
+  /** Why the task left the queue. */
+  reason: TaskDequeueReason;
+  /** Honest detail, e.g. the dispatch error behind a retry. */
+  detail?: string;
+}
+
+/**
  * The canonical discriminated union of all supervisor event variants (DEC-019).
  */
 export type SupervisorEvent =
@@ -697,7 +750,9 @@ export type SupervisorEvent =
   | VerificationObservedEvent
   | SessionPooledEvent
   | SessionReusedEvent
-  | ContextMaintainedEvent;
+  | ContextMaintainedEvent
+  | TaskQueuedEvent
+  | TaskDequeuedEvent;
 
 /** Ordered list of all valid event type discriminants. */
 export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
@@ -729,6 +784,8 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
   'SessionPooled',
   'SessionReused',
   'ContextMaintained',
+  'TaskQueued',
+  'TaskDequeued',
 ] as const;
 
 const ADAPTER_FIDELITY_TIERS: readonly AdapterFidelityTier[] = ['A', 'B', 'C', 'D', 'E'] as const;
@@ -974,6 +1031,12 @@ export function validateEvent(value: unknown): SupervisorEvent {
       break;
     case 'ContextMaintained':
       validateContextMaintained(value, problems);
+      break;
+    case 'TaskQueued':
+      validateTaskQueued(value, problems);
+      break;
+    case 'TaskDequeued':
+      validateTaskDequeued(value, problems);
       break;
     // Unknown types are already reported via the envelope check above.
     default:
@@ -1493,6 +1556,58 @@ function validateContextMaintained(value: Record<string, unknown>, problems: str
   }
   if (value['detail'] !== undefined && !isString(value['detail'])) {
     problems.push('ContextMaintained: optional field "detail" must be a string.');
+  }
+}
+
+const TASK_DEQUEUE_REASONS: readonly TaskDequeueReason[] = [
+  'scheduled',
+  'cancelled',
+  'expired',
+] as const;
+
+function validateTaskQueued(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['queueKey']) || value['queueKey'].length === 0) {
+    problems.push('TaskQueued: missing or empty required field "queueKey".');
+  }
+  if (!isString(value['priority']) || value['priority'].length === 0) {
+    problems.push('TaskQueued: missing or empty required field "priority".');
+  }
+  if (!isString(value['workingDir']) || value['workingDir'].length === 0) {
+    problems.push('TaskQueued: missing or empty required field "workingDir".');
+  }
+  for (const field of ['projectId', 'prompt', 'model', 'autonomyLevel'] as const) {
+    if (value[field] !== undefined && !isString(value[field])) {
+      problems.push(`TaskQueued: optional field "${field}" must be a string.`);
+    }
+  }
+  if (
+    value['verifyCommands'] !== undefined &&
+    (!Array.isArray(value['verifyCommands']) || !value['verifyCommands'].every(isString))
+  ) {
+    problems.push('TaskQueued: optional field "verifyCommands" must be a string array.');
+  }
+  if (value['verifyBudget'] !== undefined && !isNumber(value['verifyBudget'])) {
+    problems.push('TaskQueued: optional field "verifyBudget" must be a number.');
+  }
+  if (value['mcpServers'] !== undefined && !Array.isArray(value['mcpServers'])) {
+    problems.push('TaskQueued: optional field "mcpServers" must be an array.');
+  }
+  if (value['executionBrief'] !== undefined && !isObject(value['executionBrief'])) {
+    problems.push('TaskQueued: optional field "executionBrief" must be an object.');
+  }
+}
+
+function validateTaskDequeued(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['queueKey']) || value['queueKey'].length === 0) {
+    problems.push('TaskDequeued: missing or empty required field "queueKey".');
+  }
+  if (!isOneOf(value['reason'], TASK_DEQUEUE_REASONS)) {
+    problems.push(
+      `TaskDequeued: field "reason" must be one of ${TASK_DEQUEUE_REASONS.join(', ')}.`,
+    );
+  }
+  if (value['detail'] !== undefined && !isString(value['detail'])) {
+    problems.push('TaskDequeued: optional field "detail" must be a string.');
   }
 }
 

@@ -156,6 +156,24 @@ export const MIGRATION_005_ATTENTION_INBOX_SNAPSHOT: Migration = {
 };
 
 /**
+ * Migration 6 (issue #343): `tasks.priority` — the declared scheduling
+ * priority the durable task queue promotes within a lane. Nullable:
+ * absent → `MED` (no promotion). Defensive `ALTER`: databases created
+ * after the schema constant gained the column already have it, so the
+ * migration checks `table_info` before altering.
+ */
+export const MIGRATION_006_TASK_PRIORITY: Migration = {
+  version: 6,
+  description: 'Add tasks.priority for durable-queue promotion',
+  run: (db: Database.Database) => {
+    const cols = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'priority')) {
+      db.exec('ALTER TABLE tasks ADD COLUMN priority TEXT');
+    }
+  },
+};
+
+/**
  * The ordered list of all known migrations. New migrations are appended here
  * with an incrementing version number; the framework applies only those not
  * yet recorded in the `_migrations` table.
@@ -166,6 +184,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_003_BRIEFS,
   MIGRATION_004_CHAT,
   MIGRATION_005_ATTENTION_INBOX_SNAPSHOT,
+  MIGRATION_006_TASK_PRIORITY,
 ];
 
 /**

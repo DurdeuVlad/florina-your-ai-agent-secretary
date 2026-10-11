@@ -246,13 +246,26 @@ export function buildDefaultStubEvents(ctx: {
       poolKey: 'stub::proj-1',
       previousTaskId: 'task-0',
     },
+    {
+      ...base,
+      type: 'TaskQueued',
+      queueKey: 'stub::proj-1',
+      priority: 'MED',
+      workingDir: '/tmp/stub',
+    },
+    {
+      ...base,
+      type: 'TaskDequeued',
+      queueKey: 'stub::proj-1',
+      reason: 'scheduled',
+    },
   ];
 }
 
 /**
  * A Tier E stub adapter for pipeline testing.
  *
- * Emits synthetic events across all 28 {@link SupervisorEvent} variants. The
+ * Emits synthetic events across all 30 {@link SupervisorEvent} variants. The
  * event sequence is configurable via {@link StubAdapterOptions.events}; by
  * default the stub emits one of each variant in canonical order.
  */
@@ -393,7 +406,7 @@ export class StubAdapter extends BaseAdapter {
 
   /**
    * Build the event queue for a run. Uses the configured event sequence when
-   * provided, otherwise the default 28-variant sequence. A scripted sequence
+   * provided, otherwise the default 30-variant sequence. A scripted sequence
    * is restamped onto the run's envelope — after a session-pool rebind the
    * follow-up turn must carry the NEW task/run ids, not the stale scripted
    * ones (issue #342).

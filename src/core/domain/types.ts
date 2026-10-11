@@ -102,6 +102,13 @@ export interface Task {
    * or don't need one; no forced migration.
    */
   readonly agentProfileId?: EntityId;
+  /**
+   * Declared scheduling priority (issue #343): the durable task queue
+   * promotes higher-priority tasks within a lane ahead of FIFO order.
+   * Absent → `MED` (no promotion). Promotion decisions are journaled
+   * on the `TaskQueued` event — never inferred after the fact.
+   */
+  readonly priority?: AttentionPriority;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
 }
@@ -253,7 +260,9 @@ export type SupervisorEventKind =
   | 'VerificationObserved'
   | 'SessionPooled'
   | 'SessionReused'
-  | 'ContextMaintained';
+  | 'ContextMaintained'
+  | 'TaskQueued'
+  | 'TaskDequeued';
 
 /* ------------------------------------------------------------------ *
  * 7. AttentionItem
