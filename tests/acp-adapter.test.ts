@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   AcpAdapter,
   devinAcpAdapter,
@@ -80,10 +80,24 @@ const config: SessionConfig = {
   objective: 'fix the bug',
 };
 
-function makeAdapter(replies: Record<string, unknown> = {}) {
+function makeAdapter(
+  replies: Record<string, unknown> = {},
+  opts: {
+    auth?: {
+      methodId: string;
+      apiKey: () => string | undefined | Promise<string | undefined>;
+      signInHint: string;
+    };
+    sessionMode?: string;
+    modelConfigId?: string;
+  } = {},
+) {
   const proc = new FakeAcpProcess({
     initialize: { protocolVersion: 1 },
     'session/new': { sessionId: 'acp-s1' },
+    authenticate: {},
+    'session/set_mode': {},
+    'session/set_config_option': { configOptions: [] },
     ...replies,
   });
   const spawner: AcpSpawner = () => proc;
@@ -92,6 +106,7 @@ function makeAdapter(replies: Record<string, unknown> = {}) {
     command: 'devin',
     args: ['acp'],
     spawner,
+    ...opts,
   });
   return { adapter, proc };
 }
@@ -371,6 +386,128 @@ describe('AcpAdapter', () => {
     const collected = await events;
     expect(collected[collected.length - 1].type).toBe('AgentFailed');
     expect(adapter.connectionState).toBe('disconnected');
+  });
+
+  it('sends authenticate between initialize and session/new when configured', async () => {
+    const { adapter, proc } = makeAdapter(
+      {},
+      {
+        auth: {
+          methodId: 'devin-browser',
+          apiKey: () => 'devin-session-token$abc',
+          signInHint: 'run `devin auth login`',
+        },
+      },
+    );
+    await adapter.connect();
+    const events = collect(adapter);
+    await adapter.startRun('task-1', config);
+    proc.feed({
+      jsonrpc: '2.0',
+      id: proc.lastRequest().id,
+      result: { stopReason: 'end_turn' },
+    });
+    await events;
+
+    const methods = proc.sent
+      .map((l) => (JSON.parse(l) as { method?: string }).method)
+      .filter(Boolean);
+    expect(methods).toEqual(['initialize', 'authenticate', 'session/new', 'session/prompt']);
+    const authMsg = proc.sent
+      .map((l) => JSON.parse(l) as { method?: string; params?: Record<string, unknown> })
+      .find((m) => m.method === 'authenticate');
+    expect(authMsg?.params).toEqual({
+      methodId: 'devin-browser',
+      meta: { api_key: 'devin-session-token$abc' },
+    });
+  });
+
+  it('fails connect with the sign-in hint when no credential resolves', async () => {
+    const { adapter, proc } = makeAdapter(
+      {},
+      {
+        auth: {
+          methodId: 'devin-browser',
+          apiKey: () => undefined,
+          signInHint: 'run `devin auth login`',
+        },
+      },
+    );
+    await expect(adapter.connect()).rejects.toThrow('devin auth login');
+    // The spawned child must not outlive a failed handshake.
+    expect(proc.killed).toBe(true);
+    expect(adapter.connectionState).not.toBe('connected');
+  });
+
+  it('pins model via set_config_option and applies sessionMode per run', async () => {
+    const { adapter, proc } = makeAdapter({}, { sessionMode: 'smart', modelConfigId: 'model' });
+    await adapter.connect();
+    const events = collect(adapter);
+    await adapter.startRun('task-1', { ...config, model: 'swe-2-high' });
+    proc.feed({
+      jsonrpc: '2.0',
+      id: proc.lastRequest().id,
+      result: { stopReason: 'end_turn' },
+    });
+    await events;
+
+    const sent = proc.sent.map(
+      (l) => JSON.parse(l) as { method?: string; params?: Record<string, unknown> },
+    );
+    const setMode = sent.find((m) => m.method === 'session/set_mode');
+    const setConfig = sent.find((m) => m.method === 'session/set_config_option');
+    expect(setMode?.params).toEqual({ sessionId: 'acp-s1', modeId: 'smart' });
+    expect(setConfig?.params).toEqual({
+      sessionId: 'acp-s1',
+      configId: 'model',
+      value: 'swe-2-high',
+    });
+    // Both run between session/new and session/prompt.
+    const methods = sent.map((m) => m.method).filter(Boolean);
+    expect(methods.indexOf('session/set_mode')).toBeLessThan(methods.indexOf('session/prompt'));
+    expect(methods.indexOf('session/set_config_option')).toBeLessThan(
+      methods.indexOf('session/prompt'),
+    );
+  });
+
+  it('skips the model pin when the session supplies no model', async () => {
+    const { adapter, proc } = makeAdapter({}, { modelConfigId: 'model' });
+    await adapter.connect();
+    const events = collect(adapter);
+    await adapter.startRun('task-1', config);
+    proc.feed({
+      jsonrpc: '2.0',
+      id: proc.lastRequest().id,
+      result: { stopReason: 'end_turn' },
+    });
+    await events;
+    const hasSetConfig = proc.sent.some(
+      (l) => (JSON.parse(l) as { method?: string }).method === 'session/set_config_option',
+    );
+    expect(hasSetConfig).toBe(false);
+  });
+
+  it('session/prompt has no 30s deadline — long turns stay pending', async () => {
+    vi.useFakeTimers();
+    try {
+      const { adapter, proc } = makeAdapter();
+      await adapter.connect();
+      const events = collect(adapter);
+      await adapter.startRun('task-1', config);
+      // The prompt request is in flight; advancing past the old 30s cap
+      // must not reject it — a devin turn legitimately runs for minutes.
+      await vi.advanceTimersByTimeAsync(120000);
+      proc.feed({
+        jsonrpc: '2.0',
+        id: proc.lastRequest().id,
+        result: { stopReason: 'end_turn' },
+      });
+      const collected = await events;
+      expect(collected[collected.length - 1].type).toBe('AgentCompleted');
+      expect(collected.some((e) => e.type === 'AgentFailed')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('factories produce provider-shaped adapters', () => {

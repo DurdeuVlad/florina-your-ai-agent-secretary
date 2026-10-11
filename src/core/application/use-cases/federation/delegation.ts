@@ -51,6 +51,14 @@ export interface DelegateTaskInput {
   readonly preferModel?: string;
   /** Providers to exclude (e.g. providers the parent already tried). */
   readonly excludeProviders?: readonly string[];
+  /**
+   * Objective verification checks Florina runs when the task's session
+   * ends in a completion claim (issue #339) — forwarded to `spawnTask`
+   * so remote delegations carry the same contract local spawns do.
+   */
+  readonly verifyCommands?: readonly string[];
+  /** Corrective re-dispatch budget for verify-failed runs (issue #340). */
+  readonly verifyBudget?: number;
 }
 
 /** Raised when a delegation cannot be accepted. */
@@ -101,6 +109,8 @@ export class DelegationService {
       ...(input.preferProvider !== undefined ? { preferProvider: input.preferProvider } : {}),
       ...(input.preferModel !== undefined ? { preferModel: input.preferModel } : {}),
       ...(input.excludeProviders !== undefined ? { excludeProviders: input.excludeProviders } : {}),
+      ...(input.verifyCommands !== undefined ? { verifyCommands: input.verifyCommands } : {}),
+      ...(input.verifyBudget !== undefined ? { verifyBudget: input.verifyBudget } : {}),
     });
   }
 }

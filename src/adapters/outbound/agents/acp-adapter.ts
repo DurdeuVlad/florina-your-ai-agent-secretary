@@ -151,6 +151,31 @@ export interface AcpAdapterOptions {
   readonly permissionResponder?: PermissionResponder;
   /** Working directory to spawn the CLI in (defaults to process cwd). */
   readonly cwd?: string;
+  /**
+   * ACP `authenticate` support — sent once at {@link connect}, between
+   * `initialize` and the first `session/new`, for agents that refuse
+   * local CLI credentials in ACP mode (devin). `apiKey` resolves the
+   * credential sent as `meta.api_key`; when it yields nothing, connect
+   * fails with {@linkcode signInHint} — an agent that cannot
+   * authenticate must report unavailable, not stall every run later.
+   */
+  readonly auth?: {
+    readonly methodId: string;
+    readonly apiKey: () => string | undefined | Promise<string | undefined>;
+    readonly signInHint: string;
+  };
+  /**
+   * ACP `session/set_mode` applied per run before the prompt (e.g.
+   * 'smart' auto-approves actions the model judges safe; risky calls
+   * still arrive as `session/request_permission` → ApprovalRequested).
+   */
+  readonly sessionMode?: string;
+  /**
+   * ACP `session/set_config_option` configId used to pin
+   * `sessionConfig.model` per run ('model' on devin). A set failure
+   * fails the run — a silently wrong model violates an explicit pin.
+   */
+  readonly modelConfigId?: string;
 }
 
 const ACP_PROTOCOL_VERSION = 1;
@@ -197,10 +222,31 @@ export class AcpAdapter extends BaseAdapter {
     );
     this.process.onLine((line) => this.handleLine(line));
     this.process.onExit((code, signal) => this.handleExit(code, signal));
-    await this.request('initialize', {
-      protocolVersion: ACP_PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
-    });
+    try {
+      await this.request('initialize', {
+        protocolVersion: ACP_PROTOCOL_VERSION,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
+      });
+      if (this.options.auth !== undefined) {
+        const key = await this.options.auth.apiKey();
+        if (key === undefined || key === '') {
+          throw new Error(
+            `${this.id} ACP requires a host-supplied credential — ${this.options.auth.signInHint}`,
+          );
+        }
+        await this.request('authenticate', {
+          methodId: this.options.auth.methodId,
+          meta: { api_key: key },
+        });
+      }
+    } catch (err) {
+      // A failed handshake leaves a spawned child that would otherwise
+      // outlive the adapter — kill it before the caller sees the error.
+      const child = this.process;
+      this.process = null;
+      child?.kill();
+      throw err;
+    }
     this.setConnectionState('connected');
   }
 
@@ -223,6 +269,24 @@ export class AcpAdapter extends BaseAdapter {
       })),
     })) as { sessionId?: string } | null;
     this.acpSessionId = created?.sessionId ?? sessionConfig.sessionId;
+
+    if (this.options.sessionMode !== undefined) {
+      await this.request('session/set_mode', {
+        sessionId: this.acpSessionId,
+        modeId: this.options.sessionMode,
+      });
+    }
+    if (
+      this.options.modelConfigId !== undefined &&
+      sessionConfig.model !== undefined &&
+      sessionConfig.model !== ''
+    ) {
+      await this.request('session/set_config_option', {
+        sessionId: this.acpSessionId,
+        configId: this.options.modelConfigId,
+        value: sessionConfig.model,
+      });
+    }
 
     this.enqueue({
       type: 'AgentStarted',
@@ -266,10 +330,14 @@ export class AcpAdapter extends BaseAdapter {
       return;
     }
     try {
+      // No deadline: the prompt response lands when the agent's whole
+      // turn completes — turns run minutes, and a fixed cap kills
+      // legitimate long-running work mid-execution. Termination stays
+      // covered by session/cancel and process-exit handling.
       const result = (await this.request('session/prompt', {
         sessionId: this.acpSessionId,
         prompt: [{ type: 'text', text: objective }],
-      })) as { stopReason?: string } | null;
+      }, 0)) as { stopReason?: string } | null;
       const stopReason = result?.stopReason ?? 'end_turn';
       if (stopReason === 'cancelled') {
         this.enqueue(this.terminal('AgentStopped', { reason: 'user' as const }));
@@ -341,7 +409,12 @@ export class AcpAdapter extends BaseAdapter {
    * JSON-RPC plumbing
    * ---------------------------------------------------------------- */
 
-  private request(method: string, params?: unknown): Promise<unknown> {
+  /**
+   * `timeoutMs` of 0 means no deadline — required for `session/prompt`,
+   * whose response arrives only when the agent's whole turn completes
+   * (minutes, not seconds). Everything else keeps the 30s bound.
+   */
+  private request(method: string, params?: unknown, timeoutMs = 30000): Promise<unknown> {
     if (this.process === null) {
       return Promise.reject(new Error('ACP adapter has no process'));
     }
@@ -350,11 +423,13 @@ export class AcpAdapter extends BaseAdapter {
     return new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.process!.send(JSON.stringify(msg));
-      setTimeout(() => {
-        if (this.pending.delete(id)) {
-          reject(new Error(`ACP request "${method}" (id=${id}) timed out`));
-        }
-      }, 30000);
+      if (timeoutMs > 0) {
+        setTimeout(() => {
+          if (this.pending.delete(id)) {
+            reject(new Error(`ACP request "${method}" (id=${id}) timed out`));
+          }
+        }, timeoutMs);
+      }
     });
   }
 
