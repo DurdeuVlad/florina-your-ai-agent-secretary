@@ -15,7 +15,14 @@
 import { AdapterFidelityTier } from '../../../core/domain/enums.js';
 import type { SupervisorEvent } from '../../../core/domain/events.js';
 import type { EventPublisherPort } from '../../../core/application/ports/outbound/event-stream.js';
-import { BaseAdapter, type SessionConfig, type StartRunResult } from './base.js';
+import {
+  BaseAdapter,
+  type AgentSessionCapabilities,
+  type MaintainContextRequest,
+  type MaintainContextResult,
+  type SessionConfig,
+  type StartRunResult,
+} from './base.js';
 
 /** Stable id for the stub adapter. */
 export const STUB_ADAPTER_ID = 'stub';
@@ -35,6 +42,12 @@ export interface StubAdapterOptions {
    * to a positive value to simulate a real streaming agent.
    */
   readonly delayMs?: number;
+  /**
+   * Session-reuse capability matrix (issue #341). The stub defaults to
+   * full support so tests can exercise every `maintainContext` mode —
+   * override flags to simulate an adapter that lacks a capability.
+   */
+  readonly capabilities?: AgentSessionCapabilities;
 }
 
 /**
@@ -229,9 +242,22 @@ export class StubAdapter extends BaseAdapter {
   private cancelled = false;
   /** Queue of events to emit, populated on `startRun`. */
   private eventQueue: SupervisorEvent[] = [];
+  /** Follow-up messages delivered via sendMessage — inspectable in tests. */
+  readonly sentMessages: { sessionId: string; message: string }[] = [];
+  /** maintainContext modes applied — inspectable in tests. */
+  readonly maintainCalls: { sessionId: string; carryover: string }[] = [];
 
   constructor(bus?: EventPublisherPort | null, options: StubAdapterOptions = {}) {
-    super(STUB_ADAPTER_ID, AdapterFidelityTier.E, bus);
+    super(
+      STUB_ADAPTER_ID,
+      AdapterFidelityTier.E,
+      bus,
+      options.capabilities ?? {
+        sendMessage: true,
+        resume: true,
+        compact: true,
+      },
+    );
     this.options = options;
   }
 
@@ -278,6 +304,42 @@ export class StubAdapter extends BaseAdapter {
     }
     this.cancelled = true;
     this.activeSession = null;
+  }
+
+  /** Deliver a follow-up message — recorded for test inspection. */
+  async sendMessage(sessionId: string, message: string): Promise<boolean> {
+    this.requireConnected();
+    if (this.activeSession?.sessionId !== sessionId) {
+      return false;
+    }
+    this.sentMessages.push({ sessionId, message });
+    return true;
+  }
+
+  /** Record the call so tests can assert which mode ladder rung ran. */
+  override async maintainContext(
+    sessionId: string,
+    request: MaintainContextRequest,
+  ): Promise<MaintainContextResult> {
+    this.maintainCalls.push({ sessionId, carryover: request.carryover });
+    return super.maintainContext(sessionId, request);
+  }
+
+  /** Synthetic provider compaction — honored when `compact` is declared. */
+  protected override async performCompact(_sessionId: string): Promise<boolean> {
+    return true;
+  }
+
+  /**
+   * Synthetic provider-resume: swaps in the restart config and reports
+   * the new session id — honored when `resume` is declared.
+   */
+  protected override async performResumeWithCarryover(
+    _sessionId: string,
+    request: MaintainContextRequest,
+  ): Promise<string | null> {
+    this.activeSession = request.restartConfig;
+    return request.restartConfig.sessionId;
   }
 
   async disconnect(): Promise<void> {

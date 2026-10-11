@@ -57,6 +57,7 @@ import type { CatchUpWatermarkPort } from '../../ports/outbound/catchup-watermar
 import type { EventPublisherPort } from '../../ports/outbound/event-stream.js';
 import type {
   AgentRuntimePort,
+  AgentSessionCapabilities,
   McpServerSpec,
   SessionConfig as AdapterSessionConfig,
 } from '../../ports/outbound/agent-runtime.js';
@@ -1127,6 +1128,14 @@ export interface ProviderStatusView {
    * Install action only when this is true — never a dead button.
    */
   readonly installable?: boolean;
+  /**
+   * Static session-reuse capabilities the adapter declares (issue
+   * #341): what session scheduling can honestly expect — follow-up
+   * messages, provider-side resume, provider compaction. Omitted when
+   * the adapter's matrix is unavailable (unregistered id, factory
+   * threw); absence is "unknown", never "assumed supported".
+   */
+  readonly capabilities?: AgentSessionCapabilities;
 }
 
 /**
@@ -2702,6 +2711,17 @@ export class CommandApi {
         id: p.id,
         found: true,
         detail: p.detail,
+        // Static per-adapter facts (issue #341) — the matrix lives on
+        // the adapter itself; a factory that throws simply omits the
+        // field rather than fabricating support.
+        ...(() => {
+          try {
+            const caps = this.adapterRegistry?.capabilities?.(p.id);
+            return caps !== undefined ? { capabilities: caps } : {};
+          } catch {
+            return {};
+          }
+        })(),
         ...readinessFields(p.id),
       })),
       // Skipped = binary not found. Sign-in state is meaningless for a

@@ -31,6 +31,7 @@ import type {
 class FakeAdapter implements AgentRuntimePort {
   readonly id: string;
   readonly fidelityTier = 'B' as const;
+  readonly capabilities = { sendMessage: false, resume: false, compact: false } as const;
   connectionState: 'disconnected' | 'connecting' | 'connected' = 'disconnected';
   connectCalls = 0;
   disconnectCalls = 0;

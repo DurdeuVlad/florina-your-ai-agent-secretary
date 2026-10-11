@@ -68,6 +68,7 @@ function tmpDir(): string {
 class CapturingAdapter implements AgentRuntimePort {
   readonly id = 'capture';
   readonly fidelityTier = 'B' as const;
+  readonly capabilities = { sendMessage: false, resume: false, compact: false } as const;
   readonly runs: SessionConfig[] = [];
 
   async connect(): Promise<void> {}

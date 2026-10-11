@@ -22,6 +22,7 @@ import type {
   SessionConfig,
   StartRunResult,
 } from '../../../core/application/ports/outbound/agent-runtime.js';
+import { NO_SESSION_CAPABILITIES } from '../../../core/application/ports/outbound/agent-runtime.js';
 import type {
   Command,
   DelegateTaskResponse,
@@ -73,6 +74,12 @@ export interface RemoteFlorinaAdapterOptions {
 export class RemoteFlorinaAdapter implements AgentRuntimePort {
   readonly id: string;
   readonly fidelityTier: AdapterFidelityTier;
+  /**
+   * One adapter = one delegated run (issue #341): session-context
+   * maintenance is the child daemon's business, not this transport's —
+   * honestly declares none so schedulers degrade to spawn-fresh.
+   */
+  readonly capabilities = NO_SESSION_CAPABILITIES;
 
   private state: AdapterConnectionState = 'disconnected';
   private readonly bus: EventPublisherPort | null;

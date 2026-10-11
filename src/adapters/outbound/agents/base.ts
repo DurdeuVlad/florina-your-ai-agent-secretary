@@ -26,9 +26,13 @@ import type { EventPublisherPort } from '../../../core/application/ports/outboun
 import type {
   AdapterConnectionState,
   AgentRuntimePort,
+  AgentSessionCapabilities,
+  MaintainContextRequest,
+  MaintainContextResult,
   SessionConfig,
   StartRunResult,
 } from '../../../core/application/ports/outbound/agent-runtime.js';
+import { NO_SESSION_CAPABILITIES } from '../../../core/application/ports/outbound/agent-runtime.js';
 
 /**
  * Re-export the fidelity tier enum so adapter consumers can import the
@@ -48,6 +52,10 @@ export type {
   StartRunResult,
   AgentRuntimePort,
   AgentAdapter,
+  AgentSessionCapabilities,
+  ContextMaintenanceMode,
+  MaintainContextRequest,
+  MaintainContextResult,
 } from '../../../core/application/ports/outbound/agent-runtime.js';
 
 /**
@@ -75,17 +83,32 @@ export abstract class BaseAdapter implements AgentRuntimePort {
   private readonly bus: EventPublisherPort | null;
 
   /**
+   * Static session-reuse capabilities (issue #341): what this adapter's
+   * transport genuinely supports. Defaults to none — an adapter opts in
+   * only where support is real, so callers never schedule against a
+   * fake matrix.
+   */
+  readonly capabilities: AgentSessionCapabilities;
+
+  /**
    * @param id - Stable adapter identifier.
    * @param fidelityTier - The fidelity tier (A–E) this adapter declares.
    * @param bus - Optional {@link EventPublisherPort} to publish emitted events to. When
    *   provided, {@link BaseAdapter.emitEvent} fans events out to live
    *   subscribers; when omitted, the adapter is usable standalone (events are
    *   only available via `streamEvents`).
+   * @param capabilities - Honest session-reuse matrix; defaults to all-false.
    */
-  constructor(id: string, fidelityTier: AdapterFidelityTier, bus?: EventPublisherPort | null) {
+  constructor(
+    id: string,
+    fidelityTier: AdapterFidelityTier,
+    bus?: EventPublisherPort | null,
+    capabilities: AgentSessionCapabilities = NO_SESSION_CAPABILITIES,
+  ) {
     this.id = id;
     this.fidelityTier = fidelityTier;
     this.bus = bus ?? null;
+    this.capabilities = capabilities;
   }
 
   /** Current connection state. */
@@ -144,6 +167,71 @@ export abstract class BaseAdapter implements AgentRuntimePort {
       return this.bus.publish(event);
     }
     return 0;
+  }
+
+  /**
+   * Preserve session context between tasks (issue #341). The default
+   * implementation is a capability-driven ladder: provider compaction
+   * where `capabilities.compact` is declared and {@link performCompact}
+   * succeeds; provider-resume with the caller-composed carry-over digest
+   * where `capabilities.resume` is declared and
+   * {@link performResumeWithCarryover} succeeds; `unsupported` otherwise
+   * so the caller degrades to spawn-fresh. Concrete adapters override
+   * the hooks — never the ladder — so a declared-but-failing capability
+   * degrades honestly rather than faking a mode.
+   */
+  async maintainContext(
+    sessionId: string,
+    request: MaintainContextRequest,
+  ): Promise<MaintainContextResult> {
+    this.requireConnected();
+    if (this.capabilities.compact) {
+      try {
+        if (await this.performCompact(sessionId)) {
+          return { mode: 'compacted', sessionId };
+        }
+      } catch {
+        /* declared-but-failing compact degrades to the next rung */
+      }
+    }
+    if (this.capabilities.resume) {
+      try {
+        const resumed = await this.performResumeWithCarryover(sessionId, request);
+        if (resumed !== null) {
+          return { mode: 'restarted-with-carryover', sessionId: resumed };
+        }
+      } catch {
+        /* declared-but-failing resume degrades to unsupported */
+      }
+    }
+    return {
+      mode: 'unsupported',
+      detail:
+        `adapter "${this.id}" cannot maintain session context ` +
+        `(sendMessage=${this.capabilities.sendMessage}, ` +
+        `resume=${this.capabilities.resume}, compact=${this.capabilities.compact})`,
+    };
+  }
+
+  /**
+   * Provider-side context compaction hook (issue #341). Called only when
+   * `capabilities.compact` is declared. Returns `true` on success.
+   */
+  protected async performCompact(_sessionId: string): Promise<boolean> {
+    return false;
+  }
+
+  /**
+   * Provider-resume-with-carryover hook (issue #341). Called only when
+   * `capabilities.resume` is declared — the implementation restarts a
+   * run that continues the provider session, seeding it with
+   * `request.carryover`. Returns the new session id, or `null`.
+   */
+  protected async performResumeWithCarryover(
+    _sessionId: string,
+    _request: MaintainContextRequest,
+  ): Promise<string | null> {
+    return null;
   }
 
   // The remaining AgentAdapter methods are abstract; concrete adapters

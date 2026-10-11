@@ -86,6 +86,64 @@ export interface StartRunResult {
 }
 
 /**
+ * Static session-reuse capabilities an adapter declares (issue #341,
+ * Agent Supervision Campaign M2). These are provider *capabilities*, not
+ * assumptions: scheduling code (session pool, nudge loop, task queue)
+ * must read them honestly and degrade rather than fake support.
+ *
+ * - `sendMessage` — a follow-up user message can be delivered into an
+ *   existing live session (multi-turn).
+ * - `resume` — a new run can continue a prior provider session with its
+ *   context intact (provider-side continuation, e.g. thread resume).
+ * - `compact` — the provider can compact/summarize its own context
+ *   window without losing session continuity.
+ */
+export interface AgentSessionCapabilities {
+  readonly sendMessage: boolean;
+  readonly resume: boolean;
+  readonly compact: boolean;
+}
+
+/** Every capability denied — the honest default for adapters without support. */
+export const NO_SESSION_CAPABILITIES: AgentSessionCapabilities = {
+  sendMessage: false,
+  resume: false,
+  compact: false,
+} as const;
+
+/**
+ * How {@link AgentRuntimePort.maintainContext} preserved context:
+ * the provider compacted its own window, a new run was started carrying
+ * a caller-composed digest, or the adapter cannot maintain context at
+ * all (the caller degrades to spawn-fresh — never a fake result).
+ */
+export type ContextMaintenanceMode = 'compacted' | 'restarted-with-carryover' | 'unsupported';
+
+/** What the caller supplies when asking an adapter to maintain context. */
+export interface MaintainContextRequest {
+  /**
+   * The carry-over digest composed by the caller — the Task Capsule
+   * (issue #76) for the task the session belongs to. The adapter never
+   * summarizes context itself; it applies this caller-composed digest.
+   */
+  readonly carryover: string;
+  /**
+   * The SessionConfig to use when the mode requires a restarted run —
+   * its `objective` is the fresh delegation the digest accompanies.
+   */
+  readonly restartConfig: SessionConfig;
+}
+
+/** Result of a {@link AgentRuntimePort.maintainContext} call. */
+export interface MaintainContextResult {
+  readonly mode: ContextMaintenanceMode;
+  /** The session id after a restart; absent for `compacted`/`unsupported`. */
+  readonly sessionId?: string;
+  /** Honest detail when the mode is `unsupported` (or a fallback ran). */
+  readonly detail?: string;
+}
+
+/**
  * The contract every agent adapter implements.
  *
  * Lifecycle:
@@ -108,6 +166,14 @@ export interface AgentRuntimePort {
 
   /** Current connection state of the adapter. */
   readonly connectionState: AdapterConnectionState;
+
+  /**
+   * Static session-reuse capabilities this adapter honestly supports
+   * (issue #341). Declared per adapter, never inferred: a provider that
+   * cannot compact, resume, or accept follow-up messages reports `false`
+   * so callers degrade to spawn-fresh instead of faking continuity.
+   */
+  readonly capabilities: AgentSessionCapabilities;
 
   /**
    * Establish the provider connection (app-server handshake, CLI spawn, PTY
@@ -137,6 +203,33 @@ export interface AgentRuntimePort {
    * @param sessionId - The session to cancel.
    */
   cancel(sessionId: string): Promise<void>;
+
+  /**
+   * Deliver a follow-up user message into an existing live session —
+   * gated by `capabilities.sendMessage` (issue #341). Present only on
+   * adapters whose transport genuinely supports multi-turn input.
+   *
+   * @returns `true` when the provider accepted the message; `false` when
+   *   the session is gone, the transport rejected it, or the adapter is
+   *   not in a state to deliver.
+   */
+  sendMessage?(sessionId: string, message: string): Promise<boolean>;
+
+  /**
+   * Preserve session context between tasks — gated by
+   * `capabilities.compact`/`capabilities.resume` (issue #341). The
+   * adapter compacts the provider window where supported, else restarts
+   * a run seeded with the caller-composed carry-over digest (the Task
+   * Capsule — never a bespoke adapter summarizer). Adapters that can do
+   * neither return `unsupported` so the caller degrades to spawn-fresh.
+   *
+   * Event plumbing for a restarted run is owned by the session use case
+   * (M2.2); this method only reports which mode was applied.
+   */
+  maintainContext?(
+    sessionId: string,
+    request: MaintainContextRequest,
+  ): Promise<MaintainContextResult>;
 
   /** Tear down the provider connection and release all resources. */
   disconnect(): Promise<void>;
