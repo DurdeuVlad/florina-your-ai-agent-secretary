@@ -120,6 +120,30 @@ interface AcpPermissionRequest {
   options?: AcpPermissionOption[];
 }
 
+/**
+ * Pick the narrowest affirmative option for an auto-approved permission
+ * request — `allow_once` (single call) before `allow_always`, then a
+ * name match as last resort. Absent or unrecognizable options yield
+ * `undefined`, and the caller falls back to `cancelled`.
+ */
+function pickAllowOption(
+  options: readonly AcpPermissionOption[] | undefined,
+): AcpPermissionOption | undefined {
+  if (options === undefined || options.length === 0) {
+    return undefined;
+  }
+  return (
+    options.find((o) => o.kind === 'allow_once') ??
+    options.find((o) => o.kind === 'allow_always') ??
+    options.find(
+      (o) =>
+        typeof o.name === 'string' &&
+        /allow|approve|proceed|yes|accept/i.test(o.name) &&
+        !/reject|deny/i.test(o.name),
+    )
+  );
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -200,6 +224,8 @@ export class AcpAdapter extends BaseAdapter {
   private streamComplete = false;
   private session: SessionConfig | null = null;
   private acpSessionId: string | null = null;
+  /** Per-run flag from `sessionConfig.autonomyLevel === 'auto'` (#67 path). */
+  private runAutoApprove = false;
 
   constructor(bus: EventPublisherPort | null | undefined, options: AcpAdapterOptions) {
     super(options.id, AdapterFidelityTier.C, bus, {
@@ -253,6 +279,7 @@ export class AcpAdapter extends BaseAdapter {
   async startRun(taskId: string, sessionConfig: SessionConfig): Promise<StartRunResult> {
     this.requireConnected();
     this.session = sessionConfig;
+    this.runAutoApprove = sessionConfig.autonomyLevel === 'auto';
     this.streamComplete = false;
     this.eventQueue = [];
 
@@ -485,13 +512,26 @@ export class AcpAdapter extends BaseAdapter {
       this.enqueuePermission(params);
       const responder = this.options.permissionResponder;
       const choice = responder === undefined ? null : await responder(params);
-      if (choice === null) {
-        this.respond(request.id, { outcome: { outcome: 'cancelled' } });
-      } else {
+      if (choice !== null) {
         this.respond(request.id, {
           outcome: { outcome: 'selected', optionId: choice.optionId },
         });
+        return;
       }
+      // autonomyLevel 'auto' (journaled on AgentStarted): the run declared
+      // autonomous operation, so an unanswered request picks the narrowest
+      // allow option instead of silently cancelling the agent's work. Only
+      // when no responder is wired — an explicit responder denial wins.
+      if (responder === undefined && this.runAutoApprove) {
+        const allow = pickAllowOption(params.options);
+        if (allow !== undefined) {
+          this.respond(request.id, {
+            outcome: { outcome: 'selected', optionId: allow.optionId },
+          });
+          return;
+        }
+      }
+      this.respond(request.id, { outcome: { outcome: 'cancelled' } });
       return;
     }
     // fs/*, terminal/*, and anything else: not implemented — the daemon
