@@ -83,6 +83,7 @@ import {
 } from '../core/application/use-cases/journal/event-journal-writer.js';
 import { VerificationGate } from '../core/application/use-cases/verification/verification-gate.js';
 import { VerificationRunner } from '../core/application/use-cases/verification/verification-runner.js';
+import { NudgeLoop } from '../core/application/use-cases/tasks/nudge-loop.js';
 import { ProcessCommandRunner } from '../adapters/outbound/platform/command-runner.js';
 import { ContextHealthMonitor } from '../core/application/use-cases/context/context-health-monitor.js';
 import {
@@ -318,6 +319,7 @@ export class FlorinaDaemon extends EventEmitter {
   private journalWriter: EventJournalWriter | null = null;
   private verificationGate: VerificationGate | null = null;
   private verificationRunner: VerificationRunner | null = null;
+  private nudgeLoop: NudgeLoop | null = null;
   private contextHealth: ContextHealthMonitor | null = null;
   private ideaService: IdeaService | null = null;
   private startedAt = 0;
@@ -692,17 +694,67 @@ export class FlorinaDaemon extends EventEmitter {
         eventBus: this.bus,
       });
       const rollup = this.capsuleRollup;
+
+      // Bounded nudge loop (issue #340): verify failures re-dispatch the
+      // task with evidence up to a declared budget, then park + escalate.
+      // `commandApi` resolves lazily — it is constructed after the
+      // session manager that wires this hook.
+      this.nudgeLoop = new NudgeLoop({
+        journal: repos.events,
+        tasks: repos.tasks,
+        stateMachine: this.taskStateMachine,
+        commandApi: {
+          execute: (command) => {
+            const api = this.commandApi;
+            if (api === null) {
+              return Promise.resolve({
+                ok: false,
+                taskId: '',
+                sessionId: '',
+                error: 'command API not ready',
+              });
+            }
+            return api.execute(command);
+          },
+        },
+        inbox: this.attentionInbox,
+        onJournalFailure: (err, row) => {
+          this.attentionAggregator?.reportJournalFailure({
+            source: 'nudge-loop',
+            error: err instanceof Error ? err.message : String(err),
+            write: row,
+            retryable: !isPermanentJournalError(err),
+          });
+        },
+      });
+
       this.sessionManager = new SessionManager(this.bus, {
         onSessionEnd: async (taskId, sessionId) => {
           await rollup.rollUpSession(taskId, sessionId);
+          // The session slot is free and the capsule settled — a queued
+          // corrective nudge can dispatch now (#340).
+          await this.nudgeLoop?.dispatchPending(taskId);
         },
         // Florina-run verification on completion claims (issue #339):
         // facts must be journaled BEFORE `AgentCompleted` reaches the
         // bus, where the aggregator's verification gate assesses them.
+        // A failed verdict feeds the bounded nudge loop (#340).
         beforePublish: async (event) => {
           if (event.type === 'AgentCompleted' && this.verificationRunner !== null) {
             try {
-              await this.verificationRunner.run(event.taskId, event.sessionId, event.agentId);
+              const outcome = await this.verificationRunner.run(
+                event.taskId,
+                event.sessionId,
+                event.agentId,
+              );
+              if (!outcome.verified) {
+                this.nudgeLoop?.onVerifyFailed(
+                  event.taskId,
+                  event.sessionId,
+                  event.agentId,
+                  outcome,
+                );
+              }
             } catch {
               /* a verification failure degrades to unverified — it must
                  never swallow the completion claim itself */

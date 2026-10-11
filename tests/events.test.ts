@@ -26,6 +26,8 @@ import {
   type TaskFailedOverEvent,
   type TaskParkedEvent,
   type TaskResumedEvent,
+  type TaskVerifyFailedEvent,
+  type TaskNudgedEvent,
   type ContextCondensedEvent,
   type ContextHealthChangedEvent,
   type VerificationObservedEvent,
@@ -40,7 +42,7 @@ const base = {
   adapterFidelityTier: 'A' as const,
 };
 
-/** A valid example of each of the 13 variants. */
+/** A valid example of each of the canonical variants. */
 const validExamples: SupervisorEvent[] = [
   {
     ...base,
@@ -211,6 +213,20 @@ const validExamples: SupervisorEvent[] = [
   } satisfies TaskResumedEvent,
   {
     ...base,
+    type: 'TaskVerifyFailed',
+    attempt: 1,
+    summary: 'attempt 1: 1 of 1 declared check(s) failed',
+    failedChecks: ['npm test'],
+  } satisfies TaskVerifyFailedEvent,
+  {
+    ...base,
+    type: 'TaskNudged',
+    attempt: 2,
+    budget: 2,
+    prompt: 'CORRECTIVE DISPATCH — npm test failed: exit 1',
+  } satisfies TaskNudgedEvent,
+  {
+    ...base,
     type: 'ContextCondensed',
     summary: 'Explored auth flow; decided on JWT refresh',
     forgottenEventIds: ['evt-1', 'evt-2', 'evt-3'],
@@ -236,8 +252,8 @@ const validExamples: SupervisorEvent[] = [
 
 describe('SupervisorEvent schema', () => {
   describe('SUPERVISOR_EVENT_TYPES', () => {
-    it('lists exactly the 23 canonical variants', () => {
-      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(23);
+    it('lists exactly the 25 canonical variants', () => {
+      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(25);
       expect(SUPERVISOR_EVENT_TYPES).toEqual([
         'AgentStarted',
         'AgentProgress',
@@ -259,6 +275,8 @@ describe('SupervisorEvent schema', () => {
         'TaskFailedOver',
         'TaskParked',
         'TaskResumed',
+        'TaskVerifyFailed',
+        'TaskNudged',
         'ContextCondensed',
         'ContextHealthChanged',
         'VerificationObserved',

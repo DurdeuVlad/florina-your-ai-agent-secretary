@@ -51,6 +51,8 @@ export interface VerifyCheckResult {
   readonly spawnFailed: boolean;
   /** e.g. `exit 0`, `exit 1`, `timed out`, `spawn failed`. */
   readonly summary: string;
+  /** Bounded combined output tail — carried into corrective prompts. */
+  readonly outputTail: string;
 }
 
 /** Aggregate outcome of running a task's declared verification. */
@@ -264,6 +266,7 @@ export class VerificationRunner {
           timedOut: false,
           spawnFailed: true,
           summary: 'no worktree to run in',
+          outputTail: '',
         };
         results.push(result);
         this.journalCheck(taskId, sessionId, agentId, result, '');
@@ -288,8 +291,10 @@ export class VerificationRunner {
           timedOut: r.timedOut,
           spawnFailed: r.spawnFailed,
           summary,
+          outputTail: '',
         };
         const output = `${r.stdout}\n${r.stderr}`.trim();
+        result = { ...result, outputTail: output.slice(-OUTPUT_TAIL_CHARS) };
         this.journalCheck(taskId, sessionId, agentId, result, output);
       } catch (err) {
         // The port resolves on every outcome; a throw is a runner bug —
@@ -302,6 +307,7 @@ export class VerificationRunner {
           timedOut: false,
           spawnFailed: true,
           summary: `runner error: ${err instanceof Error ? err.message : String(err)}`,
+          outputTail: '',
         };
         results.push(result);
         this.journalCheck(taskId, sessionId, agentId, result, '');
