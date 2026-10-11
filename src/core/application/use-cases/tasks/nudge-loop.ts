@@ -303,7 +303,7 @@ export class NudgeLoop {
         kind: 'Custom',
         priority: 'Critical',
         payload: {
-          reason: `verify budget exhausted after attempt ${attempt} of ${budget} nudge(s): ${reason}`,
+          reason: `verify budget exhausted — ${budget} nudge(s) spent, run ${attempt} still failing: ${reason}`,
           attempts: history,
           resolution:
             'Approve the worktree as-is, re-dispatch with a larger ' +
