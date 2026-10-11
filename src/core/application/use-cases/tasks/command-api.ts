@@ -1352,12 +1352,43 @@ export interface RoutingDecisionView {
   readonly timestamp: string;
 }
 
+/**
+ * A queued task for the fleet view (issue #345). Every field is either
+ * journaled (position ordering inputs, reserved session id, enqueue
+ * time) or computed from live state (waitReason); the only clock-based
+ * estimate is `resumeAt`, taken verbatim from the journaled quota reset
+ * on `quota-blocked` entries — no inferred ETAs.
+ */
+export interface QueuedTaskView {
+  readonly taskId: string;
+  readonly objective: string;
+  /** 1-based position in its provider lane after priority+FIFO ordering. */
+  readonly position: number;
+  /** Target provider — the lane the task waits in. */
+  readonly provider: string;
+  readonly projectId: string | null;
+  /**
+   * The session the dispatch lands on: the run id reserved at enqueue,
+   * which becomes the pooled session row when the lane frees.
+   */
+  readonly sessionId: string;
+  readonly queueKey: string;
+  readonly priority: string;
+  /** Why the task is still waiting — computed, never stored. */
+  readonly waitReason: string;
+  /** Journaled quota reset for `quota-blocked` entries; null otherwise. */
+  readonly resumeAt: string | null;
+  readonly enqueuedAt: string;
+}
+
 /** query-fleet response (issue #127). */
 export interface FleetResponse {
   readonly ok: boolean;
   readonly providers: readonly FleetProviderView[];
   readonly parked: readonly ParkedTaskView[];
   readonly routingDecisions: readonly RoutingDecisionView[];
+  /** Live queue snapshot (issue #345) — `[]` when no queue is wired. */
+  readonly queue: readonly QueuedTaskView[];
 }
 
 /** chat-send response (issue #157) — the journaled user message. */
@@ -3011,13 +3042,19 @@ export class CommandApi {
       };
     });
 
-    // Routing history: last 24h of failover/park/resume events.
+    // Routing history: last 24h of failover/park/resume events plus the
+    // scheduler's own verdicts (issue #344/#345) — queue waits and
+    // parallel consents are routing decisions the fleet explains.
     const now = new Date();
     const since = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
     const routing = this.eventRepository
       .listByTimestampRange(since, now.toISOString())
       .filter(
-        (e) => e.kind === 'TaskFailedOver' || e.kind === 'TaskParked' || e.kind === 'TaskResumed',
+        (e) =>
+          e.kind === 'TaskFailedOver' ||
+          e.kind === 'TaskParked' ||
+          e.kind === 'TaskResumed' ||
+          e.kind === 'RoutingDecision',
       );
     const objectiveOf = (taskId: string): string =>
       this.taskStore.getById(taskId)?.objective ?? taskId;
@@ -3030,7 +3067,9 @@ export class CommandApi {
           ? `${objective} → ${String(p['toProvider'] ?? '?')}: ${String(p['reason'] ?? 'failover')}`
           : e.kind === 'TaskParked'
             ? `${objective} parked: ${String(p['reason'] ?? 'no provider capacity')}`
-            : `${objective} resumed on ${String(p['provider'] ?? '?')}`;
+            : e.kind === 'TaskResumed'
+              ? `${objective} resumed on ${String(p['provider'] ?? '?')}`
+              : `${objective} queued on ${String(p['agentId'] ?? '?')}: ${String(p['decision'] ?? '?')} — ${String(p['reason'] ?? '')}`;
       return { taskId: e.taskId, objective, kind: e.kind, summary, timestamp: e.timestamp };
     });
 
@@ -3058,7 +3097,25 @@ export class CommandApi {
       });
     }
 
-    return { ok: true, providers, parked, routingDecisions };
+    // Queue (issue #345): the scheduler's live snapshot — position,
+    // provider lane, the reserved session each entry lands on, and the
+    // computed wait reason. `resumeAt` is the journaled quota reset,
+    // the only clock-based estimate this surface may report.
+    const queue: QueuedTaskView[] = (this.taskQueue?.snapshot() ?? []).map((entry) => ({
+      taskId: entry.taskId,
+      objective: objectiveOf(entry.taskId),
+      position: entry.position,
+      provider: entry.agentId,
+      projectId: entry.projectId ?? null,
+      sessionId: entry.sessionId,
+      queueKey: entry.queueKey,
+      priority: entry.priority,
+      waitReason: entry.waitReason,
+      resumeAt: entry.wait?.resumeAt ?? null,
+      enqueuedAt: entry.enqueuedAt,
+    }));
+
+    return { ok: true, providers, parked, routingDecisions, queue };
   }
 
   /**

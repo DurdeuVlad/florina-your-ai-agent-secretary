@@ -635,7 +635,15 @@ export class FlorinaDaemon extends EventEmitter {
       this.adapterRegistry = new AdapterRegistry();
       // The stub factory creates adapters WITHOUT a direct bus reference so
       // the SessionManager is the sole event publisher (no duplicates).
-      this.adapterRegistry.register(STUB_ADAPTER_ID, () => new StubAdapter());
+      // FLORINA_STUB_DELAY_MS paces the canned event stream — test and
+      // visual-qa harnesses use it to hold a stub session open long
+      // enough to observe queue/scheduling behavior; unset → 0 (issue
+      // #345).
+      const stubDelayMs = Number(process.env['FLORINA_STUB_DELAY_MS'] ?? 0) || 0;
+      this.adapterRegistry.register(
+        STUB_ADAPTER_ID,
+        () => new StubAdapter(undefined, { delayMs: stubDelayMs }),
+      );
 
       // Local provider attachment: probe the provider CLIs declared in
       // PROVIDER_MANIFESTS and register their real adapters so tasks

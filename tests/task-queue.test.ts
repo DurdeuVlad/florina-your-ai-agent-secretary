@@ -19,7 +19,11 @@ import type {
 } from '../src/core/application/ports/outbound/agent-runtime.js';
 import { SessionManager } from '../src/core/application/use-cases/tasks/session-manager.js';
 import { CommandApi } from '../src/daemon/command-api.js';
-import type { CommandApiDeps, StartTaskResponse } from '../src/daemon/command-api.js';
+import type {
+  CommandApiDeps,
+  StartTaskResponse,
+  FleetResponse,
+} from '../src/daemon/command-api.js';
 import { TaskQueue } from '../src/core/application/use-cases/scheduling/task-queue.js';
 import { EventJournalWriter } from '../src/core/application/use-cases/journal/event-journal-writer.js';
 import { QuotaLedger } from '../src/daemon/quota-ledger.js';
@@ -942,5 +946,55 @@ describe('start-task + scheduler policy (issue #344)', () => {
       'waiting: session busy',
       'waiting: session busy',
     ]);
+  });
+
+  /* Fleet view (issue #345): the queue surface answers "where is my
+   * task" from the same snapshot the scheduler holds — position,
+   * provider lane, reserved session, computed wait reason, and the
+   * journaled quota reset as the only clock estimate. */
+  it('query-fleet reports queued tasks with position, reason, and reserved session', async () => {
+    const adapter = new BlockingAdapter();
+    const { api } = apiWithAdapter(adapter);
+    const running = makeTask(f, { id: 'task_running' });
+    const queued = makeTask(f, { id: 'task_queued', objective: 'queued probe' });
+
+    await startTask(api, running.id);
+    await startTask(api, queued.id);
+
+    const res = (await api.execute({ kind: 'query-fleet' })) as FleetResponse;
+    expect(res.ok).toBe(true);
+    const row = res.queue.find((q) => q.taskId === queued.id);
+    expect(row).toBeDefined();
+    expect(row!.objective).toBe('queued probe');
+    expect(row!.position).toBe(1);
+    expect(row!.provider).toBe(f.agentId);
+    expect(row!.waitReason).toBe('waiting: session busy');
+    expect(row!.resumeAt).toBeNull();
+    expect(row!.sessionId).toBe(f.queue.get(queued.id)!.sessionId);
+    // A dispatched task does not linger in the queue section.
+    expect(res.queue.some((q) => q.taskId === running.id)).toBe(false);
+    // The scheduler's verdict is explainable in the decision feed too.
+    expect(
+      res.routingDecisions.some(
+        (d) => d.kind === 'RoutingDecision' && d.summary.includes('session-busy'),
+      ),
+    ).toBe(true);
+  });
+
+  it('query-fleet carries the journaled quota reset for a blocked parallel entry', async () => {
+    const adapter = new BlockingAdapter();
+    const ledger = new QuotaLedger();
+    ledger.markExhausted(f.agentId, { resetsAt: '2026-10-11T06:00:00.000Z' });
+    const { api } = apiWithAdapter(adapter, { ledger });
+    const running = makeTask(f, { id: 'task_running' });
+    const parked = makeTask(f, { id: 'task_parked', parallelizable: true });
+
+    await startTask(api, running.id);
+    await startTask(api, parked.id);
+
+    const res = (await api.execute({ kind: 'query-fleet' })) as FleetResponse;
+    const row = res.queue.find((q) => q.taskId === parked.id);
+    expect(row!.resumeAt).toBe('2026-10-11T06:00:00.000Z');
+    expect(row!.waitReason).toContain('quota');
   });
 });
