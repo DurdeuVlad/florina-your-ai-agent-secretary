@@ -29,6 +29,11 @@ const SELF_JOURNALED_KINDS: ReadonlySet<SupervisorEventKind> = new Set([
   'ContextCondensed',
   'ApprovalGranted',
   'ApprovalRevoked',
+  // Task queue lifecycle (issue #343) — the TaskQueue journals its own
+  // events so enqueue durability can fail loudly; publishing is for
+  // live subscribers only.
+  'TaskQueued',
+  'TaskDequeued',
 ]);
 
 export interface EventJournalWriterDeps {

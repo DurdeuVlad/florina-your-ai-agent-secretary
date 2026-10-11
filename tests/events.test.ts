@@ -34,6 +34,8 @@ import {
   type SessionPooledEvent,
   type SessionReusedEvent,
   type ContextMaintainedEvent,
+  type TaskQueuedEvent,
+  type TaskDequeuedEvent,
 } from '../src/domain/events.js';
 
 /** Common envelope shared by every test event. */
@@ -272,12 +274,27 @@ const validExamples: SupervisorEvent[] = [
     previousTaskId: 'task-41',
     detail: 'provider resumed with carry-over digest',
   } satisfies ContextMaintainedEvent,
+  {
+    ...base,
+    type: 'TaskQueued',
+    queueKey: 'codex::proj-1',
+    priority: 'med',
+    projectId: 'proj-1',
+    workingDir: '/repo/wt',
+    prompt: 'queued objective',
+  } satisfies TaskQueuedEvent,
+  {
+    ...base,
+    type: 'TaskDequeued',
+    queueKey: 'codex::proj-1',
+    reason: 'scheduled',
+  } satisfies TaskDequeuedEvent,
 ];
 
 describe('SupervisorEvent schema', () => {
   describe('SUPERVISOR_EVENT_TYPES', () => {
-    it('lists exactly the 28 canonical variants', () => {
-      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(28);
+    it('lists exactly the 30 canonical variants', () => {
+      expect(SUPERVISOR_EVENT_TYPES).toHaveLength(30);
       expect(SUPERVISOR_EVENT_TYPES).toEqual([
         'AgentStarted',
         'AgentProgress',
@@ -307,6 +324,8 @@ describe('SupervisorEvent schema', () => {
         'SessionPooled',
         'SessionReused',
         'ContextMaintained',
+        'TaskQueued',
+        'TaskDequeued',
       ]);
     });
   });

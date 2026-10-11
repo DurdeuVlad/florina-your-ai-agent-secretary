@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   attention_item_ids TEXT NOT NULL DEFAULT '[]',    -- JSON: EntityId[]
   capsule_id         TEXT NOT NULL,
   worktree_path      TEXT,
+  priority           TEXT,
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects(id)

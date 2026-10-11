@@ -86,7 +86,7 @@ describe('storage: database initialization & migrations', () => {
   it('initializes an in-memory database and runs migrations', () => {
     const db = new StorageDatabase({ path: ':memory:' });
     const result = db.open();
-    expect(result.appliedVersion).toBe(5);
+    expect(result.appliedVersion).toBe(6);
     expect(db.isOpen).toBe(true);
     db.close();
     expect(db.isOpen).toBe(false);
@@ -97,7 +97,7 @@ describe('storage: database initialization & migrations', () => {
     db.open();
     // Running runMigrations again on the same connection should be a no-op.
     const version = runMigrations(db.connection);
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     db.close();
   });
 
@@ -889,7 +889,7 @@ describe('storage: migration framework is forward-only', () => {
       version: number;
       description: string;
     }[];
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(6);
     expect(rows[0].version).toBe(1);
     expect(rows[0].description).toContain('Create all tables');
     expect(rows[1].version).toBe(2);
@@ -908,13 +908,13 @@ describe('storage: migration framework is forward-only', () => {
     const tmp = path.join(os.tmpdir(), `flor-test-${Date.now()}.db`);
     const db1 = new StorageDatabase({ path: tmp });
     const r1 = db1.open();
-    expect(r1.appliedVersion).toBe(5);
+    expect(r1.appliedVersion).toBe(6);
     db1.close();
 
     const db2 = new StorageDatabase({ path: tmp });
     const r2 = db2.open();
     // Migrations should not be re-applied; version stays at 5.
-    expect(r2.appliedVersion).toBe(5);
+    expect(r2.appliedVersion).toBe(6);
     db2.close();
 
     // Clean up.

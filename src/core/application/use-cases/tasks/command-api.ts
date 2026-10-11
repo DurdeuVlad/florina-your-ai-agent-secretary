@@ -119,6 +119,8 @@ import type {
   MetricsQueryService,
 } from '../attention/attention-metrics.js';
 import type { SessionManager } from './session-manager.js';
+import type { TaskQueue, QueueSnapshotEntry } from '../scheduling/task-queue.js';
+import { queueKeyOf } from '../scheduling/task-queue.js';
 
 /* ================================================================== *
  * Shared types
@@ -215,6 +217,12 @@ export interface TaskSnapshot {
   readonly updatedAt: string;
   /** Number of events recorded in the journal for this task. */
   readonly eventCount: number;
+  /**
+   * Durable-queue membership (issue #343): present while the task waits
+   * in the scheduling queue — lane position and the computed wait
+   * reason. Absent when the task is not queued.
+   */
+  readonly queueState?: { position: number; waitReason: string; sessionId: string };
 }
 
 /* ================================================================== *
@@ -227,6 +235,15 @@ export interface StartTaskCommand {
   readonly taskId: string;
   readonly agentId: string;
   readonly sessionConfig: SessionConfig;
+  /**
+   * Internal marker: set by the queue scheduler when it dispatches a
+   * queued entry (issue #343). Callers never set it — a dispatch driven
+   * by the scheduler bypasses enqueue and uses the entry's reserved
+   * session id.
+   */
+  readonly scheduledByQueue?: boolean;
+  /** Reserved run id carried by the queued entry — scheduler dispatch only. */
+  readonly queueSessionId?: string;
 }
 
 /** Stop (cancel) a running task. */
@@ -360,6 +377,15 @@ export interface QueryFleetCommand {
  */
 export interface QueryProvidersCommand {
   readonly kind: 'query-providers';
+}
+
+/**
+ * Query the durable task queue (issue #343): every queued task with its
+ * lane position and computed wait reason. Positions and reasons are
+ * derived from live scheduler state — reported, never stored.
+ */
+export interface QueryQueueCommand {
+  readonly kind: 'query-queue';
 }
 
 /** List tasks, optionally filtered by status. */
@@ -770,6 +796,7 @@ export type Command =
   | QueryEventsCommand
   | QueryFleetCommand
   | QueryProvidersCommand
+  | QueryQueueCommand
   | ListTasksCommand
   | PruneWorktreeCommand
   | ShutdownCommand
@@ -824,6 +851,7 @@ export const COMMAND_KINDS: readonly string[] = [
   'query-events',
   'query-fleet',
   'query-providers',
+  'query-queue',
   'list-tasks',
   'prune-worktree',
   'shutdown',
@@ -868,6 +896,22 @@ export interface StartTaskResponse {
   readonly ok: boolean;
   readonly taskId: string;
   readonly sessionId: string;
+  readonly error?: string;
+  /**
+   * Present when the task entered (or already sat in) the durable queue
+   * instead of dispatching immediately (issue #343): its lane position
+   * and computed wait reason. `sessionId` carries the run id reserved
+   * for the eventual dispatch.
+   */
+  readonly queued?: boolean;
+  readonly queuePosition?: number;
+  readonly waitReason?: string;
+}
+
+/** Response to `query-queue` (issue #343): the materialized queue snapshot. */
+export interface QueryQueueResponse {
+  readonly ok: boolean;
+  readonly entries: QueueSnapshotEntry[];
   readonly error?: string;
 }
 
@@ -1473,7 +1517,7 @@ export type ApprovalStore = Pick<ApprovalRepositoryPort, 'getById' | 'update'>;
  * roll back an inserted session row when a subsequent step in `start-task`
  * fails before any journal events reference the session.
  */
-export type SessionStore = Pick<SessionRepositoryPort, 'insert' | 'delete'>;
+export type SessionStore = Pick<SessionRepositoryPort, 'insert' | 'delete' | 'getById' | 'update'>;
 
 /**
  * Minimal agent-store surface used by `start-task` to materialize the
@@ -1615,6 +1659,13 @@ export interface CommandApiDeps {
    */
   readonly providerReadiness?: ProviderReadiness;
   /**
+   * Durable task queue (issue #343). When wired, `start-task` submissions
+   * enter a journaled queue and dispatch only when the lane is idle;
+   * `query-queue` reports position and wait reason, and `list-tasks`
+   * annotates queued tasks. Absent → the pre-#343 spawn-or-fail path.
+   */
+  readonly taskQueue?: TaskQueue;
+  /**
    * Chat-model readiness snapshot (issue #294). The composition root
    * computes it live — configured state, key source, last classified
    * failure — because those facts live at the composition boundary.
@@ -1720,6 +1771,7 @@ export class CommandApi {
   private readonly quotaLedger?: QuotaLedger;
   private readonly providerAttachment?: CommandApiDeps['providerAttachment'];
   private readonly providerReadiness?: ProviderReadiness;
+  private readonly taskQueue?: TaskQueue;
   private readonly chatModelStatus?: CommandApiDeps['chatModelStatus'];
   private readonly terminalLauncher?: CommandApiDeps['terminalLauncher'];
   private readonly platform?: CommandApiDeps['platform'];
@@ -1761,6 +1813,7 @@ export class CommandApi {
     this.quotaLedger = deps.quotaLedger;
     this.providerAttachment = deps.providerAttachment;
     this.providerReadiness = deps.providerReadiness;
+    this.taskQueue = deps.taskQueue;
     this.chatModelStatus = deps.chatModelStatus;
     this.terminalLauncher = deps.terminalLauncher;
     this.platform = deps.platform;
@@ -1850,6 +1903,8 @@ export class CommandApi {
         return this.handleQueryFleet();
       case 'query-providers':
         return this.handleQueryProviders();
+      case 'query-queue':
+        return this.handleQueryQueue();
       case 'signin-provider':
         return this.handleSigninProvider(command);
       case 'install-provider':
@@ -1993,7 +2048,16 @@ export class CommandApi {
       };
     }
 
-    const sessionId = generateId('session');
+    // Durable queue (issue #343): a submission enters the journaled queue
+    // and the scheduler decides when the lane may dispatch — scheduling is
+    // a decision, not an accident. Scheduler-driven dispatches
+    // (`scheduledByQueue`) skip straight to the spawn path below with the
+    // entry's reserved session id.
+    if (cmd.scheduledByQueue !== true && this.taskQueue !== undefined) {
+      return this.enqueueTask(cmd, task);
+    }
+
+    const sessionId = cmd.queueSessionId ?? generateId('session');
     const ctx: TransitionContext = {
       sessionId,
       agentId: cmd.agentId,
@@ -2100,7 +2164,19 @@ export class CommandApi {
       capsuleId: generateId('capsule'),
     };
     try {
-      this.sessionStore.insert(session);
+      // A queued dispatch (#343) reuses the `pending` row the enqueue
+      // inserted — update it to `running` instead of inserting a
+      // duplicate row under the reserved session id.
+      const reserved = cmd.scheduledByQueue === true ? this.sessionStore.getById(sessionId) : null;
+      if (reserved !== null && reserved.status === 'pending') {
+        this.sessionStore.update({
+          ...reserved,
+          status: 'running',
+          startedAt: session.startedAt,
+        });
+      } else {
+        this.sessionStore.insert(session);
+      }
     } catch (err) {
       await this.rollbackAdapterSession(cmd.taskId);
       return {
@@ -2189,6 +2265,256 @@ export class CommandApi {
   }
 
   /**
+   * Enter the durable queue (issue #343): materialize the agents row,
+   * reserve the run id with a `pending` session row (the journal's
+   * session_id FK requires a real row), journal `TaskQueued`, then let
+   * the scheduler attempt an immediate dispatch. The response reports
+   * queue membership honestly — `queued: true` with position/reason —
+   * or the dispatch result when the lane was free.
+   */
+  private async enqueueTask(cmd: StartTaskCommand, task: Task): Promise<StartTaskResponse> {
+    const queue = this.taskQueue!;
+    // Idempotent re-submission: the entry already exists.
+    const existing = queue.get(cmd.taskId);
+    if (existing !== undefined) {
+      return this.queuedStartResponse(existing.taskId);
+    }
+
+    // Resolve the adapter to learn its honest fidelity tier — same rule
+    // the dispatch path applies when it materializes the agents row.
+    let adapterTier: AdapterFidelityTier = 'E';
+    if (this.adapterRegistry) {
+      try {
+        adapterTier = this.adapterRegistry.create(cmd.agentId).fidelityTier;
+      } catch (err) {
+        this.providerReadiness?.recordFailure(cmd.agentId, err);
+        return {
+          ok: false,
+          taskId: cmd.taskId,
+          sessionId: '',
+          error: `Unknown or unavailable adapter for agent "${cmd.agentId}": ${sanitizeFailureText(err)}`,
+        };
+      }
+    }
+    if (this.agentStore && this.agentStore.getById(cmd.agentId) === null) {
+      this.agentStore.insert({
+        id: cmd.agentId,
+        name: cmd.agentId,
+        provider: cmd.agentId,
+        fidelityTier: adapterTier,
+        runtime: { kind: 'cli' },
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    // Reserve the run id: the pending session row satisfies the
+    // events.session_id FK for the TaskQueued event, and the eventual
+    // dispatch reuses the same id (pending → running).
+    const sessionId = generateId('session');
+    try {
+      this.sessionStore.insert({
+        id: sessionId,
+        taskId: cmd.taskId,
+        agentId: cmd.agentId,
+        status: 'pending',
+        startedAt: new Date().toISOString(),
+        eventIds: [],
+        deliverableIds: [],
+        capsuleId: generateId('capsule'),
+      });
+    } catch (err) {
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        sessionId: '',
+        error: `Failed to queue task: ${errorMessage(err)}`,
+      };
+    }
+
+    let entry;
+    try {
+      entry = queue.enqueue({
+        taskId: cmd.taskId,
+        agentId: cmd.agentId,
+        projectId: task.projectId,
+        priority: task.priority ?? 'MED',
+        sessionId,
+        agentTier: cmd.sessionConfig.adapterFidelityTier ?? adapterTier,
+        spec: {
+          workingDir: cmd.sessionConfig.workingDir,
+          ...(cmd.sessionConfig.prompt !== undefined ? { prompt: cmd.sessionConfig.prompt } : {}),
+          ...(cmd.sessionConfig.model !== undefined ? { model: cmd.sessionConfig.model } : {}),
+          ...(cmd.sessionConfig.autonomyLevel !== undefined
+            ? { autonomyLevel: cmd.sessionConfig.autonomyLevel }
+            : {}),
+          ...(cmd.sessionConfig.verifyCommands !== undefined
+            ? { verifyCommands: cmd.sessionConfig.verifyCommands }
+            : {}),
+          ...(cmd.sessionConfig.verifyBudget !== undefined
+            ? { verifyBudget: cmd.sessionConfig.verifyBudget }
+            : {}),
+          ...(cmd.sessionConfig.mcpServers !== undefined
+            ? { mcpServers: cmd.sessionConfig.mcpServers }
+            : {}),
+          ...(cmd.sessionConfig.executionBrief !== undefined
+            ? { executionBrief: cmd.sessionConfig.executionBrief }
+            : {}),
+        },
+      });
+    } catch (err) {
+      // Journal write failed — nothing is durable, so roll back the
+      // pending session row rather than leave an orphan (DEC-011).
+      this.rollbackSessionRow(sessionId);
+      return {
+        ok: false,
+        taskId: cmd.taskId,
+        sessionId: '',
+        error: `Failed to queue task: ${errorMessage(err)}`,
+      };
+    }
+
+    // The lane may be idle — attempt a dispatch for the lane head (not
+    // necessarily this entry: priority ordering decides).
+    const outcome = await this.pumpQueue(entry.queueKey);
+    if (outcome?.taskId === cmd.taskId) {
+      if (outcome.response.ok) {
+        return { ok: true, taskId: cmd.taskId, sessionId };
+      }
+      // The dispatch attempt itself failed — report it honestly rather
+      // than pretending the submission queued cleanly. The entry stays
+      // queued (with its failure wait reason) for the next drain.
+      const snap = queue.snapshot().find((e) => e.taskId === cmd.taskId);
+      return {
+        ...outcome.response,
+        sessionId,
+        queued: true,
+        queuePosition: snap?.position ?? 1,
+        waitReason: snap?.waitReason ?? 'waiting: provider',
+      };
+    }
+    return this.queuedStartResponse(cmd.taskId);
+  }
+
+  /**
+   * Drain a lane's head when the lane is idle (issue #343). A serial lane
+   * dispatches one task at a time — a busy lane or a failed head leaves
+   * the entry queued with an honest wait reason. Returns the dispatched
+   * head's identity and response, or `undefined` when nothing was
+   * attempted (empty lane, busy lane, or a pump already in flight).
+   */
+  /** Drain every queued lane whose head can dispatch now (issue #343). */
+  async drainQueue(): Promise<void> {
+    for (const key of this.taskQueue?.laneKeys() ?? []) {
+      await this.pumpQueue(key);
+    }
+  }
+
+  private readonly pumpingLanes = new Set<string>();
+
+  private async pumpQueue(
+    queueKey: string,
+  ): Promise<{ taskId: string; response: StartTaskResponse } | undefined> {
+    const queue = this.taskQueue;
+    if (queue === undefined) {
+      return undefined;
+    }
+    // Reentrancy guard: one in-flight dispatch per lane — two tasks in
+    // the same lane must never race a `laneBusy` check into two spawns.
+    if (this.pumpingLanes.has(queueKey)) {
+      return undefined;
+    }
+    const head = queue.head(queueKey); // prunes expired entries first
+    if (head === undefined || this.laneBusy(queueKey)) {
+      return undefined;
+    }
+    this.pumpingLanes.add(queueKey);
+    const response = (await this.execute({
+      kind: 'start-task',
+      taskId: head.taskId,
+      agentId: head.agentId,
+      scheduledByQueue: true,
+      queueSessionId: head.sessionId,
+      sessionConfig: {
+        workingDir: head.spec.workingDir,
+        ...(head.spec.prompt !== undefined ? { prompt: head.spec.prompt } : {}),
+        ...(head.spec.model !== undefined ? { model: head.spec.model } : {}),
+        ...(head.spec.autonomyLevel !== undefined
+          ? { autonomyLevel: head.spec.autonomyLevel }
+          : {}),
+        ...(head.spec.adapterFidelityTier !== undefined
+          ? {
+              adapterFidelityTier: head.spec
+                .adapterFidelityTier as SessionConfig['adapterFidelityTier'],
+            }
+          : {}),
+        ...(head.spec.mcpServers !== undefined ? { mcpServers: head.spec.mcpServers } : {}),
+        ...(head.spec.executionBrief !== undefined
+          ? { executionBrief: head.spec.executionBrief }
+          : {}),
+        ...(head.spec.verifyCommands !== undefined
+          ? { verifyCommands: head.spec.verifyCommands }
+          : {}),
+        ...(head.spec.verifyBudget !== undefined ? { verifyBudget: head.spec.verifyBudget } : {}),
+      },
+    })) as StartTaskResponse;
+    try {
+      if (response.ok) {
+        try {
+          queue.dequeue(head.taskId, 'scheduled');
+        } catch (err) {
+          // The dispatch succeeded but the close-out couldn't be journaled —
+          // mark the entry so the next rebuild/pump doesn't silently
+          // re-dispatch; the AgentStarted event itself closes the fold.
+          queue.recordDispatchFailure(
+            head.taskId,
+            `dispatch succeeded but dequeue journal failed: ${errorMessage(err)}`,
+          );
+        }
+        return { taskId: head.taskId, response };
+      }
+      queue.recordDispatchFailure(head.taskId, response.error ?? 'dispatch failed');
+      return { taskId: head.taskId, response };
+    } finally {
+      this.pumpingLanes.delete(queueKey);
+    }
+  }
+
+  /** Whether the lane currently holds an active session. */
+  private laneBusy(queueKey: string): boolean {
+    if (this.sessionManager === undefined) {
+      return false;
+    }
+    for (const session of this.sessionManager.getActiveSessions().values()) {
+      if (queueKeyOf(session.agentId, session.projectId) === queueKey) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The honest queued response — position + computed wait reason. */
+  private queuedStartResponse(taskId: string): StartTaskResponse {
+    const snap = this.taskQueue?.snapshot().find((e) => e.taskId === taskId);
+    const entry = this.taskQueue?.get(taskId);
+    return {
+      ok: true,
+      taskId,
+      sessionId: entry?.sessionId ?? snap?.sessionId ?? '',
+      queued: true,
+      queuePosition: snap?.position ?? 1,
+      waitReason: snap?.waitReason ?? 'waiting: dispatch',
+    };
+  }
+
+  /** query-queue: the materialized queue snapshot (issue #343). */
+  private handleQueryQueue(): QueryQueueResponse {
+    if (this.taskQueue === undefined) {
+      return { ok: false, entries: [], error: 'task queue is not configured' };
+    }
+    return { ok: true, entries: this.taskQueue.snapshot() };
+  }
+
+  /**
    * Roll back an adapter session by stopping it via the session manager.
    * Used when a subsequent step in `start-task` fails after the adapter
    * session was already started. Best-effort: errors are swallowed so the
@@ -2243,8 +2569,33 @@ export class CommandApi {
       };
     }
 
-    const sessionId = task.sessionIds[task.sessionIds.length - 1] ?? 'unknown';
-    const agentId = task.agentIds[task.agentIds.length - 1] ?? 'unknown';
+    // Queued-task cancellation (issue #343): the task never spawned an
+    // adapter — remove it from the durable queue BEFORE the state
+    // transition so no scheduler can race the cancel into a dispatch,
+    // and mark its reserved pending session row stopped.
+    const queued = this.taskQueue?.get(cmd.taskId);
+    if (queued !== undefined) {
+      try {
+        this.taskQueue!.dequeue(cmd.taskId, 'cancelled');
+      } catch (err) {
+        return {
+          ok: false,
+          taskId: cmd.taskId,
+          error: `Failed to remove queued task: ${errorMessage(err)}`,
+        };
+      }
+      const pending = this.sessionStore.getById(queued.sessionId);
+      if (pending !== null && pending.status === 'pending') {
+        this.sessionStore.update({
+          ...pending,
+          status: 'stopped',
+          endedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    const sessionId = queued?.sessionId ?? task.sessionIds[task.sessionIds.length - 1] ?? 'unknown';
+    const agentId = queued?.agentId ?? task.agentIds[task.agentIds.length - 1] ?? 'unknown';
     const ctx: TransitionContext = {
       sessionId,
       agentId,
@@ -2955,9 +3306,16 @@ export class CommandApi {
     if (cmd.status !== undefined) {
       tasks = tasks.filter((t) => t.state === cmd.status);
     }
+    // Queue visibility (issue #343): annotate queued tasks with their
+    // lane position and computed wait reason.
+    const queueByTask = new Map(
+      (this.taskQueue?.snapshot() ?? []).map((e) => [e.taskId, e] as const),
+    );
     return {
       ok: true,
-      tasks: tasks.map((t) => toTaskSnapshot(t, this.eventRepository.listByTask(t.id).length)),
+      tasks: tasks.map((t) =>
+        toTaskSnapshot(t, this.eventRepository.listByTask(t.id).length, queueByTask.get(t.id)),
+      ),
     };
   }
 
@@ -3839,7 +4197,11 @@ function toAttentionItemSnapshot(item: AttentionItem): AttentionItemSnapshot {
 }
 
 /** Map a {@link Task} to a serializable snapshot with an event count. */
-function toTaskSnapshot(task: Task, eventCount: number): TaskSnapshot {
+function toTaskSnapshot(
+  task: Task,
+  eventCount: number,
+  queueEntry?: QueueSnapshotEntry,
+): TaskSnapshot {
   return {
     id: task.id,
     projectId: task.projectId,
@@ -3851,6 +4213,15 @@ function toTaskSnapshot(task: Task, eventCount: number): TaskSnapshot {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     eventCount,
+    ...(queueEntry !== undefined
+      ? {
+          queueState: {
+            position: queueEntry.position,
+            waitReason: queueEntry.waitReason,
+            sessionId: queueEntry.sessionId,
+          },
+        }
+      : {}),
   };
 }
 
@@ -3922,7 +4293,9 @@ export type CommandResponse<C extends Command> = C extends StartTaskCommand
                                                     ? ReposResponse
                                                     : C extends QueryProvidersCommand
                                                       ? ProvidersResponse
-                                                      : Response;
+                                                      : C extends QueryQueueCommand
+                                                        ? QueryQueueResponse
+                                                        : Response;
 
 /**
  * Narrowing wrapper around {@link CommandApi.execute} that returns the
