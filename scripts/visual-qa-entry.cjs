@@ -123,6 +123,13 @@ async function checkNoHOverflow(win, label) {
 let fixtureDir = null;
 
 async function shotApp() {
+  /* Queue-seed pacing (issue #345): when the desktop auto-starts the
+   * daemon, its stub factory inherits this env — ~3s/event keeps a stub
+   * session alive long enough for a second submission to land in the
+   * queue. An explicit override wins; an already-running daemon simply
+   * ignores it (the seed degrades to a brief queue stint). */
+  process.env.FLORINA_STUB_DELAY_MS ??= '3000';
+
   /* First-run setup fixture (issue #334): the setup card only renders
    * when onboardingState is 'open' — never true on a configured machine.
    * Pointing FLORINA_DESKTOP_SETTINGS_DIR at a temp dir gives the app a
@@ -213,6 +220,128 @@ async function shotApp() {
     await checkNoHOverflow(win, view);
   }
 
+  /* Queue section seed (issue #345): a live queued entry needs the
+   * provider's session busy at enqueue time. FLORINA_STUB_DELAY_MS
+   * (honored by the daemon's stub factory, inherited by an auto-started
+   * daemon) paces the stub run long enough to hold the lane through the
+   * capture. Seeded through the real WS command surface — same path a
+   * manager takes. When the daemon has no projects, or its stub run is
+   * already over, the section still renders — just empty. */
+  const daemonUrl = process.env.FLORINA_DAEMON_URL ?? 'ws://127.0.0.1:17419';
+  const seedIds = { blocker: null, queued: null };
+  let seedWs = null;
+  {
+    const WebSocket = require('ws');
+    const ws = new WebSocket(daemonUrl);
+    /* Sequential request/response — the daemon echoes no correlation
+     * id, so each send waits for its own command frame (pushes carry
+     * `type`, command answers carry `ok`). */
+    const inbox = [];
+    let waiter = null;
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(String(data));
+        if (msg === null || typeof msg !== 'object') return;
+        if ('ok' in msg && msg.type !== 'auth') {
+          if (waiter !== null) waiter(msg);
+          else inbox.push(msg);
+        } else if (msg.type === 'auth') {
+          if (waiter !== null) waiter(msg);
+          else inbox.push(msg);
+        }
+      } catch {
+        /* non-JSON frame — ignore */
+      }
+    });
+    const next = () =>
+      inbox.length > 0
+        ? Promise.resolve(inbox.shift())
+        : new Promise((r) => {
+            waiter = r;
+          });
+    /* The daemon echoes no correlation id — a slow earlier response can
+     * arrive mid-window and masquerade as the current command's answer.
+     * `match` keeps polling until a frame actually looks like this
+     * command's response shape (bounded by the same timeout). */
+    const send = async (cmd, match) => {
+      ws.send(JSON.stringify(cmd));
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const msg = await Promise.race([
+          next(),
+          sleep(Math.max(0, deadline - Date.now())).then(() => null),
+        ]);
+        if (msg === null) return null;
+        if (msg.type === 'auth') continue;
+        if ('ok' in msg && (match === undefined || match(msg))) return msg;
+      }
+    };
+    const seeded = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 15000);
+      const finish = (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      };
+      const chain = async () => {
+        const listed = await send({ kind: 'list-tasks' }, (m) => Array.isArray(m.tasks));
+        const projectId = listed?.tasks?.find((t) => t.projectId)?.projectId ?? null;
+        if (projectId === null) return finish('no-project');
+        const isDelegate = (m) => 'status' in m || 'taskId' in m;
+        const blocker = await send(
+          {
+            kind: 'delegate-task',
+            projectId,
+            objective: 'visual-qa queue blocker',
+            preferProvider: 'stub',
+          },
+          isDelegate,
+        );
+        if (blocker?.taskId !== undefined) seedIds.blocker = blocker.taskId;
+        const queued = await send(
+          {
+            kind: 'delegate-task',
+            projectId,
+            objective: 'visual-qa queued probe',
+            preferProvider: 'stub',
+          },
+          isDelegate,
+        );
+        if (queued?.taskId !== undefined) seedIds.queued = queued.taskId;
+        finish(seedIds.queued !== null || seedIds.blocker !== null);
+      };
+      ws.once('open', async () => {
+        let token = process.env.FLORINA_DAEMON_TOKEN;
+        if (!token) {
+          try {
+            token = fs
+              .readFileSync(path.join(os.homedir(), '.florina', 'auth-token'), 'utf8')
+              .trim();
+          } catch {
+            token = undefined;
+          }
+        }
+        if (token) {
+          ws.send(JSON.stringify({ type: 'auth', token }));
+          const ack = await next();
+          if (ack?.ok !== true) return finish('auth-failed');
+        }
+        void chain();
+      });
+      ws.once('error', () => finish('unreachable'));
+    });
+    if (seeded === true) {
+      seedWs = ws;
+      console.log(
+        `[visual-qa] queue seeded — blocker=${seedIds.blocker ?? 'n/a'} queued=${seedIds.queued ?? 'n/a'}`,
+      );
+    } else {
+      console.log(
+        `[visual-qa] queue seed skipped — ${typeof seeded === 'string' ? seeded : 'no task landed'} (section still captures)`,
+      );
+      ws.close();
+    }
+  }
+
   // Work sub-tabs (issue #220): already on 'tasks' from the loop above
   // (it's the last APP_VIEWS entry before prefs... actually prefs is
   // last, so re-select tasks explicitly before clicking sub-tabs).
@@ -224,10 +353,44 @@ async function shotApp() {
     await win.webContents.executeJavaScript(
       `document.querySelector('[data-worksub="${sub}"]')?.click()`,
     );
+    if (sub === 'fleet' && seedWs !== null) {
+      // fleet:update is a daemon-driven push — wait for the seeded row
+      // to reach the DOM rather than a fixed settle (the queue refresh
+      // lands on the next pull cycle).
+      for (let i = 0; i < 20; i++) {
+        const seen = await win.webContents.executeJavaScript(
+          `document.getElementById('fleet')?.textContent.includes('visual-qa queued probe') ?? false`,
+        );
+        if (seen) break;
+        await sleep(400);
+      }
+    }
     await sleep(SETTLE_MS);
     await captureWindow(win, path.join(SHOTS, `app-work-${sub}.png`));
     console.log(`[visual-qa] captured Work sub-tab ${sub}`);
     await checkNoHOverflow(win, `work-${sub}`);
+  }
+
+  /* Queue seed cleanup (issue #345): cancel the queued entry while it's
+   * still queued (a real dequeue, journaled 'cancelled'), stop the
+   * blocker session, then prune both seed worktrees — the daemon is
+   * left as it was found. */
+  if (seedWs !== null) {
+    const cleanup = async () => {
+      for (const id of [seedIds.queued, seedIds.blocker]) {
+        if (id === null) continue;
+        seedWs.send(JSON.stringify({ kind: 'stop-task', taskId: id }));
+        await sleep(600);
+      }
+      for (const id of [seedIds.queued, seedIds.blocker]) {
+        if (id === null) continue;
+        seedWs.send(JSON.stringify({ kind: 'prune-worktree', taskId: id }));
+        await sleep(300);
+      }
+    };
+    await cleanup().catch(() => {});
+    seedWs.close();
+    console.log('[visual-qa] queue seed cleaned up (stop + prune)');
   }
 
   // Settings > Repos (issue #253): scrolled below Routing rules/Memory,
@@ -302,7 +465,6 @@ async function shotApp() {
   // Two extra Custom items at Medium/Low prove the per-priority icon
   // and chip-color gap fix (issue #265) in the same capture.
   const WebSocket = require('ws');
-  const daemonUrl = process.env.FLORINA_DAEMON_URL ?? 'ws://127.0.0.1:17419';
   const ws = new WebSocket(daemonUrl);
   const RAISES = [
     {

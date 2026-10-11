@@ -21,6 +21,7 @@ import type {
   FleetProviderView,
   FleetResponse,
   ParkedTaskView,
+  QueuedTaskView,
   RoutingDecisionView,
 } from '../../../../core/application/use-cases/tasks/command-api.js';
 import type { RenderTree } from './view-types.js';
@@ -66,6 +67,21 @@ function renderParked(p: ParkedTaskView): RenderTree {
   ]);
 }
 
+/**
+ * Queued rows (issue #345) are visually distinct from parked ones: the
+ * row leads with the lane position and carries the entry's priority as
+ * a slate chip. `resumeAt` is journaled quota-reset evidence only — the
+ * surface never invents an ETA.
+ */
+function renderQueued(q: QueuedTaskView): RenderTree {
+  const resume = q.resumeAt !== null ? ` · resumes ${clockOf(q.resumeAt)}` : '';
+  return el('FleetRow', {}, [
+    el('InspRowTitle', {}, [`#${q.position} ${q.objective}`]),
+    el('Chip', { variant: 'slate' }, [q.priority]),
+    el('InspRowSub', {}, [`${q.provider} · ${q.waitReason}${resume}`]),
+  ]);
+}
+
 function renderDecision(d: RoutingDecisionView): RenderTree {
   return el('FleetRow', {}, [
     el('InspRowTitle', {}, [d.summary]),
@@ -95,6 +111,20 @@ export function renderFleetScreen(fleet: FleetResponse): RenderTree {
       ]),
     );
     children.push(...fleet.parked.map(renderParked));
+  }
+
+  // The queue section is always rendered (issue #345): "a queue you
+  // can't see reads as lost work" — an honest empty state still answers
+  // "where is my task" better than an absent section. `?? []` keeps the
+  // renderer honest against a daemon that predates the field.
+  const queue = fleet.queue ?? [];
+  children.push(
+    el('SectionHeader', { label: 'Queue' }, [el('SectionCount', {}, [String(queue.length)])]),
+  );
+  if (queue.length === 0) {
+    children.push(el('EmptyState', {}, [el('EmptyHint', {}, ['no queued tasks'])]));
+  } else {
+    children.push(...queue.map(renderQueued));
   }
 
   children.push(

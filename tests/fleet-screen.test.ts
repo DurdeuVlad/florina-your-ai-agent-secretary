@@ -29,6 +29,7 @@ function fleet(partial: Partial<FleetResponse> = {}): FleetResponse {
     providers: [provider()],
     parked: [],
     routingDecisions: [],
+    queue: [],
     ...partial,
   };
 }
@@ -130,6 +131,80 @@ describe('renderFleetScreen', () => {
     const hints = findAll(tree, 'EmptyHint').map((h) => String(h.children?.[0]));
     expect(hints).toContain('no providers registered');
     expect(hints).toContain('no routing decisions journaled in the last 24h');
+  });
+
+  /* Queue section (issue #345): queued entries render distinctly from
+   * parked/running — lane position in the title, priority chip, and the
+   * computed wait reason; `resumeAt` is journaled quota-reset evidence
+   * only. */
+  it('renders queued tasks with position, provider, and wait reason', () => {
+    const tree = renderFleetScreen(
+      fleet({
+        queue: [
+          {
+            taskId: 'task_q1',
+            objective: 'refactor-ingest',
+            position: 1,
+            provider: 'codex',
+            projectId: 'proj_1',
+            sessionId: 'sess_q1',
+            queueKey: 'codex::proj_1',
+            priority: 'HIGH',
+            waitReason: 'waiting: session busy',
+            resumeAt: null,
+            enqueuedAt: '2026-01-01T14:10:00Z',
+          },
+        ],
+      }),
+    );
+    const headers = findAll(tree, 'SectionHeader').map((h) => h.props?.['label']);
+    expect(headers).toContain('Queue');
+    const titles = findAll(tree, 'InspRowTitle').map((t) => String(t.children?.[0]));
+    expect(titles.some((t) => t.startsWith('#1') && t.includes('refactor-ingest'))).toBe(true);
+    const subs = findAll(tree, 'InspRowSub').map((s) => String(s.children?.[0]));
+    expect(subs.some((s) => s.includes('codex') && s.includes('session busy'))).toBe(true);
+    const chips = findAll(tree, 'Chip').map((c) => c.children?.[0]);
+    expect(chips).toContain('HIGH');
+  });
+
+  it('renders a queued quota-blocked entry with its journaled resume time', () => {
+    const tree = renderFleetScreen(
+      fleet({
+        queue: [
+          {
+            taskId: 'task_q2',
+            objective: 'batch-translate',
+            position: 2,
+            provider: 'gemini',
+            projectId: null,
+            sessionId: 'sess_q2',
+            queueKey: 'gemini',
+            priority: 'MED',
+            waitReason: 'waiting: quota — resets at 2026-01-01T18:00:00Z',
+            resumeAt: '2026-01-01T18:00:00Z',
+            enqueuedAt: '2026-01-01T14:10:00Z',
+          },
+        ],
+      }),
+    );
+    const subs = findAll(tree, 'InspRowSub').map((s) => String(s.children?.[0]));
+    expect(subs.some((s) => s.includes('resumes 18:00'))).toBe(true);
+  });
+
+  it('renders the queue section with an honest empty state when nothing waits', () => {
+    const tree = renderFleetScreen(fleet());
+    const headers = findAll(tree, 'SectionHeader').map((h) => h.props?.['label']);
+    expect(headers).toContain('Queue');
+    const hints = findAll(tree, 'EmptyHint').map((h) => String(h.children?.[0]));
+    expect(hints).toContain('no queued tasks');
+  });
+
+  it('tolerates a queue field absent on the wire (older daemon)', () => {
+    const wire = fleet();
+    delete (wire as Record<string, unknown>)['queue'];
+    const tree = renderFleetScreen(wire);
+    const hints = findAll(tree, 'EmptyHint').map((h) => String(h.children?.[0]));
+    expect(hints).toContain('no queued tasks');
   });
 
   it('emits a JSON-serializable tree', () => {
