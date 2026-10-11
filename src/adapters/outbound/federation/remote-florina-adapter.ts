@@ -144,6 +144,12 @@ export class RemoteFlorinaAdapter implements AgentRuntimePort {
       ...(this.options.preferProvider !== undefined
         ? { preferProvider: this.options.preferProvider }
         : {}),
+      // The run's declared autonomy/approval policy rides the delegation —
+      // a remote child must see the same journaled authority a local run
+      // carries on AgentStarted, never an implicit widening.
+      ...(sessionConfig.autonomyLevel !== undefined
+        ? { autonomyLevel: sessionConfig.autonomyLevel }
+        : {}),
     })) as DelegateTaskResponse;
     if (res.ok !== true || res.status !== 'spawned' || res.taskId === undefined) {
       // A parked or refused child is a non-start at the adapter level —
@@ -165,6 +171,9 @@ export class RemoteFlorinaAdapter implements AgentRuntimePort {
       objective: sessionConfig.objective,
       workingDir: sessionConfig.workingDir,
       ...(sessionConfig.model !== undefined ? { model: sessionConfig.model } : {}),
+      ...(sessionConfig.autonomyLevel !== undefined
+        ? { autonomyLevel: sessionConfig.autonomyLevel }
+        : {}),
     });
     return { sessionId: sessionConfig.sessionId, started: true };
   }

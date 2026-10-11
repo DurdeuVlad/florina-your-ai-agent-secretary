@@ -181,6 +181,54 @@ describe('delegate-task', () => {
     await daemon.stop();
   });
 
+  it('carries a declared autonomyLevel onto the spawned run’s journaled AgentStarted', async () => {
+    const daemon = new FlorinaDaemon({
+      port: 0,
+      mcpPort: 0,
+      lockfile: lockfile(),
+      dbPath: ':memory:',
+      installSignalHandlers: false,
+      preferenceProfilePath: await stubProfile(),
+    });
+    await daemon.start();
+    const projectId = await seedChild(daemon);
+
+    const socket = await openWs(daemon.port);
+    wsSend(socket, {
+      kind: 'delegate-task',
+      projectId,
+      objective: 'remote work',
+      autonomyLevel: 'auto',
+    });
+    const res = await nextMessage(socket);
+    expect(res['ok']).toBe(true);
+    expect(res['status']).toBe('spawned');
+    const taskId = String(res['taskId']);
+    socket.close();
+
+    // The child journaled the run's declared policy on AgentStarted —
+    // remote delegations never silently widen or silently drop it. The
+    // stub adapter also emits its own AgentStarted (no policy fields), so
+    // the assertion targets the dispatch record that carries one.
+    const db = (
+      daemon as unknown as { db: { connection: import('better-sqlite3').Database } }
+    ).db.connection;
+    let found = false;
+    for (let i = 0; i < 400 && !found; i += 1) {
+      const rows = db
+        .prepare(
+          "SELECT payload FROM events WHERE task_id = ? AND kind = 'AgentStarted'",
+        )
+        .all(taskId) as { payload: string }[];
+      found = rows.some(
+        (r) => (JSON.parse(r.payload) as Record<string, unknown>)['autonomyLevel'] === 'auto',
+      );
+      if (!found) await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(found).toBe(true);
+    await daemon.stop();
+  });
+
   it('rejects delegation into an unknown project', async () => {
     const daemon = new FlorinaDaemon({
       port: 0,
@@ -298,6 +346,33 @@ describe('RemoteFlorinaAdapter', () => {
     expect(completed?.taskId).toBe('parent-task');
     expect(completed?.sessionId).toBe('parent-sess');
     expect(completed?.agentId).toBe('codex@server-x');
+  });
+
+  it('forwards a declared autonomyLevel on the wire and journals it locally', async () => {
+    const client = new FakeRemoteClient();
+    const adapter = new RemoteFlorinaAdapter(null, {
+      id: 'codex@server-x',
+      remote: { host: 'x', port: 1 },
+      projectId: 'proj-child',
+      client,
+    });
+    await adapter.connect();
+    const res = await adapter.startRun('parent-task', {
+      ...sessionConfig,
+      autonomyLevel: 'auto',
+    });
+    expect(res.started).toBe(true);
+    expect(client.sent[0]).toMatchObject({
+      kind: 'delegate-task',
+      autonomyLevel: 'auto',
+    });
+    const it = adapter.streamEvents()[Symbol.asyncIterator]();
+    const started = (await it.next()).value;
+    expect(started?.type).toBe('AgentStarted');
+    if (started?.type === 'AgentStarted') {
+      expect(started.autonomyLevel).toBe('auto');
+    }
+    await it.return?.();
   });
 
   it('drops child events for tasks this adapter did not delegate', async () => {

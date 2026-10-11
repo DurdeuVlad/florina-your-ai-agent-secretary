@@ -732,6 +732,22 @@ export interface DelegateTaskCommand {
   readonly preferProvider?: string;
   readonly preferModel?: string;
   readonly excludeProviders?: readonly string[];
+  /**
+   * Autonomy/approval policy for the spawned run (e.g. `'auto'` —
+   * journaled on `AgentStarted`). Forwarded to `spawnTask` so remote
+   * delegations can declare the same bounded authority local dispatches
+   * carry through `sessionConfig`.
+   */
+  readonly autonomyLevel?: string;
+  /**
+   * Objective verification checks for the spawned task (issue #339):
+   * shell commands run in the task worktree on completion claims.
+   * Forwarded to `spawnTask` — without them the worktree-cleanliness
+   * gate alone decides and the nudge loop has nothing to re-run.
+   */
+  readonly verifyCommands?: readonly string[];
+  /** Corrective re-dispatch budget for verify-failed runs (issue #340). */
+  readonly verifyBudget?: number;
 }
 
 /**
@@ -4023,6 +4039,9 @@ export class CommandApi {
       ...(cmd.preferProvider !== undefined ? { preferProvider: cmd.preferProvider } : {}),
       ...(cmd.preferModel !== undefined ? { preferModel: cmd.preferModel } : {}),
       ...(cmd.excludeProviders !== undefined ? { excludeProviders: cmd.excludeProviders } : {}),
+      ...(cmd.autonomyLevel !== undefined ? { autonomyLevel: cmd.autonomyLevel } : {}),
+      ...(cmd.verifyCommands !== undefined ? { verifyCommands: cmd.verifyCommands } : {}),
+      ...(cmd.verifyBudget !== undefined ? { verifyBudget: cmd.verifyBudget } : {}),
     });
     if (result.status === 'spawned') {
       return {

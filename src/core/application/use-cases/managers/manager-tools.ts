@@ -139,6 +139,12 @@ export interface SpawnTaskInput {
    */
   readonly verifyBudget?: number;
   /**
+   * Autonomy/approval policy for the spawned run (e.g. 'auto' lets the
+   * adapter answer in-session permission prompts) — forwarded into the
+   * run's session config and journaled on AgentStarted.
+   */
+  readonly autonomyLevel?: string;
+  /**
    * Task-declared parallelism consent (issue #344): the spawned task may
    * run alongside another session on the same provider when quota
    * headroom exists. Persisted on the task and journaled on
@@ -294,6 +300,7 @@ export class ManagerToolService {
         ...(launch.executionBrief !== undefined ? { executionBrief: launch.executionBrief } : {}),
         ...(input.verifyCommands !== undefined ? { verifyCommands: input.verifyCommands } : {}),
         ...(input.verifyBudget !== undefined ? { verifyBudget: input.verifyBudget } : {}),
+        ...(input.autonomyLevel !== undefined ? { autonomyLevel: input.autonomyLevel } : {}),
       },
     });
     if (!res.ok || !('sessionId' in res) || typeof res.sessionId !== 'string') {
