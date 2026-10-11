@@ -8,7 +8,7 @@
  * or WebSocket connections directly.
  */
 import type { AdapterFidelityTier } from '../../../domain/enums.js';
-import type { SupervisorEvent } from '../../../domain/events.js';
+import type { SupervisorEvent, ContextMaintenanceMode } from '../../../domain/events.js';
 
 /** Connection state tracked by every adapter. */
 export type AdapterConnectionState = 'disconnected' | 'connecting' | 'connected';
@@ -115,9 +115,12 @@ export const NO_SESSION_CAPABILITIES: AgentSessionCapabilities = {
  * How {@link AgentRuntimePort.maintainContext} preserved context:
  * the provider compacted its own window, a new run was started carrying
  * a caller-composed digest, or the adapter cannot maintain context at
- * all (the caller degrades to spawn-fresh — never a fake result).
+ * all (the caller degrades to spawn-fresh — never a fake result). The
+ * union is canonically declared in the domain (journaled by
+ * `ContextMaintained`/`SessionReused` events, issue #342) and
+ * re-exported here for adapter consumers.
  */
-export type ContextMaintenanceMode = 'compacted' | 'restarted-with-carryover' | 'unsupported';
+export type { ContextMaintenanceMode } from '../../../domain/events.js';
 
 /** What the caller supplies when asking an adapter to maintain context. */
 export interface MaintainContextRequest {
@@ -137,7 +140,14 @@ export interface MaintainContextRequest {
 /** Result of a {@link AgentRuntimePort.maintainContext} call. */
 export interface MaintainContextResult {
   readonly mode: ContextMaintenanceMode;
-  /** The session id after a restart; absent for `compacted`/`unsupported`. */
+  /**
+   * The Florina run/session id the caller should bind for the new task —
+   * `restartConfig.sessionId` for both successful modes: a restarted run
+   * is a new session outright, and a compacted provider session serves
+   * the new task under the new run id (provider continuity ≠ run
+   * identity; each task keeps its own journaled session). Absent for
+   * `unsupported`.
+   */
   readonly sessionId?: string;
   /** Honest detail when the mode is `unsupported` (or a fallback ran). */
   readonly detail?: string;

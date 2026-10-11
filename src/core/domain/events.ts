@@ -605,6 +605,68 @@ export interface VerificationObservedEvent extends SupervisorEventBase {
 }
 
 /**
+ * How between-task context maintenance preserved a pooled session
+ * (issue #342): the provider compacted its own window, a new run was
+ * started carrying a caller-composed digest, or the adapter cannot
+ * maintain context at all. Declared in the domain because the mode is
+ * journaled (`ContextMaintained`, `SessionReused`); the runtime port's
+ * `MaintainContextResult` uses the same union.
+ */
+export type ContextMaintenanceMode = 'compacted' | 'restarted-with-carryover' | 'unsupported';
+
+/**
+ * Emitted when a naturally-ended session is released into the session
+ * pool instead of being torn down (issue #342, DEC-020 evolution). The
+ * provider session stays live for the next same-key task; `poolKey`
+ * names the provider+project context it may be reused under. Only a
+ * session that ended with `AgentCompleted` — never a stop, failure, or
+ * stream error — is pooled, so the pool is a reuse cache, not a leak.
+ */
+export interface SessionPooledEvent extends SupervisorEventBase {
+  type: 'SessionPooled';
+  /** Provider+project context the session may be reused under. */
+  poolKey: string;
+}
+
+/**
+ * Emitted when a task attaches to a pooled session instead of spawning
+ * a fresh run (issue #342). `taskId`/`sessionId` are the NEW task/run
+ * identities; `previousTaskId`/`previousSessionId` record the lineage so
+ * the handoff is auditable in the journal (DEC-012).
+ */
+export interface SessionReusedEvent extends SupervisorEventBase {
+  type: 'SessionReused';
+  /** The task that released this session into the pool. */
+  previousTaskId: string;
+  /** The run id that session carried while pooled. */
+  previousSessionId: string;
+  /** Provider+project context the session was pooled under. */
+  poolKey: string;
+  /** How context was maintained at attach — see ContextMaintained. */
+  mode: ContextMaintenanceMode;
+}
+
+/**
+ * Emitted when between-task context maintenance ran while attaching a
+ * pooled session (issue #342): the provider compacted its own window
+ * (`compacted`), a fresh run was started carrying a caller-composed
+ * carry-over digest (`restarted-with-carryover`), or the attempt was
+ * abandoned because the adapter cannot maintain context — in which case
+ * the task fell back to a fresh run and no SessionReused follows.
+ */
+export interface ContextMaintainedEvent extends SupervisorEventBase {
+  type: 'ContextMaintained';
+  /** The maintenance mode applied (or attempted). */
+  mode: ContextMaintenanceMode;
+  /** Provider+project context of the pooled session. */
+  poolKey: string;
+  /** The task the pooled session previously served. */
+  previousTaskId: string;
+  /** Honest detail, e.g. why the adapter degraded. */
+  detail?: string;
+}
+
+/**
  * The canonical discriminated union of all supervisor event variants (DEC-019).
  */
 export type SupervisorEvent =
@@ -632,7 +694,10 @@ export type SupervisorEvent =
   | TaskNudgedEvent
   | ContextCondensedEvent
   | ContextHealthChangedEvent
-  | VerificationObservedEvent;
+  | VerificationObservedEvent
+  | SessionPooledEvent
+  | SessionReusedEvent
+  | ContextMaintainedEvent;
 
 /** Ordered list of all valid event type discriminants. */
 export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
@@ -661,6 +726,9 @@ export const SUPERVISOR_EVENT_TYPES: readonly SupervisorEventType[] = [
   'ContextCondensed',
   'ContextHealthChanged',
   'VerificationObserved',
+  'SessionPooled',
+  'SessionReused',
+  'ContextMaintained',
 ] as const;
 
 const ADAPTER_FIDELITY_TIERS: readonly AdapterFidelityTier[] = ['A', 'B', 'C', 'D', 'E'] as const;
@@ -897,6 +965,15 @@ export function validateEvent(value: unknown): SupervisorEvent {
       break;
     case 'VerificationObserved':
       validateVerificationObserved(value, problems);
+      break;
+    case 'SessionPooled':
+      validateSessionPooled(value, problems);
+      break;
+    case 'SessionReused':
+      validateSessionReused(value, problems);
+      break;
+    case 'ContextMaintained':
+      validateContextMaintained(value, problems);
       break;
     // Unknown types are already reported via the envelope check above.
     default:
@@ -1370,6 +1447,52 @@ function validateVerificationObserved(value: Record<string, unknown>, problems: 
   }
   if (value['evidence'] !== undefined && !isUnknownRecord(value['evidence'])) {
     problems.push('VerificationObserved: optional field "evidence" must be an object.');
+  }
+}
+
+const CONTEXT_MAINTENANCE_MODES: readonly ContextMaintenanceMode[] = [
+  'compacted',
+  'restarted-with-carryover',
+  'unsupported',
+] as const;
+
+function validateSessionPooled(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['poolKey']) || value['poolKey'].length === 0) {
+    problems.push('SessionPooled: missing or empty required field "poolKey".');
+  }
+}
+
+function validateSessionReused(value: Record<string, unknown>, problems: string[]): void {
+  if (!isString(value['previousTaskId']) || value['previousTaskId'].length === 0) {
+    problems.push('SessionReused: missing or empty required field "previousTaskId".');
+  }
+  if (!isString(value['previousSessionId']) || value['previousSessionId'].length === 0) {
+    problems.push('SessionReused: missing or empty required field "previousSessionId".');
+  }
+  if (!isString(value['poolKey']) || value['poolKey'].length === 0) {
+    problems.push('SessionReused: missing or empty required field "poolKey".');
+  }
+  if (!isOneOf(value['mode'], CONTEXT_MAINTENANCE_MODES)) {
+    problems.push(
+      `SessionReused: field "mode" must be one of ${CONTEXT_MAINTENANCE_MODES.join(', ')}.`,
+    );
+  }
+}
+
+function validateContextMaintained(value: Record<string, unknown>, problems: string[]): void {
+  if (!isOneOf(value['mode'], CONTEXT_MAINTENANCE_MODES)) {
+    problems.push(
+      `ContextMaintained: field "mode" must be one of ${CONTEXT_MAINTENANCE_MODES.join(', ')}.`,
+    );
+  }
+  if (!isString(value['poolKey']) || value['poolKey'].length === 0) {
+    problems.push('ContextMaintained: missing or empty required field "poolKey".');
+  }
+  if (!isString(value['previousTaskId']) || value['previousTaskId'].length === 0) {
+    problems.push('ContextMaintained: missing or empty required field "previousTaskId".');
+  }
+  if (value['detail'] !== undefined && !isString(value['detail'])) {
+    problems.push('ContextMaintained: optional field "detail" must be a string.');
   }
 }
 

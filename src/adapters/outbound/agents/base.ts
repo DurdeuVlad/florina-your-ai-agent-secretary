@@ -187,8 +187,10 @@ export abstract class BaseAdapter implements AgentRuntimePort {
     this.requireConnected();
     if (this.capabilities.compact) {
       try {
-        if (await this.performCompact(sessionId)) {
-          return { mode: 'compacted', sessionId };
+        if (await this.performCompact(sessionId, request)) {
+          // Provider continuity ≠ run identity (issue #342): the kept
+          // provider session serves the new task under the new run id.
+          return { mode: 'compacted', sessionId: request.restartConfig.sessionId };
         }
       } catch {
         /* declared-but-failing compact degrades to the next rung */
@@ -215,9 +217,15 @@ export abstract class BaseAdapter implements AgentRuntimePort {
 
   /**
    * Provider-side context compaction hook (issue #341). Called only when
-   * `capabilities.compact` is declared. Returns `true` on success.
+   * `capabilities.compact` is declared. `request.restartConfig` carries
+   * the new task/run identities — a compacted provider session rebinds
+   * its event envelope to them (issue #342: provider continuity ≠ run
+   * identity). Returns `true` on success.
    */
-  protected async performCompact(_sessionId: string): Promise<boolean> {
+  protected async performCompact(
+    _sessionId: string,
+    _request: MaintainContextRequest,
+  ): Promise<boolean> {
     return false;
   }
 
