@@ -542,7 +542,9 @@ export class SessionManager {
     const reusable =
       (mode === 'compacted' || mode === 'restarted-with-carryover') &&
       boundSessionId !== undefined &&
-      (!needsMessage || entry.adapter.capabilities.sendMessage);
+      (!needsMessage ||
+        (entry.adapter.capabilities.sendMessage &&
+          typeof entry.adapter.sendMessage === 'function'));
     if (!reusable || boundSessionId === undefined) {
       // The old provider session is still live — kill it honestly rather
       // than leak it, then spawn fresh on the caller's adapter.
@@ -567,6 +569,7 @@ export class SessionManager {
     // restarted run already carries it inside restartConfig.
     if (needsMessage) {
       const sent = await entry.adapter.sendMessage!(bound, config.objective);
+      // sendMessage existence is proven by `reusable` above.
       if (!sent) {
         this.sessions.delete(taskId);
         await evictPoolEntry(entry);
