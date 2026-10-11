@@ -25,7 +25,7 @@
  * `FLORINA_DISABLED_PROVIDERS=a,b` skips individual providers.
  */
 import { type ChildProcess, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, normalize } from 'node:path';
 import { connect as netConnect, createServer } from 'node:net';
@@ -258,6 +258,42 @@ type AttachOutcome =
   | { readonly ok: false; readonly reason: string; readonly kind: SkipKind };
 
 /**
+ * Resolve the ACP `meta.api_key` credential for a provider whose agent
+ * refuses local CLI credentials (devin). Order: declared env vars, then
+ * the provider's own credential store — for devin that is
+ * `%APPDATA%\devin\credentials.toml` on Windows and
+ * `$XDG_DATA_HOME/devin/credentials.toml` (`~/.local/share/devin`
+ * fallback) elsewhere, written by `devin auth login`. The value is the
+ * devin session token, which `devin acp` accepts as an api_key
+ * (verified live on 3000.11.3). Never logged or journaled.
+ */
+function resolveAcpApiKey(
+  auth: NonNullable<Extract<ProviderManifest['transport'], { kind: 'acp' }>['auth']>,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  home: string,
+): string | undefined {
+  for (const name of auth.envVars ?? []) {
+    const value = env[name];
+    if (value !== undefined && value !== '') return value;
+  }
+  if (auth.credentialsFile === 'devin-credentials.toml') {
+    const path =
+      platform === 'win32'
+        ? join(env['APPDATA'] ?? join(home, 'AppData', 'Roaming'), 'devin', 'credentials.toml')
+        : join(env['XDG_DATA_HOME'] ?? join(home, '.local', 'share'), 'devin', 'credentials.toml');
+    try {
+      const match = /windsurf_api_key\s*=\s*"([^"]+)"/.exec(readFileSync(path, 'utf8'));
+      if (match?.[1] !== undefined && match[1] !== '') return match[1];
+    } catch {
+      // Absent or unreadable credential file — auth stays unresolved;
+      // the adapter reports `signInHint` at connect time.
+    }
+  }
+  return undefined;
+}
+
+/**
  * Resolve one manifest's executable and, when found, register its
  * transport adapter. Never throws — every failure is an honest skip
  * reason so one bad manifest can't take down the rest.
@@ -297,9 +333,30 @@ async function tryAttach(manifest: ProviderManifest, ctx: AttachCtx): Promise<At
     case 'hooks':
       registry.register(id, () => new ClaudeHooksAdapter(null, { command }));
       return { ok: true, command };
-    case 'acp':
-      registry.register(id, () => new AcpAdapter(null, { id, command, args: [...transport.args] }));
+    case 'acp': {
+      const acpAuth = transport.auth;
+      registry.register(id, () => {
+        const auth =
+          acpAuth === undefined
+            ? undefined
+            : {
+                methodId: acpAuth.methodId,
+                signInHint: acpAuth.signInHint,
+                apiKey: () => resolveAcpApiKey(acpAuth, env, platform, home),
+              };
+        return new AcpAdapter(null, {
+          id,
+          command,
+          args: [...transport.args],
+          ...(auth !== undefined ? { auth } : {}),
+          ...(transport.sessionMode !== undefined ? { sessionMode: transport.sessionMode } : {}),
+          ...(transport.modelConfigId !== undefined
+            ? { modelConfigId: transport.modelConfigId }
+            : {}),
+        });
+      });
       return { ok: true, command };
+    }
     case 'stream-json':
       registry.register(id, () => new AgyAdapter(null, { command }));
       return { ok: true, command };

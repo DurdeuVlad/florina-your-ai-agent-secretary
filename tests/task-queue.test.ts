@@ -894,7 +894,10 @@ describe('start-task + scheduler policy (issue #344)', () => {
   it('a consented task with no quota headroom parks with the ledger resume time', async () => {
     const adapter = new BlockingAdapter();
     const ledger = new QuotaLedger();
-    ledger.markExhausted(f.agentId, { resetsAt: '2026-10-11T06:00:00.000Z' });
+    // Resets relative to the real clock — a hardcoded future date is a
+    // time bomb that silently un-parks this test once it passes.
+    const resetsAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+    ledger.markExhausted(f.agentId, { resetsAt });
     const { api } = apiWithAdapter(adapter, { ledger });
     const running = makeTask(f, { id: 'task_running' });
     const parked = makeTask(f, { id: 'task_parked', parallelizable: true });
@@ -904,14 +907,14 @@ describe('start-task + scheduler policy (issue #344)', () => {
 
     expect(res.ok).toBe(true);
     expect(res.queued).toBe(true);
-    expect(res.waitReason).toBe('waiting: quota — resets at 2026-10-11T06:00:00.000Z');
+    expect(res.waitReason).toBe(`waiting: quota — resets at ${resetsAt}`);
     expect(adapter.runs).toHaveLength(1);
     expect(f.queue.isQueued(parked.id)).toBe(true);
 
     const decisions = f.eventsOf(parked.id, 'RoutingDecision');
     expect(decisions).toHaveLength(1);
     expect(decisions[0]!.payload['decision']).toBe('quota-blocked');
-    expect(decisions[0]!.payload['resumeAt']).toBe('2026-10-11T06:00:00.000Z');
+    expect(decisions[0]!.payload['resumeAt']).toBe(resetsAt);
   });
 
   it('a user parallel verb dispatches while the provider is busy', async () => {
@@ -984,7 +987,8 @@ describe('start-task + scheduler policy (issue #344)', () => {
   it('query-fleet carries the journaled quota reset for a blocked parallel entry', async () => {
     const adapter = new BlockingAdapter();
     const ledger = new QuotaLedger();
-    ledger.markExhausted(f.agentId, { resetsAt: '2026-10-11T06:00:00.000Z' });
+    const resetsAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+    ledger.markExhausted(f.agentId, { resetsAt });
     const { api } = apiWithAdapter(adapter, { ledger });
     const running = makeTask(f, { id: 'task_running' });
     const parked = makeTask(f, { id: 'task_parked', parallelizable: true });
@@ -994,7 +998,7 @@ describe('start-task + scheduler policy (issue #344)', () => {
 
     const res = (await api.execute({ kind: 'query-fleet' })) as FleetResponse;
     const row = res.queue.find((q) => q.taskId === parked.id);
-    expect(row!.resumeAt).toBe('2026-10-11T06:00:00.000Z');
+    expect(row!.resumeAt).toBe(resetsAt);
     expect(row!.waitReason).toContain('quota');
   });
 });

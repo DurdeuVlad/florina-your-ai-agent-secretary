@@ -113,7 +113,37 @@ export type ProviderTransport =
    * ACP adapter — the command is invoked with `args` per run
    * (`devin acp`, `gemini --experimental-acp`).
    */
-  | { readonly kind: 'acp'; readonly args: readonly string[] }
+  | {
+      readonly kind: 'acp';
+      readonly args: readonly string[];
+      /**
+       * ACP `authenticate` support. Some agents (devin) deliberately
+       * refuse local CLI credentials in ACP mode — the host must send
+       * `authenticate` with `meta.api_key` between `initialize` and the
+       * first `session/new`. `methodId` matches an id the agent
+       * advertises in `initialize`'s `authMethods`; `envVars` are
+       * consulted first for the key, then `credentialsFile`
+       * (a provider-named on-disk credential store resolved by the
+       * bootstrap wiring). Absent `auth` → no authenticate call.
+       */
+      readonly auth?: {
+        readonly methodId: string;
+        readonly envVars?: readonly string[];
+        readonly credentialsFile?: 'devin-credentials.toml';
+        readonly signInHint: string;
+      };
+      /**
+       * ACP `session/set_mode` applied per run before the first prompt
+       * (e.g. 'smart' — auto-approve model-judged-safe actions while
+       * risky ones still surface as permission requests).
+       */
+      readonly sessionMode?: string;
+      /**
+       * ACP `session/set_config_option` configId used to pin
+       * `sessionConfig.model` per run ('model' for devin).
+       */
+      readonly modelConfigId?: string;
+    }
   /**
    * A long-lived app-server child: spawn
    * `<command> <args…>` with `{endpoint}` substituted for the chosen
@@ -414,7 +444,27 @@ export const PROVIDER_MANIFESTS: readonly ProviderManifest[] = Object.freeze(
           ],
           linux: [{ kind: 'path', path: '{home}/.local/bin/devin' }],
         },
-        transport: { kind: 'acp', args: ['acp'] },
+        transport: {
+          kind: 'acp',
+          args: ['acp'],
+          // Devin's ACP server refuses local CLI credentials by design:
+          // the host must `authenticate` with `meta.api_key`. The devin
+          // session token in credentials.toml (written by `devin auth
+          // login`) is accepted as that key — verified live against
+          // devin 3000.11.3: authenticate → result {}, session/new →
+          // sessionId + configOptions (model/mode selects).
+          auth: {
+            methodId: 'devin-browser',
+            envVars: ['DEVIN_API_KEY', 'WINDSURF_API_KEY'],
+            credentialsFile: 'devin-credentials.toml',
+            signInHint: 'run `devin auth login` (or `florina auth devin`)',
+          },
+          // 'smart' auto-runs actions a fast model judges safe (file
+          // writes, git commit) while risky ones (push, deletes) still
+          // surface as session/request_permission → ApprovalRequested.
+          sessionMode: 'smart',
+          modelConfigId: 'model',
+        },
         notFoundDetail: '`devin` CLI not found (PATH, ~/.local/bin, or Devin app bundle)',
         credentialEvidence: {
           // docs.devin.ai/cli/enterprise/devin-auth: `devin auth login`
