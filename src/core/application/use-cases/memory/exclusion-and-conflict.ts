@@ -83,7 +83,13 @@ export function resolveConflict(
 
   if (resolution === 'keep-new') {
     return {
-      winner: { ...newItem, status: 'active', confidence: 'high', supersedes: existingItem.id, updatedAt: now },
+      winner: {
+        ...newItem,
+        status: 'active',
+        confidence: 'high',
+        supersedes: existingItem.id,
+        updatedAt: now,
+      },
       loser: { ...existingItem, status: 'superseded', updatedAt: now },
     };
   }

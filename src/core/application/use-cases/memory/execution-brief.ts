@@ -88,7 +88,10 @@ export function compileExecutionBrief(
   candidates: readonly MemoryItem[],
 ): ExecutionBrief {
   const eligible = candidates.filter(
-    (item) => isMemoryActive(item) && inScope(item.scope, request) && matchedTags(item, request.topics).length > 0,
+    (item) =>
+      isMemoryActive(item) &&
+      inScope(item.scope, request) &&
+      matchedTags(item, request.topics).length > 0,
   );
   const byId = new Map(eligible.map((item) => [item.id, item]));
   const dropped = new Set<string>();
@@ -122,7 +125,10 @@ export function compileExecutionBrief(
 
   return {
     objective: request.objective,
-    relevantContext: [...(request.relevantContext ?? []), ...projectKnowledge.map((i) => i.statement)],
+    relevantContext: [
+      ...(request.relevantContext ?? []),
+      ...projectKnowledge.map((i) => i.statement),
+    ],
     applicableRules,
     constraints: request.constraints ?? [],
     requiredVerification: request.requiredVerification ?? [],

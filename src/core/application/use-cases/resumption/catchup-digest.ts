@@ -64,7 +64,12 @@ export interface CatchUpDigestDeps {
 }
 
 function toSummary(task: Task): CatchUpTaskSummary {
-  return { taskId: task.id, objective: task.objective, state: task.state, updatedAt: task.updatedAt };
+  return {
+    taskId: task.id,
+    objective: task.objective,
+    state: task.state,
+    updatedAt: task.updatedAt,
+  };
 }
 
 /**
@@ -106,7 +111,10 @@ export function computeCatchUpDigest(
     pendingAttention,
     failovers,
     isEmpty:
-      notable.length === 0 && stillRunning.length === 0 && pendingAttention.length === 0 && failovers.length === 0,
+      notable.length === 0 &&
+      stillRunning.length === 0 &&
+      pendingAttention.length === 0 &&
+      failovers.length === 0,
   };
 }
 

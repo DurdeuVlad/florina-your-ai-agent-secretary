@@ -126,155 +126,159 @@ describe('diff-analyzer: classifyPath covers every category', () => {
   });
 });
 
-describe('diff-analyzer: analyze (integration with a real temp git repo)', { timeout: 30_000 }, () => {
-  let repoPath: string;
-  let tmpRoot: string;
+describe(
+  'diff-analyzer: analyze (integration with a real temp git repo)',
+  { timeout: 30_000 },
+  () => {
+    let repoPath: string;
+    let tmpRoot: string;
 
-  beforeEach(() => {
-    repoPath = createTempGitRepo();
-    tmpRoot = path.dirname(repoPath);
-  });
+    beforeEach(() => {
+      repoPath = createTempGitRepo();
+      tmpRoot = path.dirname(repoPath);
+    });
 
-  afterEach(() => {
-    try {
-      git(['worktree', 'prune'], repoPath);
-    } catch {
-      /* ignore */
-    }
-    rmrf(tmpRoot);
-  });
+    afterEach(() => {
+      try {
+        git(['worktree', 'prune'], repoPath);
+      } catch {
+        /* ignore */
+      }
+      rmrf(tmpRoot);
+    });
 
-  it('produces a DiffDigest with no LLM calls (deterministic)', () => {
-    // Add a source file and a test file in a second commit.
-    commitFile(repoPath, 'src/invoice.ts', 'export const x = 1;\n', 'add invoice');
-    commitFile(repoPath, 'src/invoice.test.ts', 'test("x", () => {});\n', 'add invoice test');
+    it('produces a DiffDigest with no LLM calls (deterministic)', () => {
+      // Add a source file and a test file in a second commit.
+      commitFile(repoPath, 'src/invoice.ts', 'export const x = 1;\n', 'add invoice');
+      commitFile(repoPath, 'src/invoice.test.ts', 'test("x", () => {});\n', 'add invoice test');
 
-    const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
-    // Make one more commit to diff against the base.
-    commitFile(repoPath, 'src/auth/login.ts', 'export const login = () => {};\n', 'add login');
+      const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
+      // Make one more commit to diff against the base.
+      commitFile(repoPath, 'src/auth/login.ts', 'export const login = () => {};\n', 'add login');
 
-    const analyzer = new DiffAnalyzer();
-    const digest = analyzer.analyze(repoPath, baseCommit);
+      const analyzer = new DiffAnalyzer();
+      const digest = analyzer.analyze(repoPath, baseCommit);
 
-    expect(digest).toBeDefined();
-    expect(digest.branch).toBe('main');
-    expect(digest.baseCommit).toBe(baseCommit);
-    expect(digest.headCommit).toMatch(/^[0-9a-f]{7,40}$/);
-    expect(digest.author).toBe('Test <test@example.com>');
-    expect(digest.commitMessage).toBe('add login');
+      expect(digest).toBeDefined();
+      expect(digest.branch).toBe('main');
+      expect(digest.baseCommit).toBe(baseCommit);
+      expect(digest.headCommit).toMatch(/^[0-9a-f]{7,40}$/);
+      expect(digest.author).toBe('Test <test@example.com>');
+      expect(digest.commitMessage).toBe('add login');
 
-    // The changed file is the auth file added in the head commit.
-    const paths = digest.changedFiles.map((f) => f.path);
-    expect(paths).toContain('src/auth/login.ts');
+      // The changed file is the auth file added in the head commit.
+      const paths = digest.changedFiles.map((f) => f.path);
+      expect(paths).toContain('src/auth/login.ts');
 
-    // It is classified as secrets-auth (sensitive).
-    const authClass = digest.pathClassifications.find((c) => c.path === 'src/auth/login.ts');
-    expect(authClass).toBeDefined();
-    expect(authClass!.category).toBe('secrets-auth');
-    expect(authClass!.isSensitive).toBe(true);
+      // It is classified as secrets-auth (sensitive).
+      const authClass = digest.pathClassifications.find((c) => c.path === 'src/auth/login.ts');
+      expect(authClass).toBeDefined();
+      expect(authClass!.category).toBe('secrets-auth');
+      expect(authClass!.isSensitive).toBe(true);
 
-    // diffStat is a non-empty string.
-    expect(typeof digest.diffStat).toBe('string');
-    expect(digest.diffStat.length).toBeGreaterThan(0);
+      // diffStat is a non-empty string.
+      expect(typeof digest.diffStat).toBe('string');
+      expect(digest.diffStat.length).toBeGreaterThan(0);
 
-    // No test results when no journal is provided.
-    expect(digest.testResults).toBeUndefined();
-  });
+      // No test results when no journal is provided.
+      expect(digest.testResults).toBeUndefined();
+    });
 
-  it('detects renames and reports renamedFrom', () => {
-    // Create a file, commit it, then rename it.
-    commitFile(repoPath, 'src/old-name.ts', 'export const y = 2;\n', 'add old-name');
-    const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
+    it('detects renames and reports renamedFrom', () => {
+      // Create a file, commit it, then rename it.
+      commitFile(repoPath, 'src/old-name.ts', 'export const y = 2;\n', 'add old-name');
+      const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
 
-    // Rename via git mv so the rename is detected with -M.
-    git(['mv', 'src/old-name.ts', 'src/new-name.ts'], repoPath);
-    git(['commit', '-m', 'rename file'], repoPath);
+      // Rename via git mv so the rename is detected with -M.
+      git(['mv', 'src/old-name.ts', 'src/new-name.ts'], repoPath);
+      git(['commit', '-m', 'rename file'], repoPath);
 
-    const analyzer = new DiffAnalyzer();
-    const digest = analyzer.analyze(repoPath, baseCommit);
+      const analyzer = new DiffAnalyzer();
+      const digest = analyzer.analyze(repoPath, baseCommit);
 
-    const renamed = digest.changedFiles.filter((f) => f.status === 'renamed');
-    expect(renamed.length).toBeGreaterThanOrEqual(1);
+      const renamed = digest.changedFiles.filter((f) => f.status === 'renamed');
+      expect(renamed.length).toBeGreaterThanOrEqual(1);
 
-    const rename = renamed.find((f) => f.path === 'src/new-name.ts');
-    expect(rename).toBeDefined();
-    expect(rename!.renamedFrom).toBe('src/old-name.ts');
+      const rename = renamed.find((f) => f.path === 'src/new-name.ts');
+      expect(rename).toBeDefined();
+      expect(rename!.renamedFrom).toBe('src/old-name.ts');
 
-    // detectRenames helper returns the renamed subset.
-    expect(analyzer.detectRenames(digest.changedFiles)).toEqual(renamed);
-  });
+      // detectRenames helper returns the renamed subset.
+      expect(analyzer.detectRenames(digest.changedFiles)).toEqual(renamed);
+    });
 
-  it('flags unexpected lockfile change (lockfile without source change)', () => {
-    const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
-    // Only touch the lockfile — no source change.
-    commitFile(repoPath, 'package-lock.json', '{"lockfileVersion": 3}\n', 'bump lockfile');
+    it('flags unexpected lockfile change (lockfile without source change)', () => {
+      const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
+      // Only touch the lockfile — no source change.
+      commitFile(repoPath, 'package-lock.json', '{"lockfileVersion": 3}\n', 'bump lockfile');
 
-    const analyzer = new DiffAnalyzer();
-    const digest = analyzer.analyze(repoPath, baseCommit);
+      const analyzer = new DiffAnalyzer();
+      const digest = analyzer.analyze(repoPath, baseCommit);
 
-    expect(digest.unexpectedLockfileChange).toBe(true);
-    const lockfileClass = digest.pathClassifications.find((c) => c.path === 'package-lock.json');
-    expect(lockfileClass?.category).toBe('lockfile');
-  });
+      expect(digest.unexpectedLockfileChange).toBe(true);
+      const lockfileClass = digest.pathClassifications.find((c) => c.path === 'package-lock.json');
+      expect(lockfileClass?.category).toBe('lockfile');
+    });
 
-  it('does not flag lockfile change when source also changed', () => {
-    const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
-    commitFile(repoPath, 'src/feature.ts', 'export const z = 3;\n', 'add feature');
-    commitFile(repoPath, 'package-lock.json', '{"lockfileVersion": 3}\n', 'bump lockfile');
+    it('does not flag lockfile change when source also changed', () => {
+      const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
+      commitFile(repoPath, 'src/feature.ts', 'export const z = 3;\n', 'add feature');
+      commitFile(repoPath, 'package-lock.json', '{"lockfileVersion": 3}\n', 'bump lockfile');
 
-    const analyzer = new DiffAnalyzer();
-    const digest = analyzer.analyze(repoPath, baseCommit);
+      const analyzer = new DiffAnalyzer();
+      const digest = analyzer.analyze(repoPath, baseCommit);
 
-    expect(digest.unexpectedLockfileChange).toBe(false);
-  });
+      expect(digest.unexpectedLockfileChange).toBe(false);
+    });
 
-  it('classifies migrations and CI/deploy paths as sensitive', () => {
-    const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
-    commitFile(repoPath, 'db/migrations/0001_init.sql', 'CREATE TABLE x;\n', 'add migration');
-    commitFile(repoPath, '.github/workflows/ci.yml', 'name: ci\n', 'add ci');
+    it('classifies migrations and CI/deploy paths as sensitive', () => {
+      const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
+      commitFile(repoPath, 'db/migrations/0001_init.sql', 'CREATE TABLE x;\n', 'add migration');
+      commitFile(repoPath, '.github/workflows/ci.yml', 'name: ci\n', 'add ci');
 
-    const analyzer = new DiffAnalyzer();
-    const digest = analyzer.analyze(repoPath, baseCommit);
+      const analyzer = new DiffAnalyzer();
+      const digest = analyzer.analyze(repoPath, baseCommit);
 
-    const migration = digest.pathClassifications.find((c) =>
-      c.path.includes('migrations/0001_init.sql'),
-    );
-    expect(migration?.category).toBe('migrations');
-    expect(migration?.isSensitive).toBe(true);
+      const migration = digest.pathClassifications.find((c) =>
+        c.path.includes('migrations/0001_init.sql'),
+      );
+      expect(migration?.category).toBe('migrations');
+      expect(migration?.isSensitive).toBe(true);
 
-    const ci = digest.pathClassifications.find((c) => c.path.includes('workflows/ci.yml'));
-    expect(ci?.category).toBe('ci-deploy');
-    expect(ci?.isSensitive).toBe(true);
-  });
+      const ci = digest.pathClassifications.find((c) => c.path.includes('workflows/ci.yml'));
+      expect(ci?.category).toBe('ci-deploy');
+      expect(ci?.isSensitive).toBe(true);
+    });
 
-  it('reports commit metadata: branch, base, head, author, message', () => {
-    const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
-    commitFile(repoPath, 'src/a.ts', 'export const a = 1;\n', 'feat: add a');
+    it('reports commit metadata: branch, base, head, author, message', () => {
+      const baseCommit = git(['rev-parse', 'HEAD'], repoPath).trim();
+      commitFile(repoPath, 'src/a.ts', 'export const a = 1;\n', 'feat: add a');
 
-    const analyzer = new DiffAnalyzer();
-    const digest: DiffDigest = analyzer.analyze(repoPath, baseCommit);
+      const analyzer = new DiffAnalyzer();
+      const digest: DiffDigest = analyzer.analyze(repoPath, baseCommit);
 
-    expect(digest.branch).toBe('main');
-    expect(digest.baseCommit).toBe(baseCommit);
-    expect(digest.headCommit).not.toBe(baseCommit);
-    expect(digest.author).toBe('Test <test@example.com>');
-    expect(digest.commitMessage).toBe('feat: add a');
-  });
+      expect(digest.branch).toBe('main');
+      expect(digest.baseCommit).toBe(baseCommit);
+      expect(digest.headCommit).not.toBe(baseCommit);
+      expect(digest.author).toBe('Test <test@example.com>');
+      expect(digest.commitMessage).toBe('feat: add a');
+    });
 
-  it('diffs the whole initial commit when base is the root commit', () => {
-    // No base provided; HEAD has one parent (the initial commit), so the diff
-    // is just the head commit's changes.
-    commitFile(repoPath, 'src/only.ts', 'export const only = 1;\n', 'second commit');
+    it('diffs the whole initial commit when base is the root commit', () => {
+      // No base provided; HEAD has one parent (the initial commit), so the diff
+      // is just the head commit's changes.
+      commitFile(repoPath, 'src/only.ts', 'export const only = 1;\n', 'second commit');
 
-    const analyzer = new DiffAnalyzer();
-    const digest = analyzer.analyze(repoPath);
+      const analyzer = new DiffAnalyzer();
+      const digest = analyzer.analyze(repoPath);
 
-    // baseCommit resolves to the initial commit (HEAD's parent).
-    const initial = git(['rev-list', '--max-parents=0', 'HEAD'], repoPath).trim();
-    expect(digest.baseCommit).toBe(initial);
-    expect(digest.changedFiles.map((f) => f.path)).toContain('src/only.ts');
-  });
-});
+      // baseCommit resolves to the initial commit (HEAD's parent).
+      const initial = git(['rev-list', '--max-parents=0', 'HEAD'], repoPath).trim();
+      expect(digest.baseCommit).toBe(initial);
+      expect(digest.changedFiles.map((f) => f.path)).toContain('src/only.ts');
+    });
+  },
+);
 
 describe('collectTestResults: aggregates TestStarted/TestFinished from the journal', () => {
   let db: StorageDatabase;

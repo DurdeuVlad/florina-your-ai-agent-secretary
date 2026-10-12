@@ -130,7 +130,11 @@ describe('inline actions write through the SAME shared use-case the conversation
       ...(row!.promoteCommand!.model !== undefined ? { model: row!.promoteCommand!.model } : {}),
       ...(row!.promoteCommand!.note !== undefined ? { note: row!.promoteCommand!.note } : {}),
     });
-    store.removeRule(row!.forgetCommand.provider, row!.forgetCommand.model, row!.forgetCommand.projectId);
+    store.removeRule(
+      row!.forgetCommand.provider,
+      row!.forgetCommand.model,
+      row!.forgetCommand.projectId,
+    );
 
     const after = store.toProfile();
     expect(after.rules).toHaveLength(1);

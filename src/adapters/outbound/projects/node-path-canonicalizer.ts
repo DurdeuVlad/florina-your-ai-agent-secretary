@@ -24,13 +24,15 @@ export class NodePathCanonicalizer implements PathCanonicalizerPort {
 
   constructor(options: NodePathCanonicalizerOptions = {}) {
     this.platform = options.platform ?? process.platform;
-    this.realpathFn = options.realpathFn ?? ((p: string) => {
-      try {
-        return realpathSync(p);
-      } catch {
-        return resolve(p);
-      }
-    });
+    this.realpathFn =
+      options.realpathFn ??
+      ((p: string) => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return resolve(p);
+        }
+      });
   }
 
   canonicalize(rawPath: string): string {

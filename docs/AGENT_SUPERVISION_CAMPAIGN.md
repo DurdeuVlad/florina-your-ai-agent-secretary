@@ -6,11 +6,11 @@
 M2 #341 (capability matrix) + #342 (session pool) ·
 M3 #343 (queue) + #344 (parallel gate) + #345 (queue surface).
 
-**Source:** user feature request 2026-10-07 — *"florina knows to
+**Source:** user feature request 2026-10-07 — _"florina knows to
 automatically compact the ai between tasks and tries to keep the same
 session… a task queue, florina appends to it, the managers make sure the
 task gets done properly and fully and the agents are smacked on the head
-until they produce high quality work that actually works."*
+until they produce high quality work that actually works."_
 
 ## Goal / System / Constraints / Evaluation
 
@@ -178,7 +178,7 @@ until they produce high quality work that actually works."*
   - Session failure/age/context-health thresholds evict and spawn
     fresh — degradation is graceful, not fatal.
   - `onSessionEnd`/capsule rollup still fires per task boundary.
-  - The 1:1 guarantee per task is preserved *while attached* — a pooled
+  - The 1:1 guarantee per task is preserved _while attached_ — a pooled
     session serves one task at a time.
 - **Scope:** `session-manager.ts` (pool lifecycle, eviction, maintain
   between tasks), bootstrap wiring, journal events
@@ -288,4 +288,4 @@ the most testable. M2's session pool assumes verified task boundaries
 (verify-then-release-to-pool). M3's scheduler assumes the pool exists to
 schedule onto. Within the user's framing, this order ships "smacked on
 the head" before "scheduling smarts" — matching their stated priority
-that work must *actually work*.
+that work must _actually work_.

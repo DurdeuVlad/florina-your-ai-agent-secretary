@@ -54,7 +54,7 @@ describe('classifyRepeatedObservations', () => {
     expect(item.sourceTurnIds).toEqual(['turn-1', 'turn-2', 'turn-3']);
   });
 
-  it('the latest observation\'s statement/scope/tags represent the item', () => {
+  it("the latest observation's statement/scope/tags represent the item", () => {
     const item = classifyRepeatedObservations(
       [
         obs('turn-1', { statement: 'Look at prior art first.', tags: ['a'] }),
@@ -74,7 +74,11 @@ describe('classifyRepeatedObservations', () => {
 
 describe('candidate items are never usable by the Execution Brief compiler (integration)', () => {
   it('a single-strike candidate item is excluded even when it tag-matches the request', () => {
-    const candidate = classifyRepeatedObservations([obs('turn-1')], 'mem-1', '2026-09-21T00:00:00.000Z');
+    const candidate = classifyRepeatedObservations(
+      [obs('turn-1')],
+      'mem-1',
+      '2026-09-21T00:00:00.000Z',
+    );
     const brief = compileExecutionBrief(
       { taskId: 't1', objective: 'x', topics: ['research-first'] },
       [candidate],

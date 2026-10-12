@@ -78,7 +78,8 @@ export type MemoryWriteResult = MemoryWriteAccepted | MemoryWriteRejected;
  * `inferred-*` provenance").
  */
 export function guardMemoryWrite(item: MemoryItem): MemoryWriteResult {
-  const isInferred = item.provenance === 'inferred-repeated' || item.provenance === 'inferred-single';
+  const isInferred =
+    item.provenance === 'inferred-repeated' || item.provenance === 'inferred-single';
   if (!isInferred) {
     return { outcome: 'accepted', item };
   }
@@ -93,7 +94,8 @@ export function guardMemoryWrite(item: MemoryItem): MemoryWriteResult {
     return {
       outcome: 'rejected',
       item,
-      reason: 'statement matches an excluded safety-adjacent topic and requires explicit confirmation',
+      reason:
+        'statement matches an excluded safety-adjacent topic and requires explicit confirmation',
     };
   }
   return { outcome: 'accepted', item };

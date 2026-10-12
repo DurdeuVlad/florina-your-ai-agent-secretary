@@ -21,23 +21,23 @@ folder choice, a secret, a final glance at proof).
 
 Two actors, two knowledge states:
 
-| Actor | Knows | Needs from Florina |
-| --- | --- | --- |
-| External agent (Claude Code, Codex, Cursor, …) | Shells, files, commands; zero Florina internals | A machine-readable install recipe, deterministic commands, structured honest output, clear "needs a human" signals |
-| Human user | "I told my agent to install it" | To be asked only for things only they can do, and a way to *see* the result is real rather than trust the agent's summary |
+| Actor                                          | Knows                                           | Needs from Florina                                                                                                        |
+| ---------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| External agent (Claude Code, Codex, Cursor, …) | Shells, files, commands; zero Florina internals | A machine-readable install recipe, deterministic commands, structured honest output, clear "needs a human" signals        |
+| Human user                                     | "I told my agent to install it"                 | To be asked only for things only they can do, and a way to _see_ the result is real rather than trust the agent's summary |
 
 ## What the surface must give the agent
 
 Mostly exists; gaps named honestly:
 
-| Capability | Today | Gap |
-| --- | --- | --- |
-| Typed verbs with exit codes (`start`, `status`, `auth`, `install`, `keys`, …) | ✅ exists, "the typed verb IS the consent" pattern already governs privileged actions | — |
-| Install recipe an agent can follow verbatim | ⚠️ README Quick Start is human/developer prose | A step-for-step recipe (install → build → `florina start` → verify) written for agent execution — or an `AGENTS.md` section |
-| Machine-readable readiness | ⚠️ `status` prints human-formatted text | `--json` output on `status`/`inbox`/`tasks` so the agent can parse truth, not scrape prose |
-| Self-verification ("did it work?") | ⚠️ implicit in `status` | A doctor-style exit contract: exit 0 = ready, non-zero + machine reason = not ready, so the agent knows when to stop or hand off |
-| Project-folder configuration | ❌ desktop-only (`pickfolders` native dialog) | A CLI verb (`florina repos add <path>` or similar) — or accept folder-picking as a deliberate human moment |
-| Daemon lifecycle an agent can manage | ✅ `florina start`/`stop` | Foreground-vs-detached behavior must be documented for agent use (a blocking terminal the agent can't leave is a trap) |
+| Capability                                                                    | Today                                                                                 | Gap                                                                                                                              |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Typed verbs with exit codes (`start`, `status`, `auth`, `install`, `keys`, …) | ✅ exists, "the typed verb IS the consent" pattern already governs privileged actions | —                                                                                                                                |
+| Install recipe an agent can follow verbatim                                   | ⚠️ README Quick Start is human/developer prose                                        | A step-for-step recipe (install → build → `florina start` → verify) written for agent execution — or an `AGENTS.md` section      |
+| Machine-readable readiness                                                    | ⚠️ `status` prints human-formatted text                                               | `--json` output on `status`/`inbox`/`tasks` so the agent can parse truth, not scrape prose                                       |
+| Self-verification ("did it work?")                                            | ⚠️ implicit in `status`                                                               | A doctor-style exit contract: exit 0 = ready, non-zero + machine reason = not ready, so the agent knows when to stop or hand off |
+| Project-folder configuration                                                  | ❌ desktop-only (`pickfolders` native dialog)                                         | A CLI verb (`florina repos add <path>` or similar) — or accept folder-picking as a deliberate human moment                       |
+| Daemon lifecycle an agent can manage                                          | ✅ `florina start`/`stop`                                                             | Foreground-vs-detached behavior must be documented for agent use (a blocking terminal the agent can't leave is a trap)           |
 
 ## What the agent may do — consent boundary
 
@@ -63,12 +63,12 @@ Hard boundaries (same as every Florina surface):
 
 ## Knowledge ledger (human-facing moments only)
 
-| Moment | User knows before | System reveals | Decision | Feedback / recovery |
-| --- | --- | --- | --- | --- |
-| "Install Florina" | The agent exists and can run commands | Agent narrates steps as it runs them | Let it proceed | Agent reports each step's real exit/output |
-| Provider sign-in | The app needs an account they have | A terminal/browser opens, named for the provider | Sign in or skip | Agent re-checks and reports honestly |
-| Folder choice | Where their projects live | "Tell me which folder your projects are in" | Name a folder | Agent runs the verb; discovered projects listed |
-| Done | Trust but verify | `florina status` truth + desktop card shows the same facts | Open the app / ask agent what failed | Missing pieces stay missing in both surfaces |
+| Moment            | User knows before                     | System reveals                                             | Decision                             | Feedback / recovery                             |
+| ----------------- | ------------------------------------- | ---------------------------------------------------------- | ------------------------------------ | ----------------------------------------------- |
+| "Install Florina" | The agent exists and can run commands | Agent narrates steps as it runs them                       | Let it proceed                       | Agent reports each step's real exit/output      |
+| Provider sign-in  | The app needs an account they have    | A terminal/browser opens, named for the provider           | Sign in or skip                      | Agent re-checks and reports honestly            |
+| Folder choice     | Where their projects live             | "Tell me which folder your projects are in"                | Name a folder                        | Agent runs the verb; discovered projects listed |
+| Done              | Trust but verify                      | `florina status` truth + desktop card shows the same facts | Open the app / ask agent what failed | Missing pieces stay missing in both surfaces    |
 
 ## Journey model
 
@@ -94,13 +94,13 @@ human with the verb and error to run manually.
 
 ## States inventory
 
-| State | Agent-facing contract | Human-facing contract |
-| --- | --- | --- |
-| Daemon not running | `status` exits non-zero with a parseable reason | Desktop shows offline; agent told to run `start` |
-| Probe couldn't answer | `probed: false` — never fabricated emptiness | "Couldn't check" copy, check-again path |
-| Provider missing | `installable` flag gates whether `install` can work | Button only when a real installer exists (shipped behavior) |
-| Needs human | Sign-in flows block on a person — agent must wait, not loop | Clear ask, named app, way back |
-| Ready vs claimed | Exit-0 verification is evidence | Status/card show identical facts — agent's summary is checkable |
+| State                 | Agent-facing contract                                       | Human-facing contract                                           |
+| --------------------- | ----------------------------------------------------------- | --------------------------------------------------------------- |
+| Daemon not running    | `status` exits non-zero with a parseable reason             | Desktop shows offline; agent told to run `start`                |
+| Probe couldn't answer | `probed: false` — never fabricated emptiness                | "Couldn't check" copy, check-again path                         |
+| Provider missing      | `installable` flag gates whether `install` can work         | Button only when a real installer exists (shipped behavior)     |
+| Needs human           | Sign-in flows block on a person — agent must wait, not loop | Clear ask, named app, way back                                  |
+| Ready vs claimed      | Exit-0 verification is evidence                             | Status/card show identical facts — agent's summary is checkable |
 
 ## Interaction rules
 
@@ -113,7 +113,7 @@ human with the verb and error to run manually.
    daemon protocol must derive from the same readiness facts — an agent
    and a human never see different worlds (a test can pin this).
 4. **Auditable.** Every agent-invoked verb lands in the same journal as a
-   human click; the human can later see *what their agent did*, not just
+   human click; the human can later see _what their agent did_, not just
    what it claimed (work/History surfaces already exist).
 5. **Hand-offs are first-class states.** "Waiting for a human to sign in"
    is a named state the agent reports and Florina reflects — not a stall.
@@ -131,7 +131,7 @@ command/honesty contract, not a layout.
 ## Open questions
 
 1. Is the source-build path (`npm install && npm run build && florina
-   start`) acceptable as the agent's recipe, or must a packaged/agent-
+start`) acceptable as the agent's recipe, or must a packaged/agent-
    installable distribution exist first? _Inference: for developers with
    agents, source is fine — packaged adds nothing the agent needs._
 2. Does folder selection warrant a new CLI verb, or is "open the app once,
@@ -148,7 +148,7 @@ command/honesty contract, not a layout.
 ## What this is not
 
 - Not Florina's Secretary doing setup — that's a separate (rejected-by-
-  context) interpretation; this contract is about *external* agents.
+  context) interpretation; this contract is about _external_ agents.
 - Not unattended autonomous install — human moments (sign-in, secrets,
   folder consent) are designed, not bypassed.
 - Not human-validated — the #279 pilot could add an agent-mediated setup

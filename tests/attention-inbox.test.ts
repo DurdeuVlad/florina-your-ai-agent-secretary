@@ -495,9 +495,7 @@ describe('AttentionInbox', () => {
 
     it('does not fire when the item is already in the target state', () => {
       const fired: string[] = [];
-      inbox.add(
-        item('1', 'High', '2026-01-01T00:00:00.000Z', { status: 'Acknowledged' }),
-      );
+      inbox.add(item('1', 'High', '2026-01-01T00:00:00.000Z', { status: 'Acknowledged' }));
       inbox.add(item('2', 'Critical', '2026-01-01T00:00:00.000Z', { status: 'Resolved' }));
       inbox.setMutationObserver(() => fired.push('fired'));
       expect(inbox.acknowledge('1')).toBe(true); // found, but no state change

@@ -60,21 +60,27 @@ export function renderHistoryView(input: HistoryViewInput): RenderTree {
 
   if (doneTasks.length === 0 && resolvedItems.length === 0) {
     return el('HistoryView', {}, [
-      el('EmptyState', {}, [
-        el('EmptyHint', {}, ['nothing completed or resolved yet']),
-      ]),
+      el('EmptyState', {}, [el('EmptyHint', {}, ['nothing completed or resolved yet'])]),
     ]);
   }
 
   return el('HistoryView', {}, [
     el('HistorySection', { title: 'Completed work' }, [
       ...(doneTasks.length === 0
-        ? [el('EmptyHint', {}, ['no completed tasks' + (projectId !== undefined ? ' in this project' : '')])]
+        ? [
+            el('EmptyHint', {}, [
+              'no completed tasks' + (projectId !== undefined ? ' in this project' : ''),
+            ]),
+          ]
         : doneTasks.map((t) => renderTaskRow(t))),
     ]),
     el('HistorySection', { title: 'Resolved decisions' }, [
       ...(resolvedItems.length === 0
-        ? [el('EmptyHint', {}, ['no resolved decisions' + (projectId !== undefined ? ' in this project' : '')])]
+        ? [
+            el('EmptyHint', {}, [
+              'no resolved decisions' + (projectId !== undefined ? ' in this project' : ''),
+            ]),
+          ]
         : resolvedItems.map((i) => renderResolvedItemRow(i))),
     ]),
   ]);

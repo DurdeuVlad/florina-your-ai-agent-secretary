@@ -64,7 +64,11 @@ const UNTIL = '2026-09-21T00:00:00.000Z';
 describe('computeCatchUpDigest', () => {
   it('is empty when there is nothing notable, running, pending, or failed-over', () => {
     const digest = computeCatchUpDigest(
-      { taskStore: new FakeTaskStore([]), inbox: new AttentionInbox(), journal: new FakeJournal([]) },
+      {
+        taskStore: new FakeTaskStore([]),
+        inbox: new AttentionInbox(),
+        journal: new FakeJournal([]),
+      },
       SINCE,
       UNTIL,
     );
@@ -79,11 +83,19 @@ describe('computeCatchUpDigest', () => {
       task({ id: 't-attn', state: 'attention-needed', updatedAt: '2026-09-20T14:00:00.000Z' }),
     ];
     const digest = computeCatchUpDigest(
-      { taskStore: new FakeTaskStore(tasks), inbox: new AttentionInbox(), journal: new FakeJournal([]) },
+      {
+        taskStore: new FakeTaskStore(tasks),
+        inbox: new AttentionInbox(),
+        journal: new FakeJournal([]),
+      },
       SINCE,
       UNTIL,
     );
-    expect(digest.notable.map((t) => t.taskId).sort()).toEqual(['t-attn', 't-completed', 't-failed']);
+    expect(digest.notable.map((t) => t.taskId).sort()).toEqual([
+      't-attn',
+      't-completed',
+      't-failed',
+    ]);
     expect(digest.isEmpty).toBe(false);
   });
 
@@ -94,7 +106,11 @@ describe('computeCatchUpDigest', () => {
       task({ id: 't-after', state: 'completed', updatedAt: '2026-09-22T00:00:00.000Z' }),
     ];
     const digest = computeCatchUpDigest(
-      { taskStore: new FakeTaskStore(tasks), inbox: new AttentionInbox(), journal: new FakeJournal([]) },
+      {
+        taskStore: new FakeTaskStore(tasks),
+        inbox: new AttentionInbox(),
+        journal: new FakeJournal([]),
+      },
       SINCE,
       UNTIL,
     );
@@ -108,7 +124,11 @@ describe('computeCatchUpDigest', () => {
       task({ id: 't-blocked', state: 'blocked', updatedAt: '2026-09-20T12:00:00.000Z' }),
     ];
     const digest = computeCatchUpDigest(
-      { taskStore: new FakeTaskStore(tasks), inbox: new AttentionInbox(), journal: new FakeJournal([]) },
+      {
+        taskStore: new FakeTaskStore(tasks),
+        inbox: new AttentionInbox(),
+        journal: new FakeJournal([]),
+      },
       SINCE,
       UNTIL,
     );
@@ -116,9 +136,15 @@ describe('computeCatchUpDigest', () => {
   });
 
   it('lists still-running tasks as a live snapshot, independent of the window', () => {
-    const tasks = [task({ id: 't-running', state: 'running', updatedAt: '2026-09-01T00:00:00.000Z' })];
+    const tasks = [
+      task({ id: 't-running', state: 'running', updatedAt: '2026-09-01T00:00:00.000Z' }),
+    ];
     const digest = computeCatchUpDigest(
-      { taskStore: new FakeTaskStore(tasks), inbox: new AttentionInbox(), journal: new FakeJournal([]) },
+      {
+        taskStore: new FakeTaskStore(tasks),
+        inbox: new AttentionInbox(),
+        journal: new FakeJournal([]),
+      },
       SINCE,
       UNTIL,
     );

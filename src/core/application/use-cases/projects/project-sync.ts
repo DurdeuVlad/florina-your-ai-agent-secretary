@@ -16,10 +16,7 @@
  * Read-only on provider state: this service and its outbound scanners never
  * write to or modify provider configs or directories.
  */
-import type {
-  EntityId,
-  Project,
-} from '../../../domain/types.js';
+import type { EntityId, Project } from '../../../domain/types.js';
 import type {
   EventJournalPort,
   ProjectRepositoryPort,
@@ -71,7 +68,12 @@ export function folderBasename(folderPath: string): string {
 }
 
 function sanitizeSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'project'
+  );
 }
 
 export class ProjectSyncService {

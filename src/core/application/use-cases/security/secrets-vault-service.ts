@@ -421,34 +421,36 @@ export class SecretsVaultService {
     const providers = new Set(match.providers ?? []);
     const nowMs = Date.parse(this.now());
     const allMetadata = await this.vault.listSecretMetadata();
-    return allMetadata
-      // Fail closed on expiry, mirroring the vault's getSecretValue:
-      // an unparseable or past expiresAt is not a usable credential.
-      .filter((m) => {
-        if (m.expiresAt === undefined) return true;
-        const t = Date.parse(m.expiresAt);
-        return !Number.isNaN(t) && t > nowMs;
-      })
-      // A project-scoped secret must never feed a global consumer.
-      .filter((m) => m.scope.projectId === undefined)
-      // Provider scope is a restriction, not just a label: a secret
-      // granted to `claude-code` must not resolve for the chat model.
-      // `providers` therefore acts as a constraint — a set provider must
-      // be on the consumer's list — not an alternate match key alone.
-      .filter((m) => m.scope.provider === undefined || providers.has(m.scope.provider))
-      .filter((m) => {
-        if (m.scope.provider !== undefined && providers.has(m.scope.provider)) {
-          return true;
-        }
-        // Match on the declared env var OR the derived one — a secret
-        // named `openai-api-key` injects as OPENAI_API_KEY for agent envs,
-        // so the credential resolver honors the same name mapping.
-        return (
-          (m.scope.envVarName !== undefined && envNames.has(m.scope.envVarName)) ||
-          envNames.has(toEnvVarName(m.name))
-        );
-      })
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return (
+      allMetadata
+        // Fail closed on expiry, mirroring the vault's getSecretValue:
+        // an unparseable or past expiresAt is not a usable credential.
+        .filter((m) => {
+          if (m.expiresAt === undefined) return true;
+          const t = Date.parse(m.expiresAt);
+          return !Number.isNaN(t) && t > nowMs;
+        })
+        // A project-scoped secret must never feed a global consumer.
+        .filter((m) => m.scope.projectId === undefined)
+        // Provider scope is a restriction, not just a label: a secret
+        // granted to `claude-code` must not resolve for the chat model.
+        // `providers` therefore acts as a constraint — a set provider must
+        // be on the consumer's list — not an alternate match key alone.
+        .filter((m) => m.scope.provider === undefined || providers.has(m.scope.provider))
+        .filter((m) => {
+          if (m.scope.provider !== undefined && providers.has(m.scope.provider)) {
+            return true;
+          }
+          // Match on the declared env var OR the derived one — a secret
+          // named `openai-api-key` injects as OPENAI_API_KEY for agent envs,
+          // so the credential resolver honors the same name mapping.
+          return (
+            (m.scope.envVarName !== undefined && envNames.has(m.scope.envVarName)) ||
+            envNames.has(toEnvVarName(m.name))
+          );
+        })
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    );
   }
 
   /**

@@ -14,9 +14,24 @@ function event(overrides: Partial<Event> & Pick<Event, 'id' | 'timestamp'>): Eve
 
 describe('searchJournalEvents', () => {
   const events: Event[] = [
-    event({ id: 'e1', timestamp: '2026-09-19T00:00:00.000Z', kind: 'AgentStarted', payload: { objective: 'fix bug' } }),
-    event({ id: 'e2', timestamp: '2026-09-20T00:00:00.000Z', kind: 'TestFinished', payload: { passed: 5, failed: 0 } }),
-    event({ id: 'e3', timestamp: '2026-09-21T00:00:00.000Z', kind: 'AgentCompleted', payload: { summary: 'fixed the bug' } }),
+    event({
+      id: 'e1',
+      timestamp: '2026-09-19T00:00:00.000Z',
+      kind: 'AgentStarted',
+      payload: { objective: 'fix bug' },
+    }),
+    event({
+      id: 'e2',
+      timestamp: '2026-09-20T00:00:00.000Z',
+      kind: 'TestFinished',
+      payload: { passed: 5, failed: 0 },
+    }),
+    event({
+      id: 'e3',
+      timestamp: '2026-09-21T00:00:00.000Z',
+      kind: 'AgentCompleted',
+      payload: { summary: 'fixed the bug' },
+    }),
   ];
 
   it('returns everything, most-recent-first, with no query', () => {

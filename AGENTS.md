@@ -43,19 +43,19 @@ Guidance for coding agents (and humans) working in this repository.
 
 ## Commands
 
-| Task                    | Command                    |
-| ----------------------- | -------------------------- |
-| Install deps            | `npm install`              |
-| Build                   | `npm run build`            |
-| Typecheck only          | `npm run typecheck`        |
-| Run tests               | `npm test`                 |
-| Watch tests             | `npm run test:watch`       |
-| Lint                    | `npm run lint`             |
-| Lint (autofix)          | `npm run lint:fix`         |
-| Format                  | `npm run format`           |
-| Check formatting        | `npm run format:check`     |
-| Package desktop (all)   | `npm run dist`             |
-| Package desktop (unpack)| `npm run dist:dir`         |
+| Task                     | Command                |
+| ------------------------ | ---------------------- |
+| Install deps             | `npm install`          |
+| Build                    | `npm run build`        |
+| Typecheck only           | `npm run typecheck`    |
+| Run tests                | `npm test`             |
+| Watch tests              | `npm run test:watch`   |
+| Lint                     | `npm run lint`         |
+| Lint (autofix)           | `npm run lint:fix`     |
+| Format                   | `npm run format`       |
+| Check formatting         | `npm run format:check` |
+| Package desktop (all)    | `npm run dist`         |
+| Package desktop (unpack) | `npm run dist:dir`     |
 
 ## Project Layout
 

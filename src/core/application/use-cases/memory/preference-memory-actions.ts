@@ -35,7 +35,10 @@ export interface PreferenceMemoryRow {
 
 function forgetCommandFor(rule: RoutingRule): UpdatePreferenceCommand;
 function forgetCommandFor(deny: DenyRule, isDeny: true): UpdatePreferenceCommand;
-function forgetCommandFor(ruleOrDeny: RoutingRule | DenyRule, isDeny?: true): UpdatePreferenceCommand {
+function forgetCommandFor(
+  ruleOrDeny: RoutingRule | DenyRule,
+  isDeny?: true,
+): UpdatePreferenceCommand {
   return {
     kind: 'update-preference',
     action: isDeny ? 'remove-deny' : 'remove-rule',

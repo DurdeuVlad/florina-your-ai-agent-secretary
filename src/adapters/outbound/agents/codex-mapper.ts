@@ -761,9 +761,7 @@ export function mapModernItemStarted(
     };
   }
   if (item.type === 'reasoning') {
-    const summary = Array.isArray(item['summary'])
-      ? item['summary'].join(' ')
-      : 'Reasoning...';
+    const summary = Array.isArray(item['summary']) ? item['summary'].join(' ') : 'Reasoning...';
     return {
       type: 'AgentProgress',
       timestamp: now(),
@@ -809,7 +807,8 @@ export function mapModernItemCompleted(
   if (item.type === 'mcpToolCall' || item.type === 'dynamicToolCall') {
     const toolName = typeof item['tool'] === 'string' ? item['tool'] : 'tool';
     const status = typeof item['status'] === 'string' ? item['status'] : 'completed';
-    const success = item['success'] !== undefined ? Boolean(item['success']) : status === 'completed';
+    const success =
+      item['success'] !== undefined ? Boolean(item['success']) : status === 'completed';
     return {
       type: 'ToolFinished',
       timestamp: now(),
@@ -829,11 +828,7 @@ export function mapModernItemCompleted(
     const first = changes[0] as { path?: string; kind?: string } | undefined;
     const path = first?.path ?? 'unknown';
     const changeType =
-      first?.kind === 'add'
-        ? 'created'
-        : first?.kind === 'delete'
-          ? 'deleted'
-          : 'modified';
+      first?.kind === 'add' ? 'created' : first?.kind === 'delete' ? 'deleted' : 'modified';
     return {
       type: 'FileChanged',
       timestamp: now(),
@@ -1019,4 +1014,3 @@ export function mapCodexNotification(
       return null;
   }
 }
-

@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { isInScope, detectOutOfScopeEdit } from '../src/core/application/use-cases/attention/scope-edit-trigger.js';
+import {
+  isInScope,
+  detectOutOfScopeEdit,
+} from '../src/core/application/use-cases/attention/scope-edit-trigger.js';
 import { AttentionInbox } from '../src/core/application/use-cases/attention/attention-inbox.js';
-import { SupervisionLadder, SupervisionLevel } from '../src/core/application/use-cases/attention/supervision-ladder.js';
+import {
+  SupervisionLadder,
+  SupervisionLevel,
+} from '../src/core/application/use-cases/attention/supervision-ladder.js';
 import type { ExecutionBrief } from '../src/core/domain/execution-brief.js';
 
 function brief(scopePaths?: readonly string[]): ExecutionBrief {

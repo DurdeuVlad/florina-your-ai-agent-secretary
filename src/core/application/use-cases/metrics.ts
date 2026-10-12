@@ -211,10 +211,7 @@ export interface MetricsSnapshot {
  * L0 (deterministic) makes no model call and is intentionally absent here.
  */
 export type SupervisionStage =
-  | 'l1-classification'
-  | 'execution-brief-compile'
-  | 'l2-manager-reasoning'
-  | 'l3-florina-reasoning';
+  'l1-classification' | 'execution-brief-compile' | 'l2-manager-reasoning' | 'l3-florina-reasoning';
 
 const SUPERVISION_STAGES: readonly SupervisionStage[] = [
   'l1-classification',

@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { compileExecutionBrief } from '../src/core/application/use-cases/memory/execution-brief.js';
 import type { MemoryItem } from '../src/core/domain/memory.js';
 
-function item(overrides: Partial<MemoryItem> & Pick<MemoryItem, 'id' | 'kind' | 'statement'>): MemoryItem {
+function item(
+  overrides: Partial<MemoryItem> & Pick<MemoryItem, 'id' | 'kind' | 'statement'>,
+): MemoryItem {
   return {
     scope: { type: 'global' },
     provenance: 'explicit',
@@ -56,7 +58,7 @@ describe('compileExecutionBrief — worked example (docs §6.3)', () => {
     const hexArchitecture = item({
       id: 'k-hex-arch',
       kind: 'project-knowledge',
-      statement: "This project uses hexagonal architecture; new code goes in src/core.",
+      statement: 'This project uses hexagonal architecture; new code goes in src/core.',
       scope: { type: 'project', projectId: 'proj-1' },
       tags: ['global-dev'],
     });
@@ -114,10 +116,9 @@ describe('compileExecutionBrief — scope filter', () => {
       status: 'candidate',
       tags: ['bugfix'],
     });
-    const brief = compileExecutionBrief(
-      { taskId: 't1', objective: 'x', topics: ['bugfix'] },
-      [candidateRule],
-    );
+    const brief = compileExecutionBrief({ taskId: 't1', objective: 'x', topics: ['bugfix'] }, [
+      candidateRule,
+    ]);
     expect(brief.applicableRules).toHaveLength(0);
   });
 });
@@ -126,7 +127,10 @@ describe('compileExecutionBrief — same-tag rules that do not conflict', () => 
   it('keeps both when they share a tag but have no conflictsWith link', () => {
     const a = item({ id: 'r-a', kind: 'rule', statement: 'Reproduce first.', tags: ['bugfix'] });
     const b = item({ id: 'r-b', kind: 'rule', statement: 'Keep it scoped.', tags: ['bugfix'] });
-    const brief = compileExecutionBrief({ taskId: 't1', objective: 'x', topics: ['bugfix'] }, [a, b]);
+    const brief = compileExecutionBrief({ taskId: 't1', objective: 'x', topics: ['bugfix'] }, [
+      a,
+      b,
+    ]);
     expect(brief.applicableRules.map((r) => r.id).sort()).toEqual(['r-a', 'r-b']);
   });
 });
@@ -194,10 +198,10 @@ describe('compileExecutionBrief — conflict resolution (explicit conflictsWith 
       updatedAt: '2026-09-20T00:00:00.000Z',
       conflictsWith: ['r-older'],
     });
-    const brief = compileExecutionBrief(
-      { taskId: 't1', objective: 'x', topics: ['bugfix'] },
-      [older, newer],
-    );
+    const brief = compileExecutionBrief({ taskId: 't1', objective: 'x', topics: ['bugfix'] }, [
+      older,
+      newer,
+    ]);
     expect(brief.applicableRules.map((r) => r.id)).toEqual(['r-newer']);
   });
 
@@ -218,10 +222,10 @@ describe('compileExecutionBrief — conflict resolution (explicit conflictsWith 
       updatedAt: '2026-09-20T00:00:00.000Z',
       conflictsWith: ['r-hard'],
     });
-    const brief = compileExecutionBrief(
-      { taskId: 't1', objective: 'x', topics: ['security'] },
-      [hardPolicy, explicitRule],
-    );
+    const brief = compileExecutionBrief({ taskId: 't1', objective: 'x', topics: ['security'] }, [
+      hardPolicy,
+      explicitRule,
+    ]);
     const ids = brief.applicableRules.map((r) => r.id);
     expect(ids).toContain('r-hard');
     expect(ids).not.toContain('r-explicit-security');

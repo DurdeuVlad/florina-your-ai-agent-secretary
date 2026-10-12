@@ -11,7 +11,7 @@ import type { TaskSnapshot } from '../src/core/application/use-cases/tasks/comma
 import type { Event } from '../src/core/domain/types.js';
 
 describe('providerTransitionText', () => {
-  it('matches flow F\'s worked example shape', () => {
+  it("matches flow F's worked example shape", () => {
     const text = providerTransitionText(
       { fromProvider: 'codex', toProvider: 'claude-code', reason: 'quota_exhausted' },
       '14:32:00',
@@ -76,7 +76,9 @@ describe('inspector timeline: provider transition row (issue #202)', () => {
     });
     const timelineCol = tree.children?.[1];
     const row = typeof timelineCol === 'string' ? undefined : timelineCol?.children?.[0];
-    expect(typeof row === 'string' ? undefined : row?.props?.['variant']).toBe('provider-transition');
+    expect(typeof row === 'string' ? undefined : row?.props?.['variant']).toBe(
+      'provider-transition',
+    );
   });
 
   it('stays visible even at D/E fidelity tier (a structural fact, not raw chatter)', () => {
@@ -89,7 +91,9 @@ describe('inspector timeline: provider transition row (issue #202)', () => {
     });
     const timelineCol = tree.children?.[1];
     const row = typeof timelineCol === 'string' ? undefined : timelineCol?.children?.[0];
-    expect(typeof row === 'string' ? undefined : row?.props?.['variant']).toBe('provider-transition');
+    expect(typeof row === 'string' ? undefined : row?.props?.['variant']).toBe(
+      'provider-transition',
+    );
   });
 
   it('existing tasks without any transition render unaffected (no regression)', () => {
@@ -131,13 +135,17 @@ describe('current-provider bug fix (issue #202): task rows show the CURRENT prov
 
   it('home-view renderTaskRow shows the most recent provider after a failover', () => {
     const row = renderTaskRow(task({ agentIds: ['codex', 'claude-code'] }));
-    const chip = (row.children ?? []).find((c) => typeof c !== 'string' && c.tag === 'ProviderChip');
+    const chip = (row.children ?? []).find(
+      (c) => typeof c !== 'string' && c.tag === 'ProviderChip',
+    );
     expect(typeof chip === 'string' ? undefined : chip?.children?.[0]).toBe('claude-code');
   });
 
   it('a task that never failed over still shows its single provider', () => {
     const row = renderTaskRow(task({ agentIds: ['codex'] }));
-    const chip = (row.children ?? []).find((c) => typeof c !== 'string' && c.tag === 'ProviderChip');
+    const chip = (row.children ?? []).find(
+      (c) => typeof c !== 'string' && c.tag === 'ProviderChip',
+    );
     expect(typeof chip === 'string' ? undefined : chip?.children?.[0]).toBe('codex');
   });
 });

@@ -48,11 +48,7 @@ function scopeFor(projectId: EntityId | undefined): MemoryItem['scope'] {
  * status. This will need revisiting if/when routing rules gain an inferred
  * write path.
  */
-function routingRuleToMemoryItem(
-  rule: RoutingRule,
-  id: EntityId,
-  now: ISODateString,
-): MemoryItem {
+function routingRuleToMemoryItem(rule: RoutingRule, id: EntityId, now: ISODateString): MemoryItem {
   return {
     id,
     kind: 'preference',

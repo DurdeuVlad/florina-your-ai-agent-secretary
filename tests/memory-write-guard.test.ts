@@ -55,7 +55,11 @@ describe('isExcludedTopic', () => {
 describe('guardMemoryWrite', () => {
   it('accepts explicit provenance regardless of kind or topic', () => {
     const result = guardMemoryWrite(
-      item({ provenance: 'explicit', kind: 'hard-policy', statement: 'Never deploy without approval.' }),
+      item({
+        provenance: 'explicit',
+        kind: 'hard-policy',
+        statement: 'Never deploy without approval.',
+      }),
     );
     expect(result.outcome).toBe('accepted');
   });
@@ -114,7 +118,10 @@ describe('guardMemoryWrite', () => {
    * through, rather than trusting a handful of hand-picked cases.
    */
   it('cannot be bypassed: every inferred provenance x every kind is rejected for an excluded topic', () => {
-    const inferredProvenances: readonly MemoryProvenance[] = ['inferred-repeated', 'inferred-single'];
+    const inferredProvenances: readonly MemoryProvenance[] = [
+      'inferred-repeated',
+      'inferred-single',
+    ];
     const kinds: readonly MemoryKind[] = [
       'fact',
       'preference',

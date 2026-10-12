@@ -30,7 +30,12 @@ function sampleBrief(): ExecutionBrief {
     objective: 'Fix the pagination bug.',
     relevantContext: ['This project uses hexagonal architecture.'],
     applicableRules: [
-      { id: 'r-1', statement: 'Reproduce before fixing.', provenance: 'explicit', scope: { type: 'global' } },
+      {
+        id: 'r-1',
+        statement: 'Reproduce before fixing.',
+        provenance: 'explicit',
+        scope: { type: 'global' },
+      },
     ],
     constraints: ['Do not touch unrelated files.'],
     requiredVerification: ['npm test', 'npm run typecheck'],

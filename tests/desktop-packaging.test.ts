@@ -31,7 +31,17 @@ function makeResolver(
     }
     // Mirrors the fileURLToPath(new URL(...)) pattern from desktop.ts:
     // bootstrapDir is the directory of dist/bootstrap/desktop.js
-    return path.join(bootstrapDir, '..', '..', 'src', 'adapters', 'inbound', 'desktop', 'renderer', relativePath);
+    return path.join(
+      bootstrapDir,
+      '..',
+      '..',
+      'src',
+      'adapters',
+      'inbound',
+      'desktop',
+      'renderer',
+      relativePath,
+    );
   };
 }
 

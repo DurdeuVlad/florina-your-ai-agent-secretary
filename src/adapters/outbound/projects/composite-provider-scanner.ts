@@ -8,10 +8,16 @@ import type {
   DiscoveredProviderProject,
   ProviderProjectScannerPort,
 } from '../../../core/application/ports/outbound/provider-projects.js';
-import { ClaudeProjectScanner, type ClaudeProjectScannerOptions } from './claude-project-scanner.js';
+import {
+  ClaudeProjectScanner,
+  type ClaudeProjectScannerOptions,
+} from './claude-project-scanner.js';
 import { CodexProjectScanner, type CodexProjectScannerOptions } from './codex-project-scanner.js';
 import { DevinProjectScanner, type DevinProjectScannerOptions } from './devin-project-scanner.js';
-import { AntigravityProjectScanner, type AntigravityProjectScannerOptions } from './antigravity-project-scanner.js';
+import {
+  AntigravityProjectScanner,
+  type AntigravityProjectScannerOptions,
+} from './antigravity-project-scanner.js';
 
 export interface CompositeProviderScannerOptions {
   readonly scanners?: readonly ProviderProjectScannerPort[];

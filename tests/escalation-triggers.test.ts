@@ -8,12 +8,20 @@ import {
 } from '../src/core/application/use-cases/attention/escalation-triggers.js';
 import { LivenessMonitor } from '../src/core/application/use-cases/attention/liveness-monitor.js';
 import { AttentionInbox } from '../src/core/application/use-cases/attention/attention-inbox.js';
-import { SupervisionLadder, SupervisionLevel } from '../src/core/application/use-cases/attention/supervision-ladder.js';
+import {
+  SupervisionLadder,
+  SupervisionLevel,
+} from '../src/core/application/use-cases/attention/supervision-ladder.js';
 import type { ContextHealthChangedEvent } from '../src/core/domain/events.js';
 
 describe('detectQuotaExhaustion', () => {
   it('signals on an exhausted window', () => {
-    const obs: QuotaObservation = { taskId: 't1', provider: 'codex', window: '5h', status: 'exhausted' };
+    const obs: QuotaObservation = {
+      taskId: 't1',
+      provider: 'codex',
+      window: '5h',
+      status: 'exhausted',
+    };
     const signal = detectQuotaExhaustion(obs);
     expect(signal).not.toBeNull();
     expect(signal!.taskId).toBe('t1');
@@ -84,7 +92,12 @@ describe('detectInactivity', () => {
 describe('escalation triggers feeding the ladder (no over-escalation)', () => {
   it('a quota-exhaustion signal resolved by an L2 resolver never reaches L4', () => {
     const inbox = new AttentionInbox();
-    const obs: QuotaObservation = { taskId: 't1', provider: 'codex', window: '5h', status: 'exhausted' };
+    const obs: QuotaObservation = {
+      taskId: 't1',
+      provider: 'codex',
+      window: '5h',
+      status: 'exhausted',
+    };
     const signal = detectQuotaExhaustion(obs)!;
     const ladder = new SupervisionLadder({
       inbox,

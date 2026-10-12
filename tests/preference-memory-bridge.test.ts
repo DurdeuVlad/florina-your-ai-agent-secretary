@@ -16,20 +16,29 @@ function fakeClock(iso: string): ClockPort {
 describe('preferenceProfileToMemoryItems', () => {
   it('maps an empty profile to no items', () => {
     const profile: PreferenceProfile = { rules: [], denied: [] };
-    expect(preferenceProfileToMemoryItems(profile, fakeIds(), fakeClock('2026-09-21T00:00:00.000Z'))).toEqual(
-      [],
-    );
+    expect(
+      preferenceProfileToMemoryItems(profile, fakeIds(), fakeClock('2026-09-21T00:00:00.000Z')),
+    ).toEqual([]);
   });
 
   it('maps routing rules and deny rules to explicit, active preference-kind items', () => {
     const profile: PreferenceProfile = {
       rules: [
-        { provider: 'claude-code', model: 'sonnet', workTypes: ['reading'], note: 'good at reasoning' },
+        {
+          provider: 'claude-code',
+          model: 'sonnet',
+          workTypes: ['reading'],
+          note: 'good at reasoning',
+        },
         { provider: 'codex', projectId: 'proj-1' },
       ],
       denied: [{ provider: 'claude-code', model: 'opus' }],
     };
-    const items = preferenceProfileToMemoryItems(profile, fakeIds(), fakeClock('2026-09-21T00:00:00.000Z'));
+    const items = preferenceProfileToMemoryItems(
+      profile,
+      fakeIds(),
+      fakeClock('2026-09-21T00:00:00.000Z'),
+    );
 
     expect(items).toHaveLength(3);
     for (const item of items) {
@@ -40,9 +49,7 @@ describe('preferenceProfileToMemoryItems', () => {
     }
 
     expect(items[0]!.scope).toEqual({ type: 'global' });
-    expect(items[0]!.statement).toBe(
-      'Prefer claude-code/sonnet for reading — good at reasoning',
-    );
+    expect(items[0]!.statement).toBe('Prefer claude-code/sonnet for reading — good at reasoning');
 
     expect(items[1]!.scope).toEqual({ type: 'project', projectId: 'proj-1' });
     expect(items[1]!.statement).toBe('Prefer codex (project rule)');
@@ -55,7 +62,11 @@ describe('preferenceProfileToMemoryItems', () => {
       rules: [{ provider: 'a' }, { provider: 'b' }],
       denied: [{ provider: 'c' }],
     };
-    const items = preferenceProfileToMemoryItems(profile, fakeIds(), fakeClock('2026-09-21T00:00:00.000Z'));
+    const items = preferenceProfileToMemoryItems(
+      profile,
+      fakeIds(),
+      fakeClock('2026-09-21T00:00:00.000Z'),
+    );
     const ids = items.map((i) => i.id);
     expect(new Set(ids).size).toBe(3);
   });

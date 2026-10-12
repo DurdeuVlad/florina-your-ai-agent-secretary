@@ -95,15 +95,16 @@ describe('CapacityRouter', () => {
       denied: [{ provider: 'claude-code', model: 'opus' }],
     };
     const result = router(profile).route({});
-    expect(result).toMatchObject({ kind: 'routed', provider: 'claude-code', model: 'claude-sonnet-5' });
+    expect(result).toMatchObject({
+      kind: 'routed',
+      provider: 'claude-code',
+      model: 'claude-sonnet-5',
+    });
   });
 
   it('a claude-code deny on the alias also blocks dated-style full ids (family not the first segment)', () => {
     const profile: PreferenceProfile = {
-      rules: [
-        { provider: 'claude-code', model: 'claude-3-opus-20240229' },
-        { provider: 'codex' },
-      ],
+      rules: [{ provider: 'claude-code', model: 'claude-3-opus-20240229' }, { provider: 'codex' }],
       denied: [{ provider: 'claude-code', model: 'opus' }],
     };
     const result = router(profile).route({});

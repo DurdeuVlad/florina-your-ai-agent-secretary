@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { buildTask } from '../src/core/domain/index.js';
-import { BUILT_IN_MANAGER_PROFILE_ID, type AgentProfile } from '../src/core/domain/agent-profile.js';
+import {
+  BUILT_IN_MANAGER_PROFILE_ID,
+  type AgentProfile,
+} from '../src/core/domain/agent-profile.js';
 import type { AgentProfileStorePort } from '../src/core/application/ports/outbound/agent-profile-store.js';
 
 class InMemoryAgentProfileStore implements AgentProfileStorePort {

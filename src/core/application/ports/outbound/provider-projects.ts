@@ -25,7 +25,8 @@ export interface ProviderProjectScannerPort {
   /** Identifier of the provider this scanner covers. */
   readonly providerId: string;
   /** Scan local provider state files (read-only) and return discovered projects. */
-  scanProjects(): Promise<readonly DiscoveredProviderProject[]> | readonly DiscoveredProviderProject[];
+  scanProjects():
+    Promise<readonly DiscoveredProviderProject[]> | readonly DiscoveredProviderProject[];
 }
 
 /** Outbound port for resolving canonical absolute filesystem paths. */

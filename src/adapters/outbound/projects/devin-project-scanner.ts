@@ -47,7 +47,9 @@ export function decodeWorkspaceUri(uri: string): string {
       // platform — on POSIX, fileURLToPath leaves it as `/x:/...`,
       // which is a meaningless path. Strip the leading slash the same
       // way the fallback below does (#284).
-      return fileURLToPath(uri).replace(/\\/g, '/').replace(/^\/([a-zA-Z]:)/, '$1');
+      return fileURLToPath(uri)
+        .replace(/\\/g, '/')
+        .replace(/^\/([a-zA-Z]:)/, '$1');
     } catch {
       let pathName = decodeURIComponent(parsed.pathname);
       if (/^\/[a-zA-Z]:/.test(pathName)) {
@@ -73,7 +75,7 @@ export class DevinProjectScanner implements ProviderProjectScannerPort {
     const appData =
       options.appDataDir ??
       (platform === 'win32'
-        ? process.env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
+        ? (process.env['APPDATA'] ?? join(home, 'AppData', 'Roaming'))
         : platform === 'darwin'
           ? join(home, 'Library', 'Application Support')
           : join(home, '.config'));

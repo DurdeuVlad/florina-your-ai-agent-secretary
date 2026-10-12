@@ -463,7 +463,12 @@ describe('MetricsCollector', () => {
     it('every stage key is present even at 0 (not silently missing)', () => {
       const snap = collector.snapshot();
       expect(Object.keys(snap.supervisionCost.modelCallsByStage).sort()).toEqual(
-        ['execution-brief-compile', 'l1-classification', 'l2-manager-reasoning', 'l3-florina-reasoning'].sort(),
+        [
+          'execution-brief-compile',
+          'l1-classification',
+          'l2-manager-reasoning',
+          'l3-florina-reasoning',
+        ].sort(),
       );
     });
 
@@ -515,7 +520,9 @@ describe('checkSupervisionCostDiscipline', () => {
   }
 
   it('passes when L1 calls are a subset of total events', () => {
-    const check = checkSupervisionCostDiscipline(snapshotWith({ AgentStarted: 10, ToolStarted: 5 }, 3));
+    const check = checkSupervisionCostDiscipline(
+      snapshotWith({ AgentStarted: 10, ToolStarted: 5 }, 3),
+    );
     expect(check.ok).toBe(true);
   });
 

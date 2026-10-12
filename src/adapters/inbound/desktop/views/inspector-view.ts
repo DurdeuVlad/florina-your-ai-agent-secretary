@@ -23,7 +23,11 @@ import type { Event } from '../../../../core/domain/types.js';
 import type { FailoverReason } from '../../../../core/domain/events.js';
 import type { TaskSnapshot } from '../../../../core/application/use-cases/tasks/command-api.js';
 import type { RenderTree } from './view-types.js';
-import { renderProviderTransitionRow, currentProvider, priorProviders } from './provider-transition.js';
+import {
+  renderProviderTransitionRow,
+  currentProvider,
+  priorProviders,
+} from './provider-transition.js';
 
 function el(
   tag: string,

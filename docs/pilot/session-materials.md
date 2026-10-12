@@ -68,7 +68,6 @@ Facilitator: _______ | Observer: _______ | Consent recorded: Y / N (time: ___)
 Anything that compromised the session (participant saw docs, prior
 knowledge surfaced, environment failure):
 
-
 ## C. Session log checklist
 
 - [ ] Consent script read verbatim; consent recorded

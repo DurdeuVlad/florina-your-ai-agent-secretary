@@ -701,7 +701,10 @@ describe('Codex mapper', () => {
 
   it('maps modern turn/completed with status failed -> AgentFailed', () => {
     const mapped = mapModernTurnCompleted(
-      { threadId: 'thread-1', turn: { id: 'turn-1', status: 'failed', error: { message: 'Out of tokens' } } },
+      {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'failed', error: { message: 'Out of tokens' } },
+      },
       ctx,
     );
     expect(mapped.type).toBe('AgentFailed');
@@ -761,7 +764,11 @@ describe('Codex mapper', () => {
 
   it('maps modern item/started for plan and reasoning -> AgentProgress', () => {
     const plan = mapModernItemStarted(
-      { threadId: 't1', turnId: 'turn-1', item: { id: 'i1', type: 'plan', text: 'Step 1: Check logs' } },
+      {
+        threadId: 't1',
+        turnId: 'turn-1',
+        item: { id: 'i1', type: 'plan', text: 'Step 1: Check logs' },
+      },
       ctx,
     )!;
     expect(plan.type).toBe('AgentProgress');
@@ -770,7 +777,11 @@ describe('Codex mapper', () => {
     }
 
     const reasoning = mapModernItemStarted(
-      { threadId: 't1', turnId: 'turn-1', item: { id: 'i2', type: 'reasoning', summary: ['Thinking about fix'] } },
+      {
+        threadId: 't1',
+        turnId: 'turn-1',
+        item: { id: 'i2', type: 'reasoning', summary: ['Thinking about fix'] },
+      },
       ctx,
     )!;
     expect(reasoning.type).toBe('AgentProgress');
@@ -780,7 +791,10 @@ describe('Codex mapper', () => {
   });
 
   it('maps modern item/agentMessage/delta -> AgentProgress', () => {
-    const delta = mapModernMessageDelta({ threadId: 't1', turnId: 'turn-1', delta: 'Partial chunk' }, ctx);
+    const delta = mapModernMessageDelta(
+      { threadId: 't1', turnId: 'turn-1', delta: 'Partial chunk' },
+      ctx,
+    );
     expect(delta.type).toBe('AgentProgress');
     if (delta.type === 'AgentProgress') {
       expect(delta.message).toBe('Partial chunk');
@@ -789,7 +803,13 @@ describe('Codex mapper', () => {
 
   it('maps modern approval requests with structured DEC-010 fields', () => {
     const cmdApproval = mapCommandExecutionApproval(
-      { threadId: 't1', turnId: 'turn-1', itemId: 'i1', command: 'git checkout main', cwd: '/repo' },
+      {
+        threadId: 't1',
+        turnId: 'turn-1',
+        itemId: 'i1',
+        command: 'git checkout main',
+        cwd: '/repo',
+      },
       ctx,
     );
     expect(cmdApproval.type).toBe('ApprovalRequested');
@@ -835,16 +855,48 @@ describe('Codex mapper', () => {
 
   it('handles null, undefined, or missing properties in modern mappers defensively', () => {
     // None of these should throw TypeError; they should safely return null
-    expect(mapModernTurnCompleted({} as unknown as Parameters<typeof mapModernTurnCompleted>[0], ctx)).toBeNull();
-    expect(mapModernTurnCompleted({ threadId: 't1' } as unknown as Parameters<typeof mapModernTurnCompleted>[0], ctx)).toBeNull();
-    expect(mapModernItemStarted({} as unknown as Parameters<typeof mapModernItemStarted>[0], ctx)).toBeNull();
-    expect(mapModernItemStarted({ threadId: 't1' } as unknown as Parameters<typeof mapModernItemStarted>[0], ctx)).toBeNull();
-    expect(mapModernItemCompleted({} as unknown as Parameters<typeof mapModernItemCompleted>[0], ctx)).toBeNull();
-    expect(mapModernItemCompleted({ threadId: 't1' } as unknown as Parameters<typeof mapModernItemCompleted>[0], ctx)).toBeNull();
-    expect(mapModernMessageDelta({} as unknown as Parameters<typeof mapModernMessageDelta>[0], ctx)).toBeNull();
-    expect(mapCommandExecutionApproval(null as unknown as Parameters<typeof mapCommandExecutionApproval>[0], ctx)).toBeNull();
-    expect(mapFileChangeApproval(null as unknown as Parameters<typeof mapFileChangeApproval>[0], ctx)).toBeNull();
-    expect(mapPermissionsApproval(null as unknown as Parameters<typeof mapPermissionsApproval>[0], ctx)).toBeNull();
+    expect(
+      mapModernTurnCompleted({} as unknown as Parameters<typeof mapModernTurnCompleted>[0], ctx),
+    ).toBeNull();
+    expect(
+      mapModernTurnCompleted(
+        { threadId: 't1' } as unknown as Parameters<typeof mapModernTurnCompleted>[0],
+        ctx,
+      ),
+    ).toBeNull();
+    expect(
+      mapModernItemStarted({} as unknown as Parameters<typeof mapModernItemStarted>[0], ctx),
+    ).toBeNull();
+    expect(
+      mapModernItemStarted(
+        { threadId: 't1' } as unknown as Parameters<typeof mapModernItemStarted>[0],
+        ctx,
+      ),
+    ).toBeNull();
+    expect(
+      mapModernItemCompleted({} as unknown as Parameters<typeof mapModernItemCompleted>[0], ctx),
+    ).toBeNull();
+    expect(
+      mapModernItemCompleted(
+        { threadId: 't1' } as unknown as Parameters<typeof mapModernItemCompleted>[0],
+        ctx,
+      ),
+    ).toBeNull();
+    expect(
+      mapModernMessageDelta({} as unknown as Parameters<typeof mapModernMessageDelta>[0], ctx),
+    ).toBeNull();
+    expect(
+      mapCommandExecutionApproval(
+        null as unknown as Parameters<typeof mapCommandExecutionApproval>[0],
+        ctx,
+      ),
+    ).toBeNull();
+    expect(
+      mapFileChangeApproval(null as unknown as Parameters<typeof mapFileChangeApproval>[0], ctx),
+    ).toBeNull();
+    expect(
+      mapPermissionsApproval(null as unknown as Parameters<typeof mapPermissionsApproval>[0], ctx),
+    ).toBeNull();
   });
 
   it('maps modern file change approval request with multiple files into combined destination and scope', () => {
@@ -869,12 +921,15 @@ describe('Codex mapper', () => {
   });
 
   it('mapCodexNotification routes all modern and legacy variants', () => {
-    expect(mapCodexNotification('turn/started', { threadId: 't1', turn: { id: 'turn-1' } }, ctx)?.type).toBe(
-      'AgentStarted',
-    );
     expect(
-      mapCodexNotification('turn/completed', { threadId: 't1', turn: { id: 'turn-1', status: 'completed' } }, ctx)
-        ?.type,
+      mapCodexNotification('turn/started', { threadId: 't1', turn: { id: 'turn-1' } }, ctx)?.type,
+    ).toBe('AgentStarted');
+    expect(
+      mapCodexNotification(
+        'turn/completed',
+        { threadId: 't1', turn: { id: 'turn-1', status: 'completed' } },
+        ctx,
+      )?.type,
     ).toBe('AgentCompleted');
     expect(
       mapCodexNotification(
@@ -905,7 +960,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('starts a run and streams mapped events', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'legacy',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -951,7 +1009,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('surfaces permission requests as ApprovalRequested with structured fields', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'legacy',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -1048,7 +1109,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('cancel stops the run and emits AgentStopped', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'legacy',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -1097,7 +1161,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('cancel emits AgentStopped even if server does not respond', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'legacy',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -1127,7 +1194,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('emits AgentFailed when transport closes unexpectedly', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'legacy',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -1155,12 +1225,18 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('throws when startRun is called before connect', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'legacy',
+    });
     await expect(adapter.startRun('task-1', sampleSessionConfig())).rejects.toThrow();
   });
 
   it('throws when startRun is called with an active session', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'legacy' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'legacy',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -1177,7 +1253,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('starts a run with modern thread/start and turn/start', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'modern',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -1189,7 +1268,11 @@ describe('CodexAdapter (mock transport)', () => {
     const threadStartMsg = JSON.parse(transport.sent[0]);
     expect(threadStartMsg.method).toBe('thread/start');
     transport.receive(
-      JSON.stringify({ jsonrpc: '2.0', id: threadStartMsg.id, result: { thread: { id: 'thread-777' } } }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: threadStartMsg.id,
+        result: { thread: { id: 'thread-777' } },
+      }),
     );
 
     // Wait a tick so startRun proceeds to turn/start
@@ -1245,14 +1328,21 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('cancel sends turn/interrupt for modern session', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'modern',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
     const startPromise = adapter.startRun('task-codex-1', sampleSessionConfig());
     const threadMsg = JSON.parse(transport.sent[0]);
     transport.receive(
-      JSON.stringify({ jsonrpc: '2.0', id: threadMsg.id, result: { thread: { id: 'thread-999' } } }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: threadMsg.id,
+        result: { thread: { id: 'thread-999' } },
+      }),
     );
     await new Promise((r) => setTimeout(r, 10));
     const turnMsg = JSON.parse(transport.sent[1]);
@@ -1286,7 +1376,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('unexpected transport closure sets connectionState to disconnected and rejects pending requests', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'modern',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
     expect(adapter.connectionState).toBe('connected');
@@ -1300,7 +1393,10 @@ describe('CodexAdapter (mock transport)', () => {
   });
 
   it('handles server approval requests with decline and enqueues ApprovalRequested (DEC-011)', async () => {
-    const adapter = new CodexAdapter(null, { endpoint: 'ws://127.0.0.1:0', protocolMode: 'modern' });
+    const adapter = new CodexAdapter(null, {
+      endpoint: 'ws://127.0.0.1:0',
+      protocolMode: 'modern',
+    });
     const transport = new MockTransport();
     adapter.setTransport(transport);
 
@@ -1348,9 +1444,7 @@ describe('CodexAdapter (mock transport)', () => {
     expect(approval).toBeDefined();
 
     // Check that adapter responded with decline per DEC-011
-    const serverResponses = transport.sent
-      .map((s) => JSON.parse(s))
-      .filter((m) => m.id === 42);
+    const serverResponses = transport.sent.map((s) => JSON.parse(s)).filter((m) => m.id === 42);
     expect(serverResponses).toHaveLength(1);
     expect(serverResponses[0].result).toEqual({ decision: 'decline' });
 
@@ -1399,9 +1493,7 @@ describe('CodexAdapter (mock transport)', () => {
     // Wait tick for responder promise
     await new Promise((r) => setTimeout(r, 10));
 
-    const serverResponses = transport.sent
-      .map((s) => JSON.parse(s))
-      .filter((m) => m.id === 99);
+    const serverResponses = transport.sent.map((s) => JSON.parse(s)).filter((m) => m.id === 99);
     expect(serverResponses).toHaveLength(1);
     expect(serverResponses[0].result).toEqual({ decision: 'accept' });
 

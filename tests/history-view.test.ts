@@ -59,10 +59,7 @@ describe('renderHistoryView', () => {
 
   it('includes reviewed/accepted states as done, not just completed', () => {
     const input: HistoryViewInput = {
-      tasks: [
-        task({ id: 't1', state: 'reviewed' }),
-        task({ id: 't2', state: 'accepted' }),
-      ],
+      tasks: [task({ id: 't1', state: 'reviewed' }), task({ id: 't2', state: 'accepted' })],
       resolvedItems: [],
     };
     const tree = renderHistoryView(input);
@@ -72,7 +69,11 @@ describe('renderHistoryView', () => {
   it('lists resolved decisions most-recent-first, excluding non-resolved statuses', () => {
     const older = resolvedItem('t1', { createdAt: '2026-09-19T00:00:00.000Z' });
     const newer = resolvedItem('t2', { createdAt: '2026-09-20T00:00:00.000Z' });
-    const pending = createAttentionItem({ taskId: 't3', kind: 'ApprovalRequest', priority: 'High' }); // status: Pending
+    const pending = createAttentionItem({
+      taskId: 't3',
+      kind: 'ApprovalRequest',
+      priority: 'High',
+    }); // status: Pending
     const tree = renderHistoryView({ tasks: [], resolvedItems: [older, newer, pending] });
     const rows = (tree.children ?? [])
       .flatMap((c) => (typeof c === 'string' ? [] : (c.children ?? [])))
@@ -99,7 +100,9 @@ describe('renderHistoryView', () => {
       .filter((c) => typeof c !== 'string' && c.tag === 'HistoryDecisionRow');
     expect(taskRows).toHaveLength(1);
     expect(decisionRows).toHaveLength(1);
-    expect(typeof taskRows[0] === 'string' ? undefined : taskRows[0]?.props?.['taskId']).toBe('t-a');
+    expect(typeof taskRows[0] === 'string' ? undefined : taskRows[0]?.props?.['taskId']).toBe(
+      't-a',
+    );
   });
 
   it('a resolved decision for a task outside the filtered project is excluded even if the task itself is not done', () => {
@@ -116,6 +119,8 @@ describe('renderHistoryView', () => {
       .flatMap((c) => (typeof c === 'string' ? [] : (c.children ?? [])))
       .filter((c) => typeof c !== 'string' && c.tag === 'HistoryDecisionRow');
     expect(decisionRows).toHaveLength(1);
-    expect(typeof decisionRows[0] === 'string' ? undefined : decisionRows[0]?.props?.['taskId']).toBe('t-a');
+    expect(
+      typeof decisionRows[0] === 'string' ? undefined : decisionRows[0]?.props?.['taskId'],
+    ).toBe('t-a');
   });
 });

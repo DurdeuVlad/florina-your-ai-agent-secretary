@@ -93,7 +93,10 @@ export function detectRetryCeiling(
  * Inactivity beyond the liveness timeout — wires the existing
  * {@link LivenessMonitor} into the named-trigger shape the ladder expects.
  */
-export function detectInactivity(taskId: string, monitor: LivenessMonitor): SupervisionSignal | null {
+export function detectInactivity(
+  taskId: string,
+  monitor: LivenessMonitor,
+): SupervisionSignal | null {
   if (!monitor.checkLiveness(taskId)) return null;
   return {
     taskId,

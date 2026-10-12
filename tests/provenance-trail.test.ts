@@ -21,9 +21,9 @@ function event(overrides: Partial<Event> & Pick<Event, 'kind'>): Event {
 
 describe('summarizeEvidence', () => {
   it('summarizes TestFinished', () => {
-    expect(summarizeEvidence(event({ kind: 'TestFinished', payload: { passed: 31, failed: 0 } }))).toBe(
-      '31 passed, 0 failed',
-    );
+    expect(
+      summarizeEvidence(event({ kind: 'TestFinished', payload: { passed: 31, failed: 0 } })),
+    ).toBe('31 passed, 0 failed');
   });
 
   it('summarizes VerificationObserved', () => {
@@ -38,12 +38,16 @@ describe('summarizeEvidence', () => {
   });
 
   it('summarizes AgentCompleted', () => {
-    expect(summarizeEvidence(event({ kind: 'AgentCompleted', payload: { summary: 'done' } }))).toBe('done');
+    expect(summarizeEvidence(event({ kind: 'AgentCompleted', payload: { summary: 'done' } }))).toBe(
+      'done',
+    );
   });
 
   it('summarizes FileChanged', () => {
     expect(
-      summarizeEvidence(event({ kind: 'FileChanged', payload: { path: 'src/a.ts', changeType: 'modified' } })),
+      summarizeEvidence(
+        event({ kind: 'FileChanged', payload: { path: 'src/a.ts', changeType: 'modified' } }),
+      ),
     ).toBe('modified: src/a.ts');
   });
 
@@ -54,42 +58,45 @@ describe('summarizeEvidence', () => {
 
 describe('buildProvenanceTrail', () => {
   it('renders claim -> event -> fact for each piece of evidence, then a transcript step', () => {
-    const trail = buildProvenanceTrail(
-      { text: '31/31 tests pass', taskId: 'task-1' },
-      [event({ kind: 'TestFinished', payload: { passed: 31, failed: 0 } })],
-    );
+    const trail = buildProvenanceTrail({ text: '31/31 tests pass', taskId: 'task-1' }, [
+      event({ kind: 'TestFinished', payload: { passed: 31, failed: 0 } }),
+    ]);
 
     expect(trail.tag).toBe('ProvenanceTrail');
     expect(trail.props?.['taskId']).toBe('task-1');
-    const kinds = (trail.children ?? []).map((c) => (typeof c === 'string' ? null : c.props?.['kind']));
+    const kinds = (trail.children ?? []).map((c) =>
+      typeof c === 'string' ? null : c.props?.['kind'],
+    );
     expect(kinds).toEqual(['claim', 'event', 'fact', 'transcript']);
   });
 
   it('renders one event/fact pair per piece of evidence, in order', () => {
-    const trail = buildProvenanceTrail(
-      { text: 'implementation complete', taskId: 'task-1' },
-      [
-        event({ id: 'e1', kind: 'TestFinished', payload: { passed: 5, failed: 0 } }),
-        event({ id: 'e2', kind: 'AgentCompleted', payload: { summary: 'shipped' } }),
-      ],
+    const trail = buildProvenanceTrail({ text: 'implementation complete', taskId: 'task-1' }, [
+      event({ id: 'e1', kind: 'TestFinished', payload: { passed: 5, failed: 0 } }),
+      event({ id: 'e2', kind: 'AgentCompleted', payload: { summary: 'shipped' } }),
+    ]);
+    const kinds = (trail.children ?? []).map((c) =>
+      typeof c === 'string' ? null : c.props?.['kind'],
     );
-    const kinds = (trail.children ?? []).map((c) => (typeof c === 'string' ? null : c.props?.['kind']));
     expect(kinds).toEqual(['claim', 'event', 'fact', 'event', 'fact', 'transcript']);
   });
 
   it('renders an explicit "no evidence" step when nothing backs the claim, not a fabricated one', () => {
     const trail = buildProvenanceTrail({ text: 'root cause identified', taskId: 'task-1' }, []);
-    const kinds = (trail.children ?? []).map((c) => (typeof c === 'string' ? null : c.props?.['kind']));
+    const kinds = (trail.children ?? []).map((c) =>
+      typeof c === 'string' ? null : c.props?.['kind'],
+    );
     expect(kinds).toEqual(['claim', 'unverified']);
   });
 
-  it('the transcript step carries a command scoped to the claim\'s task', () => {
-    const trail = buildProvenanceTrail(
-      { text: 'x', taskId: 'task-42' },
-      [event({ kind: 'TestFinished', payload: { passed: 1, failed: 0 } })],
-    );
+  it("the transcript step carries a command scoped to the claim's task", () => {
+    const trail = buildProvenanceTrail({ text: 'x', taskId: 'task-42' }, [
+      event({ kind: 'TestFinished', payload: { passed: 1, failed: 0 } }),
+    ]);
     const last = (trail.children ?? [])[(trail.children?.length ?? 1) - 1];
-    expect(typeof last === 'string' ? undefined : last?.props?.['command']).toBe('show-raw-events:task-42');
+    expect(typeof last === 'string' ? undefined : last?.props?.['command']).toBe(
+      'show-raw-events:task-42',
+    );
   });
 });
 

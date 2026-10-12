@@ -59,14 +59,22 @@ describe('findProposedConfirmations', () => {
 
 describe('resolveProposedConfirmation', () => {
   it('confirm promotes to active with high confidence', () => {
-    const resolved = resolveProposedConfirmation(proposedItem(), 'confirm', '2026-09-21T01:00:00.000Z');
+    const resolved = resolveProposedConfirmation(
+      proposedItem(),
+      'confirm',
+      '2026-09-21T01:00:00.000Z',
+    );
     expect(resolved.status).toBe('active');
     expect(resolved.confidence).toBe('high');
     expect(resolved.updatedAt).toBe('2026-09-21T01:00:00.000Z');
   });
 
   it('decline retires the item (soft-delete, kept for provenance)', () => {
-    const resolved = resolveProposedConfirmation(proposedItem(), 'decline', '2026-09-21T01:00:00.000Z');
+    const resolved = resolveProposedConfirmation(
+      proposedItem(),
+      'decline',
+      '2026-09-21T01:00:00.000Z',
+    );
     expect(resolved.status).toBe('retired');
     expect(resolved.id).toBe('mem-1');
     expect(resolved.statement).toBe(proposedItem().statement);
@@ -84,27 +92,37 @@ describe('resolveProposedConfirmation', () => {
 
   it('throws when the item is not in proposed status', () => {
     expect(() =>
-      resolveProposedConfirmation(proposedItem({ status: 'active' }), 'confirm', '2026-09-21T01:00:00.000Z'),
+      resolveProposedConfirmation(
+        proposedItem({ status: 'active' }),
+        'confirm',
+        '2026-09-21T01:00:00.000Z',
+      ),
     ).toThrow();
   });
 });
 
 describe('confirmation -> compileExecutionBrief integration', () => {
   it('a confirmed (now active) item becomes usable by the compiler', () => {
-    const confirmed = resolveProposedConfirmation(proposedItem(), 'confirm', '2026-09-21T01:00:00.000Z');
-    const brief = compileExecutionBrief(
-      { taskId: 't1', objective: 'x', topics: ['bugfix'] },
-      [confirmed],
+    const confirmed = resolveProposedConfirmation(
+      proposedItem(),
+      'confirm',
+      '2026-09-21T01:00:00.000Z',
     );
+    const brief = compileExecutionBrief({ taskId: 't1', objective: 'x', topics: ['bugfix'] }, [
+      confirmed,
+    ]);
     expect(brief.applicableRules.map((r) => r.id)).toEqual(['mem-1']);
   });
 
   it('a declined (now retired) item stays unusable', () => {
-    const declined = resolveProposedConfirmation(proposedItem(), 'decline', '2026-09-21T01:00:00.000Z');
-    const brief = compileExecutionBrief(
-      { taskId: 't1', objective: 'x', topics: ['bugfix'] },
-      [declined],
+    const declined = resolveProposedConfirmation(
+      proposedItem(),
+      'decline',
+      '2026-09-21T01:00:00.000Z',
     );
+    const brief = compileExecutionBrief({ taskId: 't1', objective: 'x', topics: ['bugfix'] }, [
+      declined,
+    ]);
     expect(brief.applicableRules).toHaveLength(0);
   });
 });

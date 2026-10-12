@@ -40,6 +40,9 @@ describe('preload.cjs PUSH_CHANNELS stays in sync with app.js subscriptions', ()
     expect(subscribed.length).toBeGreaterThan(0); // sanity: the regex actually matched something
     const allowed = preloadAllowedChannels();
     const missing = subscribed.filter((c) => !allowed.has(c));
-    expect(missing, `channels used in app.js but missing from preload.cjs PUSH_CHANNELS: ${missing.join(', ')}`).toEqual([]);
+    expect(
+      missing,
+      `channels used in app.js but missing from preload.cjs PUSH_CHANNELS: ${missing.join(', ')}`,
+    ).toEqual([]);
   });
 });

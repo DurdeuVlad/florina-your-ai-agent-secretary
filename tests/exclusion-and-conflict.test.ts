@@ -30,7 +30,10 @@ describe('isExclusionListed', () => {
 
   it('flags a rule-kind item whose statement matches an excluded topic', () => {
     expect(
-      isExclusionListed({ kind: 'rule', statement: 'Store the API key in the repo for convenience.' }),
+      isExclusionListed({
+        kind: 'rule',
+        statement: 'Store the API key in the repo for convenience.',
+      }),
     ).toBe(true);
   });
 
@@ -53,7 +56,10 @@ describe('classifyRepeatedObservations — exclusion-list cap (issue #212)', () 
 
   it('an ordinary (non-excluded) statement still promotes normally for comparison', () => {
     const item = classifyRepeatedObservations(
-      [obs('turn-1', { statement: 'Keep bug fixes scoped.', tags: ['bugfix'] }), obs('turn-2', { statement: 'Keep bug fixes scoped.', tags: ['bugfix'] })],
+      [
+        obs('turn-1', { statement: 'Keep bug fixes scoped.', tags: ['bugfix'] }),
+        obs('turn-2', { statement: 'Keep bug fixes scoped.', tags: ['bugfix'] }),
+      ],
       'mem-1',
       '2026-09-21T00:00:00.000Z',
     );
@@ -97,7 +103,8 @@ describe('findConfirmationsNeeded — always-confirm for exclusion-listed candid
 
 describe('exclusion-listed items never bypass confirmation, even confirmed with high repetition (end-to-end)', () => {
   it('never becomes active via the write-guard path either (issue #206 integration)', async () => {
-    const { guardMemoryWrite } = await import('../src/core/application/use-cases/memory/write-guard.js');
+    const { guardMemoryWrite } =
+      await import('../src/core/application/use-cases/memory/write-guard.js');
     const item: MemoryItem = {
       id: 'mem-1',
       kind: 'rule',
@@ -176,7 +183,12 @@ describe('resolveConflict', () => {
   };
 
   it('keep-new promotes the new item to active and retires the existing one to superseded', () => {
-    const { winner, loser } = resolveConflict(conflicted, existing, 'keep-new', '2026-09-21T02:00:00.000Z');
+    const { winner, loser } = resolveConflict(
+      conflicted,
+      existing,
+      'keep-new',
+      '2026-09-21T02:00:00.000Z',
+    );
     expect(winner.id).toBe('r-new');
     expect(winner.status).toBe('active');
     expect(winner.supersedes).toBe('r-existing');
@@ -185,7 +197,12 @@ describe('resolveConflict', () => {
   });
 
   it('keep-existing leaves the existing item active and supersedes the new one', () => {
-    const { winner, loser } = resolveConflict(conflicted, existing, 'keep-existing', '2026-09-21T02:00:00.000Z');
+    const { winner, loser } = resolveConflict(
+      conflicted,
+      existing,
+      'keep-existing',
+      '2026-09-21T02:00:00.000Z',
+    );
     expect(winner.id).toBe('r-existing');
     expect(winner.status).toBe('active');
     expect(loser.id).toBe('r-new');
@@ -194,6 +211,8 @@ describe('resolveConflict', () => {
 
   it('throws when newItem is not in conflict status', () => {
     const notConflicted: MemoryItem = { ...conflicted, status: 'active' };
-    expect(() => resolveConflict(notConflicted, existing, 'keep-new', '2026-09-21T02:00:00.000Z')).toThrow();
+    expect(() =>
+      resolveConflict(notConflicted, existing, 'keep-new', '2026-09-21T02:00:00.000Z'),
+    ).toThrow();
   });
 });

@@ -77,29 +77,32 @@ export function summarizeEvidence(event: Event): string {
  * itself decide relevance, matching #207's "selection vs. compilation"
  * split).
  */
-export function buildProvenanceTrail(claim: ProvenanceClaim, evidence: readonly Event[]): RenderTree {
-  const steps: RenderTree[] = [
-    el('ProvenanceStep', { kind: 'claim' }, [claim.text]),
-  ];
+export function buildProvenanceTrail(
+  claim: ProvenanceClaim,
+  evidence: readonly Event[],
+): RenderTree {
+  const steps: RenderTree[] = [el('ProvenanceStep', { kind: 'claim' }, [claim.text])];
 
   if (evidence.length === 0) {
-    steps.push(el('ProvenanceStep', { kind: 'unverified' }, ['No journaled evidence found for this claim.']));
+    steps.push(
+      el('ProvenanceStep', { kind: 'unverified' }, ['No journaled evidence found for this claim.']),
+    );
     return el('ProvenanceTrail', { taskId: claim.taskId }, steps);
   }
 
   for (const event of evidence) {
     steps.push(
-      el('ProvenanceStep', { kind: 'event', eventId: event.id, timestamp: event.timestamp }, [event.kind]),
+      el('ProvenanceStep', { kind: 'event', eventId: event.id, timestamp: event.timestamp }, [
+        event.kind,
+      ]),
       el('ProvenanceStep', { kind: 'fact' }, [summarizeEvidence(event)]),
     );
   }
 
   steps.push(
-    el(
-      'ProvenanceStep',
-      { kind: 'transcript', command: `show-raw-events:${claim.taskId}` },
-      ['View raw event payloads'],
-    ),
+    el('ProvenanceStep', { kind: 'transcript', command: `show-raw-events:${claim.taskId}` }, [
+      'View raw event payloads',
+    ]),
   );
 
   return el('ProvenanceTrail', { taskId: claim.taskId }, steps);

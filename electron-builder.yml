@@ -19,9 +19,9 @@ directories:
 files:
   - dist/**
   - node_modules/**
-  - "!node_modules/electron/**"
-  - "!node_modules/electron-builder/**"
-  - "!node_modules/.cache/**"
+  - '!node_modules/electron/**'
+  - '!node_modules/electron-builder/**'
+  - '!node_modules/.cache/**'
 
 # Bundle the renderer assets into the app's resources directory so the
 # main process can locate them with app.getPath('exe') + extraResourcesPath.
@@ -29,10 +29,10 @@ extraResources:
   - from: src/adapters/inbound/desktop/renderer
     to: renderer
     filter:
-      - "**/*.html"
-      - "**/*.js"
-      - "**/*.css"
-      - "**/*.cjs"
+      - '**/*.html'
+      - '**/*.js'
+      - '**/*.css'
+      - '**/*.cjs'
 
 win:
   # NSIS installer is the standard for Windows desktop distribution.
