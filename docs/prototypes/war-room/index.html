@@ -1641,6 +1641,29 @@
           display: none;
         }
       }
+      @media (max-width: 860px) {
+        .toNote,
+        .orderbar .hint,
+        .cm-head .btn.ghost,
+        .who-chip .st {
+          display: none;
+        }
+        .toRow {
+          gap: 4px;
+        }
+        .cm-head {
+          padding-top: 8px;
+        }
+        .stage.fill .crew {
+          padding-top: 6px;
+        }
+        .ctab {
+          padding: 6px 10px;
+        }
+        .seg-ctl button {
+          padding: 2px 6px;
+        }
+      }
       @media (max-width: 520px) {
         .florina {
           grid-template-columns: minmax(0, 1fr);
@@ -1683,6 +1706,519 @@
         animation-duration: 0.001ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.001ms !important;
+      }
+
+      /* ---------- project channel (group chat) ---------- */
+      .stage.fill {
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        padding-bottom: 0;
+      }
+      .cm-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding-top: 16px;
+      }
+      .cm-head h1 {
+        font-size: 20px;
+        font-weight: 650;
+        letter-spacing: -0.2px;
+      }
+      .cm-head .spacer {
+        flex: 1;
+      }
+      .crumb-btn {
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .crew {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding-top: 10px;
+      }
+      .who-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .who-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 12px 3px 4px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        font-size: 12.5px;
+      }
+      .who-chip:hover {
+        border-color: var(--border-hover);
+      }
+      .who-chip[aria-pressed='true'] {
+        border-color: var(--accent);
+        background: var(--panel-raised);
+      }
+      .who-chip .st {
+        color: var(--muted);
+      }
+      .who-chip.off .st {
+        color: var(--amber);
+      }
+      .who-chip .tier {
+        font-size: 10.5px;
+        font-weight: 700;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0 4px;
+      }
+      .pw {
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--muted);
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      .pw:hover {
+        color: var(--text);
+        border-color: var(--border-hover);
+      }
+      .livepill {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .livedot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+        display: inline-block;
+      }
+      .livedot.wait {
+        background: var(--amber);
+      }
+      .livedot.idle {
+        background: var(--slate);
+      }
+      .ctabs {
+        flex-wrap: wrap;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        border-bottom: 1px solid var(--border);
+        margin-top: 10px;
+      }
+      .tablist {
+        display: flex;
+        gap: 4px;
+      }
+      .ctab {
+        padding: 8px 12px;
+        color: var(--muted);
+        font-weight: 600;
+        border-bottom: 2px solid transparent;
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .ctab[aria-selected='true'] {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+      .seg-ctl {
+        margin-left: auto;
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .seg-ctl button {
+        font-size: 12px;
+        padding: 2px 10px;
+        border-radius: 6px;
+        color: var(--muted);
+      }
+      .seg-ctl button[aria-pressed='true'] {
+        background: var(--panel-raised);
+        color: var(--text);
+      }
+      .unread {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--accent-contrast);
+        background: var(--accent);
+        border-radius: 9px;
+        padding: 0 7px;
+      }
+      .mono-badge {
+        position: relative;
+      }
+      .mono-badge .ub {
+        position: absolute;
+        top: -9px;
+        right: -10px;
+        min-width: 20px;
+        height: 20px;
+        padding: 0 4px;
+        border-radius: 10px;
+        background: var(--accent);
+        color: var(--accent-contrast);
+        font-size: 10.5px;
+        font-style: normal;
+        font-weight: 700;
+        line-height: 16px;
+        text-align: center;
+        border: 2px solid var(--surface);
+        box-sizing: border-box;
+      }
+      .chan {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+      .chlog {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 8px 16px 0;
+      }
+      .mrow {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 12px;
+        padding: 8px 6px 8px 0;
+        border-radius: var(--radius-md);
+      }
+      .mrow.cont {
+        padding-top: 0;
+      }
+      .mrow.hl,
+      .hrow.hl,
+      .srow.hl {
+        background: rgba(169, 138, 240, 0.1);
+        outline: 1px solid var(--accent);
+      }
+      .av-l {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 10.5px;
+        font-weight: 700;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--text);
+      }
+      .av-l.coord {
+        border-radius: 10px;
+        color: var(--accent);
+        background: var(--panel-raised);
+      }
+      .av-l.you {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-contrast);
+      }
+      .av-l.fl {
+        border-color: var(--accent);
+        background: transparent;
+      }
+      .av-l.fl::after {
+        content: '';
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .av-l.sm {
+        width: 22px;
+        height: 22px;
+        font-size: 9.5px;
+      }
+      .av-l.sm.coord {
+        border-radius: 7px;
+      }
+      .mrow.cont .av-l {
+        visibility: hidden;
+        height: 0;
+      }
+      .mhead {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        flex-wrap: wrap;
+        font-size: 13px;
+      }
+      .mhead b {
+        font-weight: 650;
+      }
+      .mhead .role,
+      .mhead .when {
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .mtext {
+        font-size: 14px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .mention {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .mrow.order .mbody {
+        border-left: 2px solid var(--accent);
+        padding-left: 12px;
+      }
+      .mrow.nudge .mbody {
+        border-left: 2px dashed var(--amber);
+        padding-left: 12px;
+      }
+      .otag {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-right: 8px;
+      }
+      .mrow.fl .mtext {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .mrow.you .mtext {
+        color: var(--text);
+      }
+      .mrow .call {
+        margin-top: 6px;
+      }
+      .answered {
+        font-size: 13px;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 8px 12px;
+        margin-top: 6px;
+      }
+      .answered b {
+        color: var(--green);
+        font-weight: 650;
+      }
+      .srow {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        align-items: baseline;
+        font-size: 12.5px;
+        color: var(--muted);
+        padding: 8px 40px;
+        text-align: center;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        margin: 8px 0;
+      }
+      .hrow {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 12px;
+        padding: 8px 6px 8px 0;
+        border-radius: var(--radius-md);
+      }
+      .hrow .hg {
+        width: 32px;
+        text-align: center;
+        color: var(--green);
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      .hrow .hb {
+        font-size: 13.5px;
+      }
+      .hrow .hb b {
+        color: var(--green);
+        font-weight: 650;
+        margin-right: 6px;
+      }
+      .rcpt {
+        display: flex;
+        gap: 8px 12px;
+        flex-wrap: wrap;
+        align-items: center;
+        font-size: 11.5px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      .rcpt .ok {
+        color: var(--green);
+      }
+      .rcpt .bad {
+        color: var(--amber);
+      }
+      details.tools {
+        font-size: 12.5px;
+        margin: 2px 0;
+      }
+      details.tools summary {
+        cursor: pointer;
+        color: var(--muted);
+        list-style: none;
+      }
+      details.tools summary::-webkit-details-marker {
+        display: none;
+      }
+      details.tools summary::before {
+        content: '▸ ';
+      }
+      details.tools[open] summary::before {
+        content: '▾ ';
+      }
+      details.tools .tl {
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        font-size: 12px;
+        padding: 2px 0 0 16px;
+        color: var(--text);
+      }
+      details.tools .tl .ok {
+        color: var(--green);
+      }
+      details.tools .tl .bad {
+        color: var(--red);
+      }
+      .rawrow {
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--muted);
+        padding: 1px 0 1px 44px;
+      }
+      .newline {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        margin: 10px 0;
+      }
+      .newline::before,
+      .newline::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--accent);
+        opacity: 0.5;
+      }
+      .hidden-note {
+        font-size: 12.5px;
+        color: var(--muted);
+        padding: 4px 0 4px 44px;
+      }
+      .hidden-note button {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .jump {
+        position: absolute;
+        right: 16px;
+        bottom: 12px;
+        background: var(--accent);
+        color: var(--accent-contrast);
+        font-weight: 600;
+        font-size: 12.5px;
+        padding: 4px 12px;
+        border-radius: 14px;
+        box-shadow: var(--shadow-md);
+      }
+      .toRow {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+        max-width: 1160px;
+      }
+      .toRow .lbl {
+        font-size: 12px;
+        color: var(--muted);
+        margin-right: 2px;
+      }
+      .to-chip {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 1px 12px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .to-chip:hover {
+        border-color: var(--border-hover);
+        color: var(--text);
+      }
+      .to-chip[aria-checked='true'] {
+        color: var(--text);
+        border-color: var(--accent);
+        background: var(--panel-raised);
+      }
+      .to-chip[aria-disabled='true'] {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .toNote {
+        font-size: 12px;
+        color: var(--muted);
+        margin-left: 8px;
+        flex: 1 1 260px;
+      }
+      #addr .toRow {
+        margin-bottom: 8px;
+      }
+      #addr:not(:empty) {
+        margin-bottom: 2px;
+      }
+      .wire-row {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr);
+        gap: 8px;
+        width: 100%;
+        padding: 8px 6px;
+        border-radius: var(--radius-md);
+        border-bottom: 1px solid var(--border);
+        font-size: 12.5px;
+      }
+      .wire-row:hover {
+        background: var(--panel);
+      }
+      .wire-row .when {
+        color: var(--muted);
+      }
+      .wire-row .wire-who {
+        display: block;
+        color: var(--muted);
+        font-size: 11.5px;
+      }
+      .wire-row .wire-text {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .linkbtn {
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 12px;
       }
     </style>
   </head>
@@ -1754,7 +2290,7 @@
           </div>
           <button type="submit" class="btn primary" id="send" style="height: 44px">Send</button>
         </div>
-        <div class="hint">
+        <div class="hint" id="hintLine">
           <span><kbd>Hold Space</kbd> talk</span>
           <span><kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line</span>
           <span class="kbd-hint"><kbd>o</kbd> focus here · <kbd>?</kbd> all shortcuts</span>
@@ -1898,7 +2434,7 @@
                 id: 'o4',
                 title: 'Remove dead coupon code',
                 state: 'blocked',
-                worker: 'codex',
+                worker: 'claude-code',
                 note: 'Needs network access (your call)',
               },
               {
@@ -2036,7 +2572,7 @@
             kind: 'Approval needed',
             cmdr: 'checkout',
             age: 4,
-            title: 'Let Codex download packages from registry.npmjs.org?',
+            title: 'Let claude-code download packages from registry.npmjs.org?',
             reco: {
               key: 'allow',
               why: 'Scoped to this one host and this one task. You approved the same on Sep 13 and Oct 2 (rule R3).',
@@ -2046,7 +2582,7 @@
               ['capability', 'network'],
               ['destination', 'registry.npmjs.org'],
               ['scope', 'this task only'],
-              ['adapter', 'Codex · tier A'],
+              ['adapter', 'Claude Code · tier B'],
             ],
             blocking: 'Remove dead coupon code is waiting on this.',
             authority: 'Authenticated UI',
@@ -2075,9 +2611,9 @@
             evidence: {
               claim: 'Needs network access to registry.npmjs.org',
               chain: [
-                ['Claim', 'Codex asked to download packages from registry.npmjs.org'],
+                ['Claim', 'claude-code asked to download packages from registry.npmjs.org'],
                 ['Journal', 'evt_8841 ApprovalRequested · 14:38:02'],
-                ['Adapter', 'codex app-server permission request (structured, tier A)'],
+                ['Adapter', 'Claude Code PermissionRequest hook (structured, tier B)'],
                 ['Raw', 'transcript line 412 · open in the full timeline'],
               ],
               rules: ['R3 matched', 'R1 not affected'],
@@ -2431,7 +2967,412 @@
         };
       }
 
+      /* ===================================================================
+       * Project channels: the group chat for each front. Participants are
+       * You, Florina, the coordinator (the commander) and its workers. Rows
+       * are what the real journal can already reconstruct: AgentProgress text,
+       * the coordinator's TaskNudged prompts, orders (dispatch), tool results,
+       * approvals, failovers. Human messages are the new part (prototype only).
+       * =================================================================== */
+      const CREW = {
+        checkout: [
+          {
+            id: 'claude-code',
+            tier: 'B',
+            cap: 'live',
+            state: 'editing',
+            detail: 'Editing the pricing module',
+          },
+          {
+            id: 'codex',
+            tier: 'A',
+            cap: 'none',
+            state: 'out of quota',
+            detail: 'Out of quota until 17:10',
+          },
+        ],
+        oauth: [
+          {
+            id: 'claude-code',
+            tier: 'B',
+            cap: 'live',
+            state: 'held',
+            detail: 'Held by the coordinator until you decide',
+          },
+        ],
+        pagination: [
+          { id: 'claude-code', tier: 'B', cap: 'live', state: 'running tests' },
+          {
+            id: 'agy',
+            tier: 'D',
+            cap: 'none',
+            state: 'drafting docs',
+            detail: 'Drafting the endpoint docs',
+            why: 'agy is tier D: Florina can read its output but cannot message it',
+          },
+        ],
+        docs: [
+          { id: 'gemini', tier: 'C', cap: 'live', state: 'editing', detail: 'Editing 9 files' },
+        ],
+        infra: [
+          {
+            id: 'codex',
+            tier: 'A',
+            cap: 'none',
+            state: 'waiting for quota',
+            detail: 'Waiting for Codex quota until 17:10',
+          },
+        ],
+      };
+
+      const WMONO = { 'claude-code': 'CC', codex: 'CX', gemini: 'GM', agy: 'AG' };
+
+      const SCRIPT = {
+        checkout: [
+          {
+            from: 'claude-code',
+            k: 'say',
+            text: 'Pricing module: moved 3 functions, fixing the imports.',
+          },
+          {
+            from: 'claude-code',
+            k: 'tool',
+            tools: [{ cmd: 'tsc --noEmit', ok: true, d: '0 errors' }],
+          },
+          {
+            from: 'coord',
+            k: 'say',
+            text: 'Order 3 is still waiting on your network call. Pricing module is on track.',
+          },
+        ],
+        pagination: [
+          {
+            from: 'claude-code',
+            k: 'say',
+            text: '2 of 5 endpoint tests pass. Fixing the page-size clamp.',
+          },
+          { from: 'claude-code', k: 'say', text: 'Clamp fixed. Re-running the suite.' },
+        ],
+        docs: [
+          { from: 'gemini', k: 'say', text: '5 of 9 files done. No signature changes so far.' },
+          { from: 'gemini', k: 'say', text: 'All 9 files done. Running the docs build.' },
+        ],
+      };
+
+      function mkChannels(handled) {
+        const T = (s) => {
+          const [a, b] = s.split(':');
+          return +a * 60 + +b;
+        };
+        const m = (t, from, k, text, x) => Object.assign({ t: T(t), from, k, text }, x || {});
+        const ch = {
+          checkout: [
+            m(
+              '09:12',
+              'florina',
+              'sys',
+              'Florina briefed the coordinator: “Fix the flaky cart test and add login rate limiting. Codex if it’s free.” Limits: no push or merge, approved hosts only.',
+            ),
+            m(
+              '09:12',
+              'coord',
+              'say',
+              'Two orders, in sequence: the flaky cart test first (small), then the login rate limit. Starting on @codex, which has headroom. For each order, done means tests pass, build is green, and I re-run them myself before I call it done.',
+            ),
+            m(
+              '09:13',
+              'coord',
+              'order',
+              'Fix the flaky cart test (cart.spec.ts:88). Reproduce it, find the cause, fix it, run the suite 4 times. Do not touch pricing code.',
+              { to: 'codex', tag: 'Order 1' },
+            ),
+            m(
+              '09:14',
+              'codex',
+              'say',
+              'Reproduced: it fails 2 of 3 runs. The assertion runs before the total debounce has flushed.',
+            ),
+            m('09:14', 'codex', 'tool', '', {
+              tools: [{ cmd: 'npm test -- cart (×3)', ok: false, d: '2 failed, 1 passed' }],
+            }),
+            m('09:15', 'codex', 'raw', 'FileChanged test/helpers/cart.ts (+6 −1)'),
+            m(
+              '09:31',
+              'codex',
+              'say',
+              'Fixed by awaiting the debounce flush in the test helper. No product code changed. 4 of 4 runs green.',
+            ),
+            m('09:33', 'coord', 'say', 'Verifying it myself rather than taking your word for it.'),
+            m('09:33', 'coord', 'tool', '', {
+              tools: [{ cmd: 'npm test', ok: true, d: 'exit 0 · 38s' }],
+              ev: 'VerificationObserved',
+            }),
+            m('09:35', 'coord', 'say', 'Order 1 verified. On to order 2.'),
+            m(
+              '09:36',
+              'coord',
+              'order',
+              'Login rate limit: 5 failed attempts in 15 minutes per account locks the account for 15 minutes. One test per rule. Keep it in src/auth/limiter.',
+              { to: 'codex', tag: 'Order 2' },
+            ),
+            m('09:58', 'codex', 'say', 'Limiter middleware written. Writing the tests next.'),
+            m(
+              '14:32',
+              'coord',
+              'say',
+              '@codex is out of quota until 17:10. Moving order 2 to @claude-code with the task capsule: limiter written, tests missing.',
+              { to: 'claude-code' },
+            ),
+            m(
+              '14:33',
+              'claude-code',
+              'say',
+              'Picked up from the capsule. The limiter looks right. Adding tests for the lockout and the window reset.',
+            ),
+            m('14:34', 'claude-code', 'tool', '', {
+              tools: [
+                { cmd: 'npm test', ok: false, d: '1 failed: rate-limit.spec' },
+                { cmd: 'npm test', ok: true, d: '23/23 · 41s' },
+              ],
+            }),
+            m(
+              '14:37',
+              'claude-code',
+              'say',
+              'Done: 23/23 tests, build green. One behaviour change: failed logins now invalidate the session token.',
+            ),
+            m(
+              '14:37',
+              'coord',
+              'say',
+              'Re-ran it independently: 23/23, exit 0. Report sent to Florina, with the token behaviour change flagged as the risk.',
+              { ref: 'r1' },
+            ),
+            m(
+              '14:38',
+              'claude-code',
+              'say',
+              'Order 3 (remove dead coupon code) needs the @types/coupon-utils package from registry.npmjs.org. Asking for network access.',
+              { to: 'coord' },
+            ),
+            m(
+              '14:38',
+              'coord',
+              'say',
+              'Network is outside what I can grant. Escalating to Florina.',
+            ),
+            m(
+              '14:38',
+              'florina',
+              'fl',
+              'Matches R3: you allowed this twice before. I recommend Allow once, scoped to this task.',
+            ),
+            m('14:38', 'coord', 'ask', 'Waiting on your call.', { ref: 'c1' }),
+          ],
+          oauth: [
+            m(
+              '11:02',
+              'florina',
+              'sys',
+              'Florina briefed the coordinator: “Move sessions to the new OAuth provider.” Limits: the Brief covers src/auth/** only. Migrations need your sign-off (R5).',
+            ),
+            m(
+              '11:03',
+              'coord',
+              'say',
+              'Plan: (1) refresh tests first, (2) migrate the session store, (3) retire the legacy login route. One worker, @claude-code. Everything stays inside src/auth/**.',
+            ),
+            m(
+              '11:04',
+              'coord',
+              'order',
+              'Add token refresh tests before changing anything. They must pass against today’s code.',
+              { to: 'claude-code', tag: 'Order 1' },
+            ),
+            m(
+              '12:10',
+              'claude-code',
+              'say',
+              '14 tests written. All pass on the current implementation.',
+            ),
+            m('12:11', 'coord', 'tool', '', {
+              tools: [{ cmd: 'npm test', ok: true, d: '14/14 · exit 0' }],
+              ev: 'VerificationObserved',
+            }),
+            m(
+              '12:20',
+              'coord',
+              'order',
+              'Migrate the session store to the new provider. Stay inside src/auth/**.',
+              { to: 'claude-code', tag: 'Order 2' },
+            ),
+            m('13:40', 'claude-code', 'say', 'Session store migrated. Done.'),
+            m(
+              '13:41',
+              'coord',
+              'nudge',
+              'There is no test run in your log, so this is not done. Run the suite and paste the result.',
+              { to: 'claude-code', tag: 'Nudge 1 of 2' },
+            ),
+            m('13:52', 'claude-code', 'say', 'Ran it: 17/17 pass.'),
+            m('14:20', 'coord', 'nudge', 'Quiet for 6 minutes. Status?', {
+              to: 'claude-code',
+              tag: 'Check-in',
+            }),
+            m('14:21', 'claude-code', 'say', 'Waiting on a schema detail. Resuming now.'),
+            m(
+              '14:30',
+              'claude-code',
+              'say',
+              'The session store needs a last_seen column, so I added db/migrations/0042_sessions.sql.',
+            ),
+            m(
+              '14:30',
+              'coord',
+              'say',
+              'Stop. That file is outside src/auth/** and R5 needs your sign-off. Holding order 2 and escalating.',
+              { to: 'claude-code' },
+            ),
+            m(
+              '14:31',
+              'florina',
+              'fl',
+              'R5 applies. Reverting keeps the work inside its Brief; the migration can come back as its own approved task.',
+            ),
+            m('14:31', 'coord', 'ask', 'Waiting on your call.', { ref: 'c2' }),
+          ],
+          pagination: [
+            m(
+              '10:30',
+              'florina',
+              'sys',
+              'Florina briefed the coordinator: “Cursor pagination for the invoices endpoints.” Limits: no push or merge.',
+            ),
+            m(
+              '10:31',
+              'coord',
+              'say',
+              'Three orders: cursor encoding, the invoices endpoint, then docs. @claude-code takes the first two. @agy drafts the docs as an observer (tier D: I can read its output but not message it).',
+            ),
+            m(
+              '10:32',
+              'coord',
+              'order',
+              'Cursor encoding: opaque, stable across inserts, round-trip tested.',
+              { to: 'claude-code', tag: 'Order 1' },
+            ),
+            m(
+              '14:20',
+              'agy',
+              'say',
+              'Drafting the endpoint docs from the OpenAPI spec. (Observed output only.)',
+            ),
+            m(
+              '14:30',
+              'claude-code',
+              'say',
+              'Encoding done. 31/31 tests, including insert-during-pagination.',
+            ),
+            m('14:31', 'coord', 'tool', '', {
+              tools: [{ cmd: 'npm test', ok: true, d: '31/31 · exit 0' }],
+              ev: 'VerificationObserved',
+            }),
+            m(
+              '14:32',
+              'coord',
+              'order',
+              'Invoices endpoint: use the cursor, default page size 50, max 200.',
+              { to: 'claude-code', tag: 'Order 2' },
+            ),
+            m('14:38', 'claude-code', 'say', 'Endpoint written. Tests running.'),
+          ],
+          docs: [
+            m(
+              '13:00',
+              'florina',
+              'sys',
+              'Florina briefed the coordinator: “Tidy the README and API comments.”',
+            ),
+            m(
+              '13:01',
+              'coord',
+              'order',
+              'Restructure the README: install, usage, contributing. Check every link.',
+              { to: 'gemini', tag: 'Order 1' },
+            ),
+            m('13:40', 'gemini', 'say', 'README restructured. 23 links checked, 0 broken.'),
+            m('13:42', 'coord', 'say', 'Verified: the link checker exits 0.'),
+            m(
+              '14:00',
+              'coord',
+              'order',
+              'Refresh the API comments in src/api (9 files). No signature changes.',
+              { to: 'gemini', tag: 'Order 2' },
+            ),
+            m(
+              '14:30',
+              'coord',
+              'say',
+              'Three doc reports are ready. None touches production behaviour.',
+              { ref: 'r2' },
+            ),
+          ],
+          infra: [
+            m(
+              '14:33',
+              'florina',
+              'sys',
+              'Florina briefed the coordinator: “Cache dependencies in CI.” Rule R2: CI work stays on Codex.',
+            ),
+            m(
+              '14:33',
+              'coord',
+              'say',
+              '@codex is out until 17:10 and R2 pins CI work to it. I am holding rather than guessing. Say the word and I will run it once on @claude-code.',
+            ),
+          ],
+        };
+        handled.forEach((h) => {
+          if (ch[h.cmdr])
+            ch[h.cmdr].push({
+              t: h.t,
+              from: 'coord',
+              k: 'handled',
+              what: h.what,
+              did: h.did,
+              level: h.level,
+              ev: h.ev,
+              hid: h.id,
+            });
+        });
+        const UNSEEN = { checkout: 4, oauth: 3, pagination: 1 };
+        const out = {};
+        Object.keys(ch).forEach((id) => {
+          const msgs = ch[id]
+            .map((x, i) => Object.assign({ _i: i }, x))
+            .sort((a, b) => a.t - b.t || a._i - b._i);
+          msgs.forEach((x, i) => {
+            x.id = `${id}-${i + 1}`;
+            delete x._i;
+          });
+          out[id] = {
+            msgs,
+            seen: Math.max(0, msgs.length - (UNSEEN[id] || 0)),
+            n: msgs.length,
+            divider: null,
+            script: 0,
+          };
+        });
+        handled.forEach((h) => {
+          const msg = out[h.cmdr] && out[h.cmdr].msgs.find((x) => x.hid === h.id);
+          if (msg) h.msgId = msg.id;
+        });
+        return out;
+      }
+
       function baseState() {
+        const handled = mkHandled().map((h, i) => Object.assign(h, { id: 'h' + (i + 1) }));
+        const channels = mkChannels(handled);
         return {
           scenario: 'morning',
           clock: 14 * 60 + 41,
@@ -2449,10 +3390,23 @@
           drawer: null,
           drawerFor: null,
           addressee: null,
-          commanders: mkCommanders(),
+          ctab: 'channel',
+          chDetail: 'actions',
+          chWho: null,
+          to: 'coord',
+          focusMsg: null,
+          scrolledFocus: null,
+          chanOpen: false,
+          openTools: {},
+          inter: { noted: false },
+          hseq: 100,
+          commanders: mkCommanders().map((c) =>
+            Object.assign(c, { crew: structuredClone(CREW[c.id] || []), checkin: 'decisions' }),
+          ),
           calls: mkCalls(),
           reports: mkReports(),
-          handled: mkHandled(),
+          handled,
+          channels,
           minutes: mkMinutes(),
           record: mkRecord(),
           supplies: mkSupplies(),
@@ -2488,6 +3442,7 @@
         }
         if (name === 'critical') {
           s.commanders.find((c) => c.id === 'docs').status = 'critical';
+          s.commanders.find((c) => c.id === 'docs').crew[0].state = 'stopped';
           s.critical = {
             cmdr: 'docs',
             headline: 'docs-cleanup stopped itself.',
@@ -2532,6 +3487,7 @@
           s.calls = [];
           s.reports = [];
           s.handled = [];
+          s.channels = {};
           s.minutes = [];
           s.record = [];
           s.handledTotal = 0;
@@ -2631,11 +3587,11 @@
         const v = c.orders.filter((o) => o.state === 'verified').length;
         const st = STATUS[c.status];
         return `<button class="seat ${c.status} ${sel ? 'sel' : ''}" data-act="open-cmdr" data-id="${c.id}" data-key="seat-${c.id}" data-nav ${sel ? 'aria-current="true"' : ''}>
-          <span class="mono-badge" aria-hidden="true">${esc(c.mono)}</span>
+          <span class="mono-badge" aria-hidden="true">${esc(c.mono)}${unread(c.id) ? `<i class="ub">${unread(c.id)}</i>` : ''}</span>
           <span class="seat-main">
             <span class="seat-top"><b class="seat-name">${esc(c.name)}</b><span class="seat-status ${st.tone}">${esc(statusWord(c))}</span></span>
             ${c.chatter ? `<span class="seat-obj chatter">✓ ${esc(c.chatter)}</span>` : `<span class="seat-obj">${esc(c.objective)}</span>`}
-            <span class="seat-prog"><span class="segs" aria-hidden="true">${c.orders.map((o) => `<i class="seg ${o.state}"></i>`).join('')}</span><span class="seat-count">${v} of ${c.orders.length} verified</span><span class="seat-handled" title="Problems handled without you today">${CHECK}<span class="sr">handled today: </span><span>${c.handled}</span></span></span>
+            <span class="seat-prog"><span class="segs" aria-hidden="true">${c.orders.map((o) => `<i class="seg ${o.state}"></i>`).join('')}</span><span class="seat-count">${v} of ${c.orders.length} verified<span class="sr">${unread(c.id) ? `, ${unread(c.id)} new in the channel` : ''}</span></span><span class="seat-handled" title="Problems handled without you today">${CHECK}<span class="sr">handled today: </span><span>${c.handled}</span></span></span>
           </span>
         </button>`;
       }
@@ -2709,6 +3665,7 @@
           : `<div class="strip">
           <button class="stat ${n ? 'amber' : ''}" data-act="focus-calls"><b>${n}</b> need${n === 1 ? 's' : ''} you</button>
           <button class="stat" data-act="drawer" data-id="handled" aria-expanded="${S.drawer === 'handled'}"><b>${handledToday()}</b> handled for you</button>
+          <button class="stat" data-act="drawer" data-id="wire" aria-expanded="${S.drawer === 'wire'}">Wire${totalUnread() ? ` <b>${totalUnread()}</b> new` : ''}</button>
           ${(() => {
             const out = S.supplies.filter((x) => x.used >= 100);
             const hot = S.supplies.filter((x) => x.used >= 80 && x.used < 100);
@@ -2735,8 +3692,12 @@
         </section>`;
       }
 
-      function callHTML(c) {
+      function callHTML(c, ctx) {
         const cm = cmdr(c.cmdr);
+        const disc =
+          ctx && ctx.chan
+            ? ''
+            : `<button class="btn ghost" data-act="discuss" data-id="${c.id}">Discussion</button>`;
         const opts = c.choice
           ? `<div class="opts" role="group" aria-label="Options">${c.options.map((o, i) => `<button class="opt ${o.key === c.reco.key ? 'reco-pick' : ''}" data-act="resolve" data-id="${c.id}" data-opt="${o.key}" ${i === 0 ? 'data-primary' : ''}${disabledAttr()}><span class="l">${esc(o.label)}${o.key === c.reco.key ? '<span class="tag">Florina’s pick</span>' : ''}</span><span class="d">${esc(o.detail || '')}</span></button>`).join('')}</div>`
           : `<div class="actions">${c.options
@@ -2746,15 +3707,15 @@
               })
               .join(
                 '',
-              )}<button class="btn ghost" data-act="later" data-id="${c.id}"${disabledAttr()}>Later</button><button class="btn ghost" data-act="inspect" data-id="${c.id}">Inspect</button></div>`;
+              )}<button class="btn ghost" data-act="later" data-id="${c.id}"${disabledAttr()}>Later</button><button class="btn ghost" data-act="inspect" data-id="${c.id}">Inspect</button>${disc}</div>`;
         const choiceActions = c.choice
-          ? `<div class="actions"><button class="btn ghost" data-act="later" data-id="${c.id}"${disabledAttr()}>Later</button><button class="btn ghost" data-act="inspect" data-id="${c.id}">Inspect</button></div>`
+          ? `<div class="actions"><button class="btn ghost" data-act="later" data-id="${c.id}"${disabledAttr()}>Later</button><button class="btn ghost" data-act="inspect" data-id="${c.id}">Inspect</button>${disc}</div>`
           : '';
         const recoOpt = c.options.find((o) => o.key === c.reco.key);
         const recoBox = `<div class="reco"><b>Florina recommends: ${esc(recoOpt.label)}.</b><span class="why">${esc(c.reco.why)}</span></div>`;
         return `<article class="call ${c.pri} ${seen.has(c.id) ? '' : 'enter'}" id="${c.id}" data-nav data-key="call-${c.id}" tabindex="-1" aria-labelledby="t-${c.id}">
           <div class="top"><span class="kind">${esc(c.kind)}</span><span class="chip ${c.pri}">${c.pri}</span><span>${esc(cm ? cm.name : '')}</span><span class="when">${c.age ? c.age + ' min ago' : 'just now'}</span></div>
-          <h3 id="t-${c.id}">${esc(c.title)}</h3>
+          <${ctx && ctx.chan ? 'h2' : 'h3'} id="t-${c.id}">${esc(c.title)}</${ctx && ctx.chan ? 'h2' : 'h3'}>
           ${recoBox}
           <div class="observed" aria-label="Observed facts">${c.observed.map(([k, v]) => `<span><b>${esc(k)}</b>${esc(v)}</span>`).join('')}</div>
           <div class="blocking">${esc(c.blocking)}</div>
@@ -2783,7 +3744,7 @@
           <div class="actions">
             <button class="btn primary" data-act="accept" data-id="${r.id}" ${'data-primary'}${disabledAttr()}>${r.group ? 'Accept all' : 'Accept'}<kbd>Enter</kbd></button>
             ${r.group ? '' : `<button class="btn" data-act="pr" data-id="${r.id}"${disabledAttr()}>Open PR</button><button class="btn ghost" data-act="sendback" data-id="${r.id}"${disabledAttr()}>Send back</button>`}
-            <button class="btn ghost" data-act="prove" data-id="${r.id}" aria-expanded="${!!open}">${r.group ? 'Read all' : 'Prove it'}</button>
+            <button class="btn ghost" data-act="prove" data-id="${r.id}" aria-expanded="${!!open}">${r.group ? 'Read all' : 'Prove it'}</button><button class="btn ghost" data-act="discuss" data-id="${r.id}">Open thread</button>
           </div>
         </article>`;
       }
@@ -2791,7 +3752,12 @@
       function tableHTML() {
         if (S.firstRun) return firstRunHTML();
         const calls = S.calls.length
-          ? `<div class="stack">${S.calls.slice(0, 3).map(callHTML).join('')}</div>${S.calls.length > 3 ? `<p class="muted" style="margin-top:12px">+${S.calls.length - 3} more, lower urgency. Answer these first.</p>` : ''}`
+          ? `<div class="stack">${S.calls
+              .slice(0, 3)
+              .map((x) => callHTML(x))
+              .join(
+                '',
+              )}</div>${S.calls.length > 3 ? `<p class="muted" style="margin-top:12px">+${S.calls.length - 3} more, lower urgency. Answer these first.</p>` : ''}`
           : `<div class="calm"><div class="big">Nothing needs you.</div><div class="hint">Your commanders are handling it. Anything that needs a human call lands here.</div></div>`;
         if (!S.calls.length && !S.reports.length) {
           const recent = S.handled.slice(0, 4);
@@ -2800,7 +3766,7 @@
             <p class="muted" style="margin-top:16px;font-size:13px">Anything that needs a human call, and every finished report, lands here with its proof attached.</p></section>`;
         }
         const reps = S.reports.length
-          ? S.reports.map(reportHTML).join('')
+          ? S.reports.map((x) => reportHTML(x)).join('')
           : `<div class="calm"><div class="big">No reports waiting.</div><div class="hint">Finished work arrives here with its proof attached.</div></div>`;
         return `${florinaHTML()}
           <div class="zones">
@@ -2818,37 +3784,6 @@
           body = `<div class="firstrun"><div class="label">Found 3 repositories</div>${f.repos.map((r) => `<label class="repo"><input type="checkbox" data-repo="${r.id}" ${r.on ? 'checked' : ''}/> <span>${esc(r.name)}</span><span class="mono">${esc(r.path)}</span></label>`).join('')}<div class="actions"><button class="btn primary" data-act="fr-appoint" data-primary>Appoint ${pl(f.repos.filter((r) => r.on).length, 'commander')}</button></div></div>`;
         }
         return `${florinaHTML()}${body}`;
-      }
-
-      function commanderHTML() {
-        const c = cmdr(S.cmdrId);
-        if (!c) return tableHTML();
-        const st = STATUS[c.status];
-        const calls = S.calls.filter((x) => x.cmdr === c.id);
-        const reps = S.reports.filter((x) => x.cmdr === c.id);
-        const handled = S.handled.filter((h) => h.cmdr === c.id);
-        return `<div class="crumbs"><button data-act="view" data-id="table">‹ The Table</button><span aria-hidden="true">/</span><span>${esc(c.name)}</span></div>
-          <header class="cmdr-title"><h1 id="cmdr-h" tabindex="-1">${esc(c.name)}</h1><span class="seat-status ${st.tone}">${esc(statusWord(c))}</span>${c.workers.map((w) => `<span class="chip">${esc(w)}</span>`).join('')}</header>
-          <p class="muted">${esc(c.objective)}</p>
-          ${c.holdReason ? `<p class="risk" style="margin-top:8px">${esc(c.holdReason)}</p>` : ''}
-          <div class="actions" style="margin-top:16px">
-            <button class="btn" data-act="pause" data-id="${c.id}"${disabledAttr()}>${c.paused ? 'Resume this front' : 'Hold this front'}</button>
-            <button class="btn" data-act="redirect" data-id="${c.id}"${disabledAttr()}>Give it a new order</button>
-            ${c.status === 'holding' ? `<button class="btn" data-act="override" data-id="${c.id}"${disabledAttr()}>Run on Claude Code anyway</button>` : ''}
-            <button class="btn ghost" data-act="timeline" data-id="${c.id}">Open full timeline</button>
-          </div>
-          ${calls.length ? `<section style="margin-top:24px" aria-label="Calls for this front"><div class="zone-head"><h2 class="label">Needs your call</h2></div><div class="stack">${calls.map(callHTML).join('')}</div></section>` : ''}
-          ${reps.length ? `<section style="margin-top:24px" aria-label="Reports for this front"><div class="zone-head"><h2 class="label">Reports in</h2></div>${reps.map(reportHTML).join('')}</section>` : ''}
-          <div class="cmdr-grid">
-            <section aria-labelledby="ord"><div class="zone-head"><h2 class="label" id="ord">Orders</h2><span class="n">${c.orders.filter((o) => o.state === 'verified').length} of ${c.orders.length} verified</span></div>
-              <div class="rows">${c.orders.map((o) => `<div class="row"><span class="glyph ${o.state}" aria-hidden="true">${ORDER_GLYPH[o.state]}</span><div>${esc(o.title)}<span class="sub">${esc(o.note || '')}</span></div><span class="when">${ORDER_WORD[o.state]}</span></div>`).join('')}</div>
-            </section>
-            <section aria-labelledby="hl"><div class="zone-head"><h2 class="label" id="hl">Handled here</h2><span class="n">${c.handled} today</span></div>
-              ${handled.length ? `<div class="rows">${handled.map((h) => `<div class="row"><span class="glyph verified" aria-hidden="true">✓</span><div>${esc(h.what)}<span class="sub">${esc(h.did)}</span></div><span class="when">${fmt(h.t)}</span></div>`).join('')}</div>` : `<p class="muted">Nothing has gone wrong on this front today.</p>`}
-              <div class="zone-head" style="margin-top:24px"><h2 class="label">Limits</h2></div>
-              <p class="muted" style="font-size:13px">Asks you before: push, merge, deploy, network outside approved hosts, migrations.<br/>Track record: ${esc(c.record)}.</p>
-            </section>
-          </div>`;
       }
 
       function recordHTML() {
@@ -2870,7 +3805,7 @@
         const f = (k, l) =>
           `<button class="pill" data-act="recfilter" data-id="${k}" aria-pressed="${S.recFilter === k}">${l}</button>`;
         return `<div class="page"><div><h1>Record</h1><p class="lede">Everything that happened, with its proof. Summaries are projections: the journal underneath is never edited.</p></div>
-          <div class="filters"><input type="search" id="recq" placeholder="Search the record" aria-label="Search the record" value="${esc(S.recQuery)}" />${f('all', 'All')}${f('report', 'Reports')}${f('decision', 'Decisions')}${f('handled', 'Handled')}</div>
+          <div class="filters"><input type="search" id="recq" placeholder="Search the record" aria-label="Search the record" value="${esc(S.recQuery)}" />${f('all', 'All')}${f('report', 'Reports')}${f('decision', 'Decisions')}${f('handled', 'Handled')}${f('message', 'Messages')}</div>
           <div>${rows || '<p class="muted">Nothing matches.</p>'}</div></div>`;
       }
 
@@ -2890,7 +3825,17 @@
 
       function renderStage() {
         const st = $('#stage');
+        $$('details.tools').forEach((d) => {
+          S.openTools[d.dataset.tool] = d.open;
+        });
+        const prevLog = $('#chlog');
+        const prevAtBottom = prevLog
+          ? prevLog.scrollHeight - prevLog.scrollTop - prevLog.clientHeight < 48
+          : true;
+        const prevTop = prevLog ? prevLog.scrollTop : 0;
         const keepTop = st.scrollTop;
+        const fill = chanMode();
+        st.classList.toggle('fill', fill);
         st.innerHTML =
           S.view === 'table'
             ? tableHTML()
@@ -2899,12 +3844,31 @@
               : S.view === 'record'
                 ? recordHTML()
                 : standingHTML();
-        st.scrollTop = keepTop;
+        st.scrollTop = fill ? 0 : keepTop;
         $$('#stage .call, #stage .report').forEach((el) =>
           seen.add(el.id || el.dataset.key.replace('rep-', '')),
         );
         S.calls.forEach((c) => seen.add(c.id));
         S.reports.forEach((r) => seen.add(r.id));
+        const log = $('#chlog');
+        if (log) {
+          const ch = chan(S.cmdrId);
+          if (S.focusMsg && S.scrolledFocus !== S.focusMsg) {
+            const el = log.querySelector(`[data-msg="${S.focusMsg}"]`);
+            if (el) el.scrollIntoView({ block: 'center' });
+            S.scrolledFocus = S.focusMsg;
+          } else if (S.chanOpen || prevAtBottom) log.scrollTop = log.scrollHeight;
+          else log.scrollTop = prevTop;
+          S.chanOpen = false;
+          const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+          if (atBottom) ch.seen = ch.msgs.length;
+          const jump = $('#jump');
+          const left = ch.msgs.length - ch.seen;
+          if (jump) {
+            jump.hidden = atBottom || left <= 0;
+            jump.textContent = `↓ ${left} new`;
+          }
+        }
       }
 
       function renderBanner() {
@@ -2939,6 +3903,7 @@
         const tabs = [
           ['minutes', 'Minutes'],
           ['handled', 'Handled'],
+          ['wire', 'Wire'],
           ['supplies', 'Supplies'],
           ['desk', 'Desk'],
         ];
@@ -2960,10 +3925,12 @@
             shown
               .map(
                 (h) =>
-                  `<div class="ledger-item"><span>${esc(h.what)}</span><span>${esc(h.did)}</span><span class="meta"><span>${fmt(h.t)}</span><span>${esc((cmdr(h.cmdr) || { name: h.cmdr }).name)}</span><span class="chip">${esc(h.level)}</span><span class="mono">${esc(h.ev)}</span></span></div>`,
+                  `<div class="ledger-item"><span>${esc(h.what)}</span><span>${esc(h.did)}</span><span class="meta"><span>${fmt(h.t)}</span><span>${esc((cmdr(h.cmdr) || { name: h.cmdr }).name)}</span><span class="chip">${esc(h.level)}</span><span class="mono">${esc(h.ev)}</span>${h.msgId ? `<button class="linkbtn" data-act="open-msg" data-cmdr="${h.cmdr}" data-msg="${h.msgId}">Open in channel</button>` : ''}</span></div>`,
               )
               .join('') +
             `<p class="muted" style="font-size:12.5px">Showing the latest ${shown.length} of ${handledToday()}. The full list is in the Record.</p>`;
+        } else if (S.drawer === 'wire') {
+          body = wireHTML();
         } else if (S.drawer === 'supplies') {
           body =
             `<p class="muted" style="font-size:13px">Subscription quota is your fleet’s fuel. Florina routes around dry providers; this is where you see why.</p>` +
@@ -2985,18 +3952,11 @@
           if (c)
             body = `<p><b>${esc(c.evidence.claim)}</b></p><div class="prove"><ol>${c.evidence.chain.map(([k, v]) => `<li><b>${esc(k)}</b><span>${esc(v)}</span></li>`).join('')}</ol></div><div class="desk-sec"><div class="label">Rules consulted</div><ul>${c.evidence.rules.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div><p class="muted" style="font-size:12.5px">Approval level: ${esc(c.authority)}. Observed facts come from the adapter, not from a summary.</p>`;
         }
-        el.innerHTML = `<div class="drawer-tabs" role="tablist" aria-label="Side panel">${tabs.map(([k, l]) => `<button role="tab" data-act="drawer" data-id="${k}" aria-selected="${S.drawer === k}" data-key="tab-${k}">${l}</button>`).join('')}<button class="x" data-act="drawer-close" aria-label="Close side panel" data-key="drawer-x">✕</button></div><div class="drawer-body" role="tabpanel">${body}</div>`;
+        el.innerHTML = `<div class="drawer-tabs"><div class="tablist" role="tablist" aria-label="Side panel">${tabs.map(([k, l]) => `<button role="tab" data-act="drawer" data-id="${k}" aria-selected="${S.drawer === k}" data-key="tab-${k}">${l}</button>`).join('')}</div><button class="x" data-act="drawer-close" aria-label="Close side panel" data-key="drawer-x">✕</button></div><div class="drawer-body" role="tabpanel">${body}</div>`;
         if (wasHidden) {
           const t = $('[aria-selected="true"]', el);
           if (t) t.focus();
         }
-      }
-
-      function renderAddr() {
-        const a = S.addressee ? cmdr(S.addressee) : null;
-        $('#addr').innerHTML = a
-          ? `<span class="addr">To ${esc(a.name)}, via Florina <button type="button" data-act="addr-clear" aria-label="Clear addressee">✕</button></span>`
-          : '';
       }
 
       function renderSheet() {
@@ -3030,9 +3990,9 @@
         const active = document.activeElement;
         const key = active && active.dataset ? active.dataset.key : null;
         renderTabs();
-        renderRail();
         renderBanner();
         renderStage();
+        renderRail();
         renderDrawer();
         renderAddr();
         if (!S.sheet) $('#sheet').dataset.focused = '';
@@ -3046,6 +4006,404 @@
           /* voice attribute kept in sync by florinaHTML */
         }
         $('#app').dataset.scenario = S.scenario;
+      }
+
+      /* ===================================================================
+       * Channel logic + rendering
+       * =================================================================== */
+      const LIMITS_RE = /\b(push|force[- ]?push|merge|deploy|rm -rf|drop table)\b/i;
+      const chan = (id) =>
+        S.channels[id] || (S.channels[id] = { msgs: [], seen: 0, n: 0, divider: null, script: 0 });
+      const clip = (s, n) => (s.length > (n || 60) ? s.slice(0, (n || 60) - 1) + '…' : s);
+      const chanMode = () => S.view === 'commander' && S.ctab === 'channel' && !!cmdr(S.cmdrId);
+
+      function appendMsg(cid, m) {
+        const ch = chan(cid);
+        if (m.t === undefined) m.t = S.clock;
+        ch.n += 1;
+        m.id = `${cid}-${ch.n}`;
+        ch.msgs.push(m);
+        return m;
+      }
+
+      function unread(cid) {
+        const ch = S.channels[cid];
+        if (!ch) return 0;
+        return ch.msgs
+          .slice(ch.seen)
+          .filter((x) => !['tool', 'raw'].includes(x.k) && x.from !== 'you').length;
+      }
+      const totalUnread = () => S.commanders.reduce((n, c) => n + unread(c.id), 0);
+
+      function whoOf(from, c) {
+        if (from === 'coord')
+          return { name: c.name, role: 'Coordinator', mono: c.mono, cls: 'coord' };
+        if (from === 'you') return { name: 'You', role: '', mono: 'You', cls: 'you' };
+        if (from === 'florina') return { name: 'Florina', role: 'Secretary', mono: '', cls: 'fl' };
+        const w = c.crew.find((x) => x.id === from);
+        return {
+          name: from,
+          role: w ? `Worker · tier ${w.tier}` : 'Worker',
+          mono: WMONO[from] || from.slice(0, 2).toUpperCase(),
+          cls: 'worker',
+        };
+      }
+
+      const mentions = (s) =>
+        esc(s).replace(/@([a-z][a-z-]*)/g, '<span class="mention">@$1</span>');
+      const toName = (t) => (t === 'coord' ? 'coordinator' : t);
+
+      function toolHTML(m) {
+        const bad = m.tools.filter((t) => !t.ok).length;
+        const sum = `ran ${pl(m.tools.length, 'command')}${bad ? ` · ${bad} failed` : ' · all passed'}${m.ev ? ` · ${m.ev}` : ''}`;
+        return `<details class="tools" data-tool="${m.id}" ${S.openTools[m.id] ? 'open' : ''}><summary>${esc(sum)}</summary>${m.tools.map((t) => `<div class="tl"><span class="${t.ok ? 'ok' : 'bad'}">${t.ok ? '✓' : '✗'}</span> ${esc(t.cmd)} <span class="muted">· ${esc(t.d)}</span></div>`).join('')}</details>`;
+      }
+
+      function chanRow(m, c, cont) {
+        const hl = S.focusMsg === m.id ? ' hl' : '';
+        const attr = `id="${m.id}" data-msg="${m.id}"`;
+        if (m.k === 'sys')
+          return `<div class="srow${hl}" ${attr}><span>${esc(m.text)}</span><span class="when">${fmt(m.t)}</span></div>`;
+        if (m.k === 'raw')
+          return `<div class="rawrow${hl}" ${attr}>${fmt(m.t)} ${esc(m.text)}</div>`;
+        if (m.k === 'handled')
+          return `<div class="hrow${hl}" ${attr}><span class="hg" aria-hidden="true">✓</span><div class="hb"><b>Handled without you.</b>${esc(m.what)} ${esc(m.did)}<div class="rcpt"><span>${fmt(m.t)}</span><span class="chip">${esc(m.level)}</span><span class="mono">${esc(m.ev)}</span></div></div></div>`;
+        const w = whoOf(m.from, c);
+        const av = `<span class="av-l ${w.cls}" aria-hidden="true">${esc(w.mono)}</span>`;
+        const head = cont
+          ? ''
+          : `<div class="mhead"><b>${esc(w.name)}</b>${w.role ? `<span class="role">${esc(w.role)}</span>` : ''}${m.to ? `<span class="role">to @${esc(toName(m.to))}</span>` : ''}<span class="when">${fmt(m.t)}</span></div>`;
+        let body = '';
+        if (m.k === 'tool') body = toolHTML(m);
+        else if (m.k === 'ask') {
+          const call = S.calls.find((x) => x.id === m.ref);
+          body = call
+            ? `<div class="mtext">${mentions(m.text)}</div>${callHTML(call, { chan: true })}`
+            : `<div class="answered"><b>Answered.</b> ${esc(m.answer || 'Handled earlier')}</div>`;
+        } else
+          body = `<div class="mtext">${m.tag ? `<span class="otag">${esc(m.tag)}</span>` : ''}${mentions(m.text)}</div>`;
+        const rc =
+          m.rcpt && m.rcpt.length
+            ? `<div class="rcpt">${m.rcpt.map((r) => `<span class="${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓' : '!'} ${esc(r.s)}</span>`).join('')}</div>`
+            : '';
+        return `<div class="mrow ${m.k}${cont ? ' cont' : ''}${hl}" ${attr}>${av}<div class="mbody">${head}${body}${rc}</div></div>`;
+      }
+
+      function channelHTML(c) {
+        const ch = chan(c.id);
+        const lvl = S.chDetail;
+        const vis = (m) =>
+          m.k === 'raw' ? lvl === 'all' : m.k === 'tool' ? lvl !== 'convo' : true;
+        const who = S.chWho;
+        const match = (m) =>
+          !who ||
+          m.from === who ||
+          m.to === who ||
+          ['sys', 'handled', 'ask'].includes(m.k) ||
+          m.from === 'you' ||
+          m.from === 'florina';
+        const hidden = ch.msgs.filter((m) => !vis(m) && match(m)).length;
+        let html = '';
+        let prev = null;
+        ch.msgs.forEach((m, i) => {
+          if (!vis(m) || !match(m)) return;
+          if (ch.divider !== null && i === ch.divider && ch.divider < ch.msgs.length) {
+            html += `<div class="newline" role="separator">New since you last looked</div>`;
+            prev = null;
+          }
+          const grouping = ['say', 'fl', 'you', 'nudge'].includes(m.k);
+          const cont =
+            grouping &&
+            prev &&
+            prev.from === m.from &&
+            prev.k === m.k &&
+            m.t - prev.t <= 3 &&
+            !m.to &&
+            !prev.to &&
+            !m.tag;
+          html += chanRow(m, c, cont);
+          prev = grouping ? m : null;
+        });
+        if (hidden)
+          html += `<div class="hidden-note">${pl(hidden, lvl === 'convo' ? 'tool action or raw event' : 'raw event')} hidden. <button data-act="detail" data-id="${lvl === 'convo' ? 'actions' : 'all'}" class="linkbtn">${lvl === 'convo' ? 'Show actions' : 'Show everything'}</button></div>`;
+        return `<div class="chan"><div class="chlog" id="chlog" role="log" aria-label="${esc(c.name)} channel" tabindex="0">${html || '<p class="muted">Nothing here yet.</p>'}</div><button class="jump" id="jump" data-act="jump" hidden></button></div>`;
+      }
+
+      function crewHTML(c) {
+        const live = ['advancing', 'verifying', 'briefed'].includes(c.status);
+        const coordState =
+          {
+            awaiting: 'waiting on you',
+            holding: 'holding',
+            paused: 'held by you',
+            critical: 'stopped',
+            idle: 'standing by',
+          }[c.status] || (c.status === 'verifying' ? 'verifying' : 'coordinating');
+        const pill = live
+          ? ['', 'Live']
+          : c.status === 'awaiting'
+            ? ['wait', 'Waiting on you']
+            : c.status === 'critical'
+              ? ['wait', 'Stopped']
+              : ['idle', c.status === 'holding' ? 'Holding' : 'Idle'];
+        return `<div class="crew" role="group" aria-label="Participants. Select one to filter the channel.">
+          <button class="who-chip" data-act="who" data-w="coord" aria-pressed="${S.chWho === 'coord'}"><span class="av-l coord sm" aria-hidden="true">${esc(c.mono)}</span>Coordinator<span class="st">${esc(coordState)}</span></button>
+          ${c.crew.map((w) => `<span class="who-wrap"><button class="who-chip ${w.cap === 'none' || w.paused ? 'off' : ''}" data-act="who" data-w="${w.id}" aria-pressed="${S.chWho === w.id}"><span class="av-l worker sm" aria-hidden="true">${esc(WMONO[w.id] || '··')}</span>${esc(w.id)}<span class="tier" title="Adapter fidelity tier ${w.tier}">${w.tier}</span><span class="st" title="${esc(w.detail || w.state)}">${esc(w.paused ? 'paused' : w.state)}</span></button>${w.cap === 'live' && !offline() ? `<button class="pw" data-act="pause-worker" data-id="${c.id}" data-w="${w.id}" aria-label="${w.paused ? 'Resume' : 'Pause'} ${esc(w.id)}">${w.paused ? 'Resume' : 'Pause'}</button>` : ''}</span>`).join('')}
+          <span class="livepill"><span class="livedot ${pill[0]}" aria-hidden="true"></span>${pill[1]}</span></div>`;
+      }
+
+      function commanderHTML() {
+        const c = cmdr(S.cmdrId);
+        if (!c) return tableHTML();
+        const st = STATUS[c.status];
+        const un = unread(c.id);
+        const head = `<div class="cm-head"><button class="crumb-btn" data-act="view" data-id="table">‹ The Table</button><h1 id="cmdr-h" tabindex="-1">${esc(c.name)}</h1><span class="seat-status ${st.tone}">${esc(statusWord(c))}</span><span class="spacer"></span>
+          <button class="btn" data-act="pause" data-id="${c.id}"${disabledAttr()}>${c.paused ? 'Resume this front' : 'Hold this front'}</button>
+          ${c.status === 'holding' ? `<button class="btn" data-act="override" data-id="${c.id}"${disabledAttr()}>Run on Claude Code once</button>` : ''}
+          <button class="btn ghost" data-act="timeline" data-id="${c.id}">Open full timeline</button></div>`;
+        const seg = (k, l) =>
+          `<button data-act="detail" data-id="${k}" aria-pressed="${S.chDetail === k}">${l}</button>`;
+        const tabs = `<div class="ctabs"><div class="tablist" role="tablist" aria-label="${esc(c.name)} views">
+          <button class="ctab" role="tab" data-act="ctab" data-id="channel" aria-selected="${S.ctab === 'channel'}" data-key="ctab-channel">Channel${un && S.ctab !== 'channel' ? `<span class="unread">${un}</span>` : ''}</button>
+          <button class="ctab" role="tab" data-act="ctab" data-id="overview" aria-selected="${S.ctab === 'overview'}" data-key="ctab-overview">Overview</button></div>
+          ${S.ctab === 'channel' ? `<span class="seg-ctl" role="group" aria-label="Detail level">${seg('convo', 'Conversation')}${seg('actions', 'Actions')}${seg('all', 'Everything')}</span>` : ''}</div>`;
+        return `${head}${crewHTML(c)}${tabs}${S.ctab === 'channel' ? channelHTML(c) : overviewHTML(c)}`;
+      }
+
+      function overviewHTML(c) {
+        const calls = S.calls.filter((x) => x.cmdr === c.id);
+        const reps = S.reports.filter((x) => x.cmdr === c.id);
+        const handled = S.handled.filter((h) => h.cmdr === c.id);
+        return `<p class="muted" style="margin-top:14px">${esc(c.objective)}</p>
+          ${c.holdReason ? `<p class="risk" style="margin-top:8px">${esc(c.holdReason)}</p>` : ''}
+          ${calls.length ? `<section style="margin-top:24px" aria-label="Calls for this front"><div class="zone-head"><h2 class="label">Needs your call</h2></div><div class="stack">${calls.map((x) => callHTML(x)).join('')}</div></section>` : ''}
+          ${reps.length ? `<section style="margin-top:24px" aria-label="Reports for this front"><div class="zone-head"><h2 class="label">Reports in</h2></div>${reps.map((x) => reportHTML(x)).join('')}</section>` : ''}
+          <div class="cmdr-grid">
+            <section aria-labelledby="ord"><div class="zone-head"><h2 class="label" id="ord">Orders</h2><span class="n">${c.orders.filter((o) => o.state === 'verified').length} of ${c.orders.length} verified</span></div>
+              <div class="rows">${c.orders.map((o) => `<div class="row"><span class="glyph ${o.state}" aria-hidden="true">${ORDER_GLYPH[o.state]}</span><div>${esc(o.title)}<span class="sub">${esc(o.note || '')}</span></div><span class="when">${ORDER_WORD[o.state]}</span></div>`).join('')}</div>
+            </section>
+            <section aria-labelledby="hl"><div class="zone-head"><h2 class="label" id="hl">Handled here</h2><span class="n">${c.handled} today</span></div>
+              ${handled.length ? `<div class="rows">${handled.map((h) => `<div class="row"><span class="glyph verified" aria-hidden="true">✓</span><div>${esc(h.what)}<span class="sub">${esc(h.did)} ${h.msgId ? `<button class="linkbtn" data-act="open-msg" data-cmdr="${c.id}" data-msg="${h.msgId}">Open in channel</button>` : ''}</span></div><span class="when">${fmt(h.t)}</span></div>`).join('')}</div>` : `<p class="muted">Nothing has gone wrong on this front today.</p>`}
+              <div class="zone-head" style="margin-top:24px"><h2 class="label">Limits and check-ins</h2></div>
+              <p class="muted" style="font-size:13px">Asks you before: push, merge, deploy, network outside approved hosts, migrations.<br/>Track record: ${esc(c.record)}.</p>
+              <div class="setting" style="border-top:0;padding-bottom:0"><label for="checkin">When should this commander check with you?</label><select id="checkin" aria-label="Check-in mode"><option value="decisions" ${c.checkin === 'decisions' ? 'selected' : ''}>Only at decision points</option><option value="orders" ${c.checkin === 'orders' ? 'selected' : ''}>Before it dispatches any order</option><option value="blocked" ${c.checkin === 'blocked' ? 'selected' : ''}>Only when it is blocked</option></select></div>
+            </section>
+          </div>`;
+      }
+
+      function openChannel(cid, msgId) {
+        S.view = 'commander';
+        S.cmdrId = cid;
+        S.ctab = 'channel';
+        S.chWho = null;
+        S.to = 'coord';
+        S.focusMsg = msgId || null;
+        const ch = chan(cid);
+        ch.divider = ch.seen;
+        S.chanOpen = true;
+        if (msgId) {
+          const m = ch.msgs.find((x) => x.id === msgId);
+          if (m && m.k === 'tool' && S.chDetail === 'convo') S.chDetail = 'actions';
+          if (m && m.k === 'raw') S.chDetail = 'all';
+        }
+        render();
+      }
+
+      function toNote(c) {
+        const t = S.to;
+        if (t === 'coord')
+          return 'The coordinator decides how to relay it. Your Limits still apply.';
+        if (t === 'all') return 'The coordinator and every live worker get this.';
+        if (t === 'florina') return 'Florina reads the order back before anything is dispatched.';
+        const w = c.crew.find((x) => x.id === t);
+        return w
+          ? `${w.id} gets it as a user message between turns. The coordinator sees it too. May use quota.`
+          : '';
+      }
+
+      function renderAddr() {
+        const el = $('#addr');
+        const box = $('#order');
+        const hint = $('#hintLine');
+        if (chanMode()) {
+          const c = cmdr(S.cmdrId);
+          const opts = [
+            ['coord', 'Coordinator', ''],
+            ...c.crew.map((w) => [
+              w.id,
+              w.id,
+              w.cap === 'live' ? '' : w.why || `no live session (${w.state})`,
+            ]),
+            ['all', 'Everyone', ''],
+            ['florina', 'Florina (new order)', ''],
+          ];
+          el.innerHTML = `<div class="toRow" role="radiogroup" aria-label="Send to"><span class="lbl">To</span>${opts.map(([k, l, why]) => `<button type="button" role="radio" class="to-chip" aria-checked="${S.to === k}" ${why ? 'aria-disabled="true"' : ''} data-act="to" data-id="${k}" data-why="${esc(why)}" ${why ? `title="${esc(why)}"` : ''}>${esc(l)}</button>`).join('')}<span class="toNote" id="toNote">${esc(toNote(c))}</span></div>`;
+          box.placeholder =
+            S.to === 'florina'
+              ? 'Give Florina a new order for this front.'
+              : `Message ${S.to === 'coord' ? 'the coordinator' : S.to === 'all' ? 'everyone in this channel' : S.to}.`;
+          if (hint)
+            hint.innerHTML =
+              '<span>Everyone here sees it. It is journaled before delivery. It cannot grant permissions.</span><span class="kbd-hint"><kbd>Enter</kbd> send · <kbd>Esc</kbd> leave the box</span>';
+          return;
+        }
+        const a = S.addressee ? cmdr(S.addressee) : null;
+        el.innerHTML = a
+          ? `<span class="addr">To ${esc(a.name)}, via Florina <button type="button" data-act="addr-clear" aria-label="Clear addressee">✕</button></span>`
+          : '';
+        box.placeholder = 'Tell Florina the outcome you want.';
+        if (hint)
+          hint.innerHTML =
+            '<span><kbd>Hold Space</kbd> talk</span><span><kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line</span><span class="kbd-hint"><kbd>o</kbd> focus here · <kbd>?</kbd> all shortcuts</span>';
+      }
+
+      function postIntervention(text) {
+        const c = cmdr(S.cmdrId);
+        if (!c || offline()) return;
+        S.clock += 1;
+        const to = S.to;
+        const advice = LIMITS_RE.test(text);
+        const live = c.crew.filter((w) => w.cap === 'live' && !w.paused);
+        const target = to === 'coord' ? 'the coordinator' : to === 'all' ? 'everyone' : `@${to}`;
+        const me = appendMsg(c.id, {
+          from: 'you',
+          k: 'you',
+          to,
+          text,
+          rcpt: [{ s: 'Journaled', ok: true }],
+        });
+        S.record.unshift({
+          day: 'Today',
+          t: S.clock,
+          type: 'message',
+          title: `You to ${to === 'coord' ? 'coordinator' : to}: ${clip(text, 70)}`,
+          sub: `${c.name} channel · journaled before delivery`,
+        });
+        $('#order').value = '';
+        autosize();
+        render();
+        const deliverTo =
+          to === 'coord'
+            ? 'coordinator'
+            : to === 'all'
+              ? `coordinator + ${live.map((w) => w.id).join(', ') || 'no live workers'}`
+              : to;
+        later(() => {
+          me.rcpt.push({ s: `Delivered to ${deliverTo}`, ok: true });
+          if (advice) me.rcpt.push({ s: 'Advice only: Limits still apply', ok: false });
+          render();
+        }, 450);
+        if (!S.inter.noted) {
+          S.inter.noted = true;
+          later(() => {
+            appendMsg(c.id, {
+              from: 'florina',
+              k: 'fl',
+              text: 'I logged this in the Record. Messages never grant permissions; approvals still come as cards.',
+            });
+            render();
+          }, 900);
+        }
+        if (advice) {
+          later(() => {
+            appendMsg(c.id, {
+              from: 'florina',
+              k: 'fl',
+              text: 'That includes “push”, “merge” or “deploy”. R1: nothing goes out without a card from you. I passed your message on as advice only. Say “ask me to approve a push” and I will raise the card.',
+            });
+            render();
+          }, 1100);
+        }
+        const wk = live[0];
+        later(() => {
+          S.clock += 1;
+          if (to === 'coord' || to === 'all') {
+            appendMsg(c.id, {
+              from: 'coord',
+              k: 'say',
+              text: wk
+                ? `Heard you. I will fold that into the Brief and tell @${wk.id}.${advice ? ' I am treating the push part as advice only.' : ''}`
+                : 'Heard you. I will fold that into the Brief.',
+            });
+          } else {
+            appendMsg(c.id, { from: to, k: 'say', text: 'Understood. Adjusting.' });
+          }
+          render();
+        }, 1500);
+        later(() => {
+          if (to === 'coord' && wk) {
+            appendMsg(c.id, {
+              from: 'coord',
+              k: 'nudge',
+              to: wk.id,
+              tag: 'Relayed from you',
+              text: `You said: “${clip(text, 90)}”. Adjust and confirm.`,
+            });
+            render();
+          } else if (to !== 'coord' && to !== 'all') {
+            appendMsg(c.id, {
+              from: 'coord',
+              k: 'say',
+              text: `Saw your message to @${to}. I will keep the Brief in sync.`,
+            });
+            render();
+          } else if (to === 'all' && wk) {
+            appendMsg(c.id, { from: wk.id, k: 'say', text: 'Understood. Adjusting.' });
+            render();
+          }
+        }, 2500);
+        if (to === 'coord' && wk)
+          later(() => {
+            appendMsg(c.id, {
+              from: wk.id,
+              k: 'say',
+              text: 'Understood. Adjusting and will confirm.',
+            });
+            render();
+          }, 3500);
+      }
+
+      function wireHTML() {
+        const items = [];
+        S.commanders.forEach((c) => {
+          const ch = S.channels[c.id];
+          if (ch)
+            ch.msgs.forEach((m) => {
+              if (!['tool', 'raw'].includes(m.k)) items.push({ c, m });
+            });
+        });
+        items.sort((a, b) => b.m.t - a.m.t || +b.m.id.split('-').pop() - +a.m.id.split('-').pop());
+        const rows = items.slice(0, 30).map(({ c, m }) => {
+          const w =
+            m.from === 'coord'
+              ? 'coordinator'
+              : m.from === 'florina'
+                ? 'Florina'
+                : m.from === 'you'
+                  ? 'You'
+                  : m.from;
+          const text = m.k === 'handled' ? `Handled: ${m.what} ${m.did}` : m.text;
+          return `<button class="wire-row" data-act="open-msg" data-cmdr="${c.id}" data-msg="${m.id}"><span class="when">${fmt(m.t)}</span><span><span class="wire-who">${esc(c.name)} · ${esc(w)}</span><span class="wire-text">${esc(text)}</span></span></button>`;
+        });
+        return `<p class="muted" style="font-size:13px">Every project channel, newest first. Tool calls are left out. Select a line to open it in context.</p>${rows.join('') || '<p class="muted">Nothing yet.</p>'}`;
+      }
+
+      function emitScript() {
+        const ids = Object.keys(SCRIPT).filter((id) => {
+          const c = cmdr(id);
+          return (
+            c &&
+            ['advancing', 'verifying', 'briefed', 'awaiting'].includes(c.status) &&
+            chan(id).script < SCRIPT[id].length
+          );
+        });
+        if (!ids.length) return;
+        const id = ids[Math.floor(Math.random() * ids.length)];
+        const ch = chan(id);
+        const line = SCRIPT[id][ch.script];
+        ch.script += 1;
+        appendMsg(id, structuredClone(line));
+        render();
       }
 
       function announce(msg) {
@@ -3112,6 +4470,7 @@
           orders: structuredClone(cmdr(c.cmdr).orders),
           recLen: S.record.length,
           minLen: S.minutes.length,
+          chLen: chan(c.cmdr).msgs.length,
         };
         const el = document.getElementById(id);
         const finish = () => {
@@ -3126,6 +4485,20 @@
           });
           S.minutes.push({ k: 'you', t: S.clock, text: `${o.label}.` });
           say(o.outcome);
+          const askMsg = chan(c.cmdr).msgs.find((x) => x.ref === c.id && x.k === 'ask');
+          if (askMsg) askMsg.answer = `${o.label} · ${fmt(S.clock)}`;
+          appendMsg(c.cmdr, {
+            from: 'you',
+            k: 'you',
+            to: 'coord',
+            tag: 'Decision',
+            text: `${o.label}.`,
+            rcpt: [
+              { s: 'Journaled', ok: true },
+              { s: 'Delivered to coordinator', ok: true },
+            ],
+          });
+          appendMsg(c.cmdr, { from: 'coord', k: 'say', text: `Thanks. ${o.outcome}` });
           const nextKey = S.calls[0] ? `call-${S.calls[0].id}` : null;
           render();
           const f = nextKey ? $(`[data-key="${nextKey}"]`) : $('#headline');
@@ -3140,6 +4513,9 @@
             cm.orders = snapshot.orders;
             S.record.splice(0, S.record.length - snapshot.recLen);
             S.minutes.length = snapshot.minLen;
+            chan(c.cmdr).msgs.length = snapshot.chLen;
+            const am = chan(c.cmdr).msgs.find((x) => x.ref === c.id && x.k === 'ask');
+            if (am) am.answer = null;
             seen.delete(id);
             render();
             announce('Undone. The call is back on the Table.');
@@ -3340,6 +4716,7 @@
         const c = o.cmdr;
         const id = 'o' + (c.orders.length + 1) + Math.floor(Math.random() * 99);
         const prevStatus = c.status;
+        const chLen0 = chan(c.id).msgs.length;
         c.orders.push({
           id,
           title: o.title,
@@ -3349,6 +4726,8 @@
         });
         if (!['awaiting', 'critical', 'holding', 'paused'].includes(c.status)) c.status = 'briefed';
         if (!c.workers.includes(o.worker)) c.workers.push(o.worker);
+        if (!c.crew.find((w) => w.id === o.worker))
+          c.crew.push({ id: o.worker, tier: 'B', cap: 'live', state: 'starting' });
         S.sheet = null;
         S.addressee = null;
         S.minutes.push(
@@ -3356,6 +4735,23 @@
           { k: 'tool', t: S.clock, text: `dispatch ${c.name}`, ok: true },
         );
         say(`Understood. ${c.name} has it on ${o.worker}.`);
+        appendMsg(c.id, {
+          from: 'florina',
+          k: 'sys',
+          text: `Florina briefed the coordinator: “${o.objective}.” Limits: ${o.limits.join('; ').toLowerCase()}.`,
+        });
+        appendMsg(c.id, {
+          from: 'coord',
+          k: 'say',
+          text: `Understood. Assigning it to @${o.worker}. Done means ${o.done.split('.')[0].toLowerCase()}.`,
+        });
+        appendMsg(c.id, {
+          from: 'coord',
+          k: 'order',
+          to: o.worker,
+          tag: `Order ${c.orders.length}`,
+          text: `${o.objective}.`,
+        });
         S.record.unshift({
           day: 'Today',
           t: S.clock,
@@ -3367,6 +4763,7 @@
         render();
         toast(`Dispatched to ${c.name} on ${o.worker}.`, () => {
           c.orders = c.orders.filter((x) => x.id !== id);
+          chan(c.id).msgs.length = chLen0;
           c.status = prevStatus;
           render();
           announce('Order withdrawn.');
@@ -3448,6 +4845,16 @@
         render();
         later(() => {
           S.voice = 'idle';
+          document.addEventListener(
+            'toggle',
+            (e) => {
+              const d = e.target;
+              if (d && d.matches && d.matches('details.tools'))
+                S.openTools[d.dataset.tool] = d.open;
+            },
+            true,
+          );
+
           const ta = $('#order');
           if (voiceIdx > 0) {
             ta.value =
@@ -3473,6 +4880,7 @@
           render();
           return;
         }
+        if (Math.random() < 0.5) emitScript();
         const r = Math.random();
         if (r < 0.62) {
           const h = HANDLED_POOL[Math.floor(Math.random() * HANDLED_POOL.length)];
@@ -3488,7 +4896,25 @@
         if (!c) return;
         c.handled += 1;
         S.handledTotal += 1;
-        S.handled.unshift({ t: S.clock, cmdr: h[0], what: h[1], did: h[2], level: h[3], ev: h[4] });
+        const entry = {
+          id: 'h' + ++S.hseq,
+          t: S.clock,
+          cmdr: h[0],
+          what: h[1],
+          did: h[2],
+          level: h[3],
+          ev: h[4],
+        };
+        S.handled.unshift(entry);
+        entry.msgId = appendMsg(h[0], {
+          from: 'coord',
+          k: 'handled',
+          what: h[1],
+          did: h[2],
+          level: h[3],
+          ev: h[4],
+          hid: entry.id,
+        }).id;
         c.chatter = h[2];
         render();
         const seat = $(`[data-key="seat-${c.id}"]`);
@@ -3515,6 +4941,12 @@
           }
         }
         say(`${r.title}: ${r.evidence.slice(0, 2).join(', ')}.`);
+        appendMsg(r.cmdr, {
+          from: 'coord',
+          k: 'say',
+          text: `Verified independently: ${r.evidence.slice(0, 2).join(', ')}. Report sent to Florina.`,
+          ref: r.id,
+        });
         render();
         if (!S.holdCalls) {
           toast(`New report from ${cmdr(r.cmdr).name}: ${r.title}.`);
@@ -3527,6 +4959,19 @@
         const cm = cmdr(c.cmdr);
         if (cm && cm.status !== 'critical') cm.status = 'awaiting';
         say(`${cm.name} needs your call: ${c.title}`);
+        appendMsg(c.cmdr, {
+          from: 'claude-code',
+          k: 'say',
+          to: 'coord',
+          text: 'I need a decision before I go further. Two designs fit; neither is in the Brief.',
+        });
+        appendMsg(c.cmdr, {
+          from: 'coord',
+          k: 'say',
+          text: 'Not mine to decide. Escalating to Florina.',
+        });
+        appendMsg(c.cmdr, { from: 'florina', k: 'fl', text: `${c.reco.why}` });
+        appendMsg(c.cmdr, { from: 'coord', k: 'ask', text: 'Waiting on your call.', ref: c.id });
         render();
         if (!S.holdCalls) toast(`${cm.name} needs your call.`);
       }
@@ -3582,12 +5027,31 @@
           aliases: [r.name.split('-')[0]],
           objective: r.objective,
           workers: [],
+          crew: [],
+          checkin: 'decisions',
           handled: 0,
           paused: false,
           orders: [],
           record: 'No reports yet',
         }));
         S.firstRun = null;
+        chosen.forEach((r) => {
+          S.channels[r.id] = {
+            msgs: [
+              {
+                id: `${r.id}-1`,
+                t: S.clock,
+                from: 'florina',
+                k: 'sys',
+                text: `Florina appointed a coordinator for ${r.name}. Nothing has been briefed yet.`,
+              },
+            ],
+            seen: 1,
+            n: 1,
+            divider: null,
+            script: 0,
+          };
+        });
         S.minutes.push({
           k: 'fl',
           t: S.clock,
@@ -3606,7 +5070,18 @@
         if (
           t &&
           t.getAttribute('aria-disabled') === 'true' &&
-          !['inspect', 'drawer', 'view'].includes(t.dataset.act)
+          ![
+            'inspect',
+            'drawer',
+            'view',
+            'to',
+            'who',
+            'detail',
+            'ctab',
+            'open-msg',
+            'discuss',
+            'jump',
+          ].includes(t.dataset.act)
         ) {
           toast('The daemon is unreachable. I will do this as soon as I am back.');
           return;
@@ -3626,14 +5101,90 @@
             $('#stage').scrollTop = 0;
             break;
           case 'open-cmdr':
-            S.view = 'commander';
-            S.cmdrId = id;
-            render();
+            openChannel(id);
             {
               const h = $('#cmdr-h');
               if (h) h.focus({ preventScroll: true });
             }
             break;
+          case 'ctab':
+            S.ctab = id;
+            S.chanOpen = true;
+            render();
+            break;
+          case 'detail':
+            S.chDetail = id;
+            render();
+            break;
+          case 'who':
+            S.chWho = S.chWho === t.dataset.w ? null : t.dataset.w;
+            S.chanOpen = true;
+            render();
+            break;
+          case 'to':
+            if (t.getAttribute('aria-disabled') === 'true') {
+              toast(t.dataset.why || 'That participant cannot take messages.');
+              break;
+            }
+            S.to = id;
+            renderAddr();
+            $('#order').focus();
+            break;
+          case 'jump': {
+            const log = $('#chlog');
+            if (log) log.scrollTop = log.scrollHeight;
+            chan(S.cmdrId).seen = chan(S.cmdrId).msgs.length;
+            render();
+            break;
+          }
+          case 'open-msg':
+            S.drawer = null;
+            openChannel(t.dataset.cmdr, t.dataset.msg);
+            break;
+          case 'discuss': {
+            let hit = null;
+            Object.keys(S.channels).forEach((cid) => {
+              const m = S.channels[cid].msgs.find((x) => x.ref === id && x.k !== 'sys');
+              if (m && !hit) hit = { cid, m };
+            });
+            if (hit) {
+              S.drawer = null;
+              openChannel(hit.cid, hit.m.id);
+            } else toast('No discussion is recorded for this item yet.');
+            break;
+          }
+          case 'pause-worker': {
+            const c = cmdr(id);
+            const w = c.crew.find((x) => x.id === t.dataset.w);
+            w.paused = !w.paused;
+            appendMsg(c.id, {
+              from: 'you',
+              k: 'you',
+              to: w.id,
+              text: w.paused ? 'Pause.' : 'Resume.',
+              rcpt: [
+                { s: 'Journaled', ok: true },
+                { s: `Delivered to ${w.id}`, ok: true },
+              ],
+            });
+            appendMsg(c.id, {
+              from: 'coord',
+              k: 'say',
+              text: w.paused
+                ? `Noted. @${w.id} is paused and its worktree is untouched. I will wait for you to resume it.`
+                : `@${w.id} is back on its order.`,
+            });
+            S.record.unshift({
+              day: 'Today',
+              t: S.clock,
+              type: 'message',
+              title: `You ${w.paused ? 'paused' : 'resumed'} ${w.id}`,
+              sub: `${c.name} channel · journaled`,
+            });
+            render();
+            toast(w.paused ? `${w.id} paused. Its worktree is untouched.` : `${w.id} resumed.`);
+            break;
+          }
           case 'resolve':
             resolveCall(id, t.dataset.opt);
             break;
@@ -3731,6 +5282,23 @@
               c._prev = c.status;
               c.status = 'paused';
             } else c.status = c._prev || 'advancing';
+            appendMsg(c.id, {
+              from: 'you',
+              k: 'you',
+              to: 'coord',
+              text: c.paused ? 'Hold this front.' : 'Resume this front.',
+              rcpt: [
+                { s: 'Journaled', ok: true },
+                { s: 'Delivered to coordinator', ok: true },
+              ],
+            });
+            appendMsg(c.id, {
+              from: 'coord',
+              k: 'say',
+              text: c.paused
+                ? 'Holding. Workers finish the current step and stop. Nothing is discarded.'
+                : 'Resuming from where we stopped.',
+            });
             render();
             toast(
               c.paused ? `${c.name} is paused. Its worktree is untouched.` : `${c.name} resumed.`,
@@ -3751,6 +5319,27 @@
             c.orders[0].worker = 'claude-code';
             c.orders[0].note = 'Running on Claude Code (you overrode R2 once)';
             say('Running infra-ci on Claude Code, once. Rule R2 is unchanged.');
+            c.crew = [
+              { id: 'claude-code', tier: 'B', cap: 'live', state: 'starting' },
+              { id: 'codex', tier: 'A', cap: 'none', state: 'out of quota' },
+            ];
+            appendMsg(c.id, {
+              from: 'you',
+              k: 'you',
+              to: 'coord',
+              text: 'Run it on Claude Code, once.',
+              rcpt: [
+                { s: 'Journaled', ok: true },
+                { s: 'Delivered to coordinator', ok: true },
+              ],
+            });
+            appendMsg(c.id, {
+              from: 'coord',
+              k: 'order',
+              to: 'claude-code',
+              tag: 'Order 1',
+              text: 'Cache node_modules between CI runs. One-time move off Codex; rule R2 stays as it is.',
+            });
             render();
             toast('Running on Claude Code, once. Rule R2 is unchanged.');
             break;
@@ -3846,6 +5435,10 @@
         }
         if (e.target.id === 'readback') S.readback = e.target.value;
         if (e.target.id === 'speakT') S.speak = e.target.checked;
+        if (e.target.id === 'checkin') {
+          cmdr(S.cmdrId).checkin = e.target.value;
+          toast('Saved. This only changes how often this commander checks with you.');
+        }
         if (e.target.dataset && e.target.dataset.repo) {
           const r = S.firstRun.repos.find((x) => x.id === e.target.dataset.repo);
           r.on = e.target.checked;
@@ -3879,7 +5472,11 @@
         e.preventDefault();
         const v = ta.value;
         if (!v.trim()) return;
-        submitOrder(v);
+        if (chanMode() && S.to !== 'florina') postIntervention(v);
+        else {
+          if (chanMode()) S.addressee = S.cmdrId;
+          submitOrder(v);
+        }
       });
       $('#mic').addEventListener('click', () => {
         S.voice === 'listening' ? voiceStop() : voiceStart();
@@ -3956,6 +5553,10 @@
           if ($('#pmenu .pmenu')) {
             closeProto();
             $('#protoBtn').focus();
+            return;
+          }
+          if (typing(e.target) && e.target.tagName !== 'SELECT') {
+            e.target.blur();
             return;
           }
           if (S.sheet) {
@@ -4053,16 +5654,20 @@
             render();
             break;
           case '3':
-            S.drawer = S.drawer === 'supplies' ? null : 'supplies';
+            S.drawer = S.drawer === 'wire' ? null : 'wire';
             render();
             break;
           case '4':
+            S.drawer = S.drawer === 'supplies' ? null : 'supplies';
+            render();
+            break;
+          case '5':
             S.drawer = S.drawer === 'desk' ? null : 'desk';
             render();
             break;
           case '?':
             $('#overlay').innerHTML =
-              `<div class="overlay" role="dialog" aria-label="Keyboard shortcuts" aria-modal="true"><div class="modal"><h2>Keyboard</h2><div class="keys"><kbd>Hold Space</kbd><span>Talk to Florina</span><kbd>o</kbd><span>Write an order</span><kbd>j</kbd> <span>Next card or commander (<kbd>k</kbd> back)</span><kbd>Enter</kbd><span>Primary action of the focused card</span><kbd>g t</kbd><span>The Table</span><kbd>g r</kbd><span>Record</span><kbd>g s</kbd><span>Standing orders</span><kbd>1 2 3 4</kbd><span>Minutes, Handled, Supplies, Desk</span><kbd>Esc</kbd><span>Back out one level</span></div><div class="actions" style="margin-top:16px"><button class="btn primary" id="helpClose">Close</button></div></div></div>`;
+              `<div class="overlay" role="dialog" aria-label="Keyboard shortcuts" aria-modal="true"><div class="modal"><h2>Keyboard</h2><div class="keys"><kbd>Hold Space</kbd><span>Talk to Florina</span><kbd>o</kbd><span>Write an order</span><kbd>j</kbd> <span>Next card or commander (<kbd>k</kbd> back)</span><kbd>Enter</kbd><span>Primary action of the focused card</span><kbd>g t</kbd><span>The Table</span><kbd>g r</kbd><span>Record</span><kbd>g s</kbd><span>Standing orders</span><kbd>1 2 3 4 5</kbd><span>Minutes, Handled, Wire, Supplies, Desk</span><kbd>Esc</kbd><span>Back out one level</span></div><div class="actions" style="margin-top:16px"><button class="btn primary" id="helpClose">Close</button></div></div></div>`;
             $('#helpClose').focus();
             $('#helpClose').addEventListener('click', () => {
               $('#overlay').innerHTML = '';
@@ -4093,6 +5698,9 @@
         },
         setSim,
         briefing,
+        openChannel,
+        appendMsg,
+        emitScript,
       };
 
       render();
