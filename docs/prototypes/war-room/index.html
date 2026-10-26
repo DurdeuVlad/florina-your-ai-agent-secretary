@@ -2220,6 +2220,23 @@
         font-weight: 600;
         font-size: 12px;
       }
+      .goalbox {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--panel);
+        padding: 10px 12px;
+        margin-top: 2px;
+      }
+      .goalbox .gl {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 4px 12px;
+        font-size: 12.5px;
+        margin-top: 6px;
+      }
+      .goalbox .gl dt {
+        color: var(--muted);
+      }
     </style>
   </head>
   <body>
@@ -3067,12 +3084,15 @@
         const m = (t, from, k, text, x) => Object.assign({ t: T(t), from, k, text }, x || {});
         const ch = {
           checkout: [
-            m(
-              '09:12',
-              'florina',
-              'sys',
-              'Florina briefed the coordinator: “Fix the flaky cart test and add login rate limiting. Codex if it’s free.” Limits: no push or merge, approved hosts only.',
-            ),
+            m('09:12', 'florina', 'goal', '', {
+              to: 'coord',
+              goal: {
+                outcome: 'Fix the flaky cart test and add login rate limiting.',
+                pref: 'Codex if it’s free',
+                limits: ['No push or merge', 'Approved hosts only'],
+                done: 'Tests pass and the build is green for each order. Proof attached.',
+              },
+            }),
             m(
               '09:12',
               'coord',
@@ -3170,12 +3190,15 @@
             m('14:38', 'coord', 'ask', 'Waiting on your call.', { ref: 'c1' }),
           ],
           oauth: [
-            m(
-              '11:02',
-              'florina',
-              'sys',
-              'Florina briefed the coordinator: “Move sessions to the new OAuth provider.” Limits: the Brief covers src/auth/** only. Migrations need your sign-off (R5).',
-            ),
+            m('11:02', 'florina', 'goal', '', {
+              to: 'coord',
+              goal: {
+                outcome: 'Move sessions to the new OAuth provider.',
+                pref: null,
+                limits: ['Brief covers src/auth/** only', 'Migrations need your sign-off (R5)'],
+                done: 'Tests pass and the build is green. Proof attached.',
+              },
+            }),
             m(
               '11:03',
               'coord',
@@ -3242,12 +3265,15 @@
             m('14:31', 'coord', 'ask', 'Waiting on your call.', { ref: 'c2' }),
           ],
           pagination: [
-            m(
-              '10:30',
-              'florina',
-              'sys',
-              'Florina briefed the coordinator: “Cursor pagination for the invoices endpoints.” Limits: no push or merge.',
-            ),
+            m('10:30', 'florina', 'goal', '', {
+              to: 'coord',
+              goal: {
+                outcome: 'Cursor pagination for the invoices endpoints.',
+                pref: null,
+                limits: ['No push or merge'],
+                done: 'Tests pass and the build is green. Proof attached.',
+              },
+            }),
             m(
               '10:31',
               'coord',
@@ -3287,12 +3313,15 @@
             m('14:38', 'claude-code', 'say', 'Endpoint written. Tests running.'),
           ],
           docs: [
-            m(
-              '13:00',
-              'florina',
-              'sys',
-              'Florina briefed the coordinator: “Tidy the README and API comments.”',
-            ),
+            m('13:00', 'florina', 'goal', '', {
+              to: 'coord',
+              goal: {
+                outcome: 'Tidy the README and API comments.',
+                pref: null,
+                limits: ['No production behaviour changes'],
+                done: 'Links check out and the docs build passes.',
+              },
+            }),
             m(
               '13:01',
               'coord',
@@ -3318,12 +3347,15 @@
             ),
           ],
           infra: [
-            m(
-              '14:33',
-              'florina',
-              'sys',
-              'Florina briefed the coordinator: “Cache dependencies in CI.” Rule R2: CI work stays on Codex.',
-            ),
+            m('14:33', 'florina', 'goal', '', {
+              to: 'coord',
+              goal: {
+                outcome: 'Cache dependencies in CI.',
+                pref: null,
+                limits: ['CI work stays on Codex (R2)'],
+                done: 'A CI run is faster and green. Proof attached.',
+              },
+            }),
             m(
               '14:33',
               'coord',
@@ -3971,9 +4003,9 @@
         } else {
           const o = sh.order;
           el.innerHTML = `<div class="sheet" role="dialog" aria-label="Read-back of your order"><h2>Here’s what I understood.</h2><dl class="dl">
-            <dt>Outcome</dt><dd>${esc(o.objective)}</dd>
-            <dt>Front</dt><dd>${esc(o.cmdr.name)}</dd>
-            <dt>Worker</dt><dd>${esc(o.worker)} <span class="inferred">${esc(o.why)}</span></dd>
+            <dt>Goal</dt><dd>${esc(o.objective)}</dd>
+            <dt>Front</dt><dd>${esc(o.cmdr.name)} <span class="inferred">coordinator</span></dd>
+            <dt>Worker</dt><dd>The coordinator chooses. Likely ${esc(o.worker)}. <span class="inferred">${esc(o.why)}</span></dd>
             <dt>Limits</dt><dd class="chips">${o.limits.map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</dd>
             <dt>Done means</dt><dd>${esc(o.done)}</dd>
             <dt>Because of</dt><dd class="chips">${o.rules.map((r) => `<button type="button" class="chip link" data-act="view" data-id="standing">${r}</button>`).join('')}</dd>
@@ -4062,6 +4094,10 @@
       function chanRow(m, c, cont) {
         const hl = S.focusMsg === m.id ? ' hl' : '';
         const attr = `id="${m.id}" data-msg="${m.id}"`;
+        if (m.k === 'goal') {
+          const g = m.goal;
+          return `<div class="mrow goal${hl}" ${attr}><span class="av-l fl" aria-hidden="true"></span><div class="mbody"><div class="mhead"><b>Florina</b><span class="role">Secretary</span><span class="role">goal to @coordinator</span><span class="when">${fmt(m.t)}</span></div><div class="goalbox"><span class="otag">Goal</span><div class="mtext">${esc(g.outcome)}</div><dl class="gl">${g.pref ? `<dt>You said</dt><dd>${esc(g.pref)}</dd>` : ''}<dt>Limits</dt><dd>${g.limits.map((l) => `<span class="chip">${esc(l)}</span>`).join(' ')}</dd><dt>Done means</dt><dd>${esc(g.done)}</dd></dl></div></div></div>`;
+        }
         if (m.k === 'sys')
           return `<div class="srow${hl}" ${attr}><span>${esc(m.text)}</span><span class="when">${fmt(m.t)}</span></div>`;
         if (m.k === 'raw')
@@ -4099,7 +4135,7 @@
           !who ||
           m.from === who ||
           m.to === who ||
-          ['sys', 'handled', 'ask'].includes(m.k) ||
+          ['sys', 'goal', 'handled', 'ask'].includes(m.k) ||
           m.from === 'you' ||
           m.from === 'florina';
         const hidden = ch.msgs.filter((m) => !vis(m) && match(m)).length;
@@ -4382,7 +4418,12 @@
                 : m.from === 'you'
                   ? 'You'
                   : m.from;
-          const text = m.k === 'handled' ? `Handled: ${m.what} ${m.did}` : m.text;
+          const text =
+            m.k === 'handled'
+              ? `Handled: ${m.what} ${m.did}`
+              : m.k === 'goal'
+                ? `Goal from Florina: ${m.goal.outcome}`
+                : m.text;
           return `<button class="wire-row" data-act="open-msg" data-cmdr="${c.id}" data-msg="${m.id}"><span class="when">${fmt(m.t)}</span><span><span class="wire-who">${esc(c.name)} · ${esc(w)}</span><span class="wire-text">${esc(text)}</span></span></button>`;
         });
         return `<p class="muted" style="font-size:13px">Every project channel, newest first. Tool calls are left out. Select a line to open it in context.</p>${rows.join('') || '<p class="muted">Nothing yet.</p>'}`;
@@ -4657,6 +4698,11 @@
           why = `Codex is out until ${fmt(codex.resets)}, so Claude Code. Your rule R4.`;
           rules.push('R4');
         }
+        const pref = /\bcodex\b/.test(t)
+          ? 'Codex if it is free'
+          : /\bclaude\b/.test(t)
+            ? 'Claude Code'
+            : null;
         const objective = text
           .trim()
           .replace(/^(please|can you|could you)\s+/i, '')
@@ -4665,6 +4711,7 @@
         return {
           cmdr: target,
           worker,
+          pref,
           why,
           rules,
           objective: o,
@@ -4717,67 +4764,93 @@
         const id = 'o' + (c.orders.length + 1) + Math.floor(Math.random() * 99);
         const prevStatus = c.status;
         const chLen0 = chan(c.id).msgs.length;
-        c.orders.push({
-          id,
-          title: o.title,
-          state: 'queued',
-          worker: o.worker,
-          note: `Briefed to ${o.worker}`,
-        });
+        const state = { withdrawn: false };
+        const live = () => !state.withdrawn && cmdr(c.id);
         if (!['awaiting', 'critical', 'holding', 'paused'].includes(c.status)) c.status = 'briefed';
-        if (!c.workers.includes(o.worker)) c.workers.push(o.worker);
-        if (!c.crew.find((w) => w.id === o.worker))
-          c.crew.push({ id: o.worker, tier: 'B', cap: 'live', state: 'starting' });
         S.sheet = null;
         S.addressee = null;
         S.minutes.push(
           { k: 'you', t: S.clock, text: o.objective + '.' },
-          { k: 'tool', t: S.clock, text: `dispatch ${c.name}`, ok: true },
+          { k: 'tool', t: S.clock, text: `hand goal to ${c.name}`, ok: true },
         );
-        say(`Understood. ${c.name} has it on ${o.worker}.`);
+        say(
+          `Understood. I gave ${c.name} the goal. Its coordinator picks the worker; with your rules it will likely start on ${o.worker}.`,
+        );
+        /* Florina hands over a GOAL (outcome, limits, done-means), never a worker or steps */
         appendMsg(c.id, {
           from: 'florina',
-          k: 'sys',
-          text: `Florina briefed the coordinator: “${o.objective}.” Limits: ${o.limits.join('; ').toLowerCase()}.`,
-        });
-        appendMsg(c.id, {
-          from: 'coord',
-          k: 'say',
-          text: `Understood. Assigning it to @${o.worker}. Done means ${o.done.split('.')[0].toLowerCase()}.`,
-        });
-        appendMsg(c.id, {
-          from: 'coord',
-          k: 'order',
-          to: o.worker,
-          tag: `Order ${c.orders.length}`,
-          text: `${o.objective}.`,
+          k: 'goal',
+          to: 'coord',
+          text: '',
+          goal: {
+            outcome: o.objective + '.',
+            pref: o.pref,
+            limits: o.limits,
+            done: o.done,
+          },
         });
         S.record.unshift({
           day: 'Today',
           t: S.clock,
           type: 'decision',
-          title: `Ordered: ${o.title}`,
-          sub: `${c.name} · ${o.worker} · you`,
+          title: `Goal: ${o.title}`,
+          sub: `${c.name} · given by Florina · you`,
         });
         $('#order').value = '';
         render();
-        toast(`Dispatched to ${c.name} on ${o.worker}.`, () => {
+        toast(`Goal handed to ${c.name}.`, () => {
+          state.withdrawn = true;
           c.orders = c.orders.filter((x) => x.id !== id);
           chan(c.id).msgs.length = chLen0;
           c.status = prevStatus;
           render();
-          announce('Order withdrawn.');
+          announce('Goal withdrawn.');
         });
+        /* the coordinator answers with a plan, then issues the worker order itself */
         later(() => {
+          if (!live()) return;
+          S.clock += 1;
+          appendMsg(c.id, {
+            from: 'coord',
+            k: 'say',
+            text: `Got the goal. I will split it into orders and choose the worker. ${o.why} Done means ${o.done.split('.')[0].toLowerCase()}, and I will re-run it myself before I call it done.`,
+          });
+          render();
+        }, 900);
+        later(() => {
+          if (!live()) return;
+          c.orders.push({
+            id,
+            title: o.title,
+            state: 'queued',
+            worker: o.worker,
+            note: `Ordered to ${o.worker} by the coordinator`,
+          });
+          if (!c.workers.includes(o.worker)) c.workers.push(o.worker);
+          if (!c.crew.find((w) => w.id === o.worker))
+            c.crew.push({ id: o.worker, tier: 'B', cap: 'live', state: 'starting' });
+          appendMsg(c.id, {
+            from: 'coord',
+            k: 'order',
+            to: o.worker,
+            tag: `Order ${chan(c.id).msgs.filter((x) => x.k === 'order').length + 1}`,
+            text: `${o.objective}.`,
+          });
+          render();
+        }, 1900);
+        later(() => {
+          if (!live()) return;
           const cc = cmdr(c.id);
-          const ord = cc && cc.orders.find((x) => x.id === id);
+          const ord = cc.orders.find((x) => x.id === id);
           if (ord && cc.status === 'briefed') {
             cc.status = 'advancing';
             ord.state = 'running';
             ord.note = 'Working';
+            const w = cc.crew.find((x) => x.id === o.worker);
+            if (w) w.state = 'working';
             render();
           }
-        }, 2400);
+        }, 4200);
       }
 
       /* ---- speech out: user-initiated only (Catch me up), stops the moment you talk ---- */
